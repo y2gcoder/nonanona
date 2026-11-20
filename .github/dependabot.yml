@@ -1,0 +1,22 @@
+# 의존성 버전 업데이트. 7일 숙성 규칙에 맞춰 cooldown을 7일로 둔다(docs/repo-baseline.md는 홈 저장소에 있다).
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Seoul
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns: ["*"]
+  # 스택에 맞춰 생태계를 추가한다. pnpm 워크스페이스는 잠금 파일이 있는 루트를 본다.
+  # - package-ecosystem: npm
+  #   directory: /
+  #   schedule: { interval: weekly, day: monday, timezone: Asia/Seoul }
+  #   cooldown: { default-days: 7 }
+  #   groups: { minor-patch: { update-types: [minor, patch] } }
+  #   open-pull-requests-limit: 5
+  # - package-ecosystem: gradle   # 위와 같은 형식

@@ -1,0 +1,7 @@
+# 설치: mise run hooks:install (클론한 뒤 한 번)
+pre-commit:
+  commands:
+    gitleaks:
+      # 스테이징된 변경만 검사한다. 오탐은 .gitleaks.toml에 좁게 허용한다.
+      run: gitleaks git --pre-commit --staged --redact --no-banner --config .gitleaks.toml
+    # 언어별 린터·포매터는 여기에 glob과 함께 추가한다.

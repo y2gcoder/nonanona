@@ -1,0 +1,21 @@
+# 비밀값
+.env
+.env.*
+!.env.tpl
+!.env.example
+mise.local.toml
+*.p8
+*.p12
+*.pem
+*.key
+gitleaks-report*
+
+# 개인 로컬 설정
+.claude/settings.local.json
+
+# OS / 에디터
+.DS_Store
+.idea/
+.vscode/
+
+# 빌드 산출물은 스택에 맞춰 추가한다.

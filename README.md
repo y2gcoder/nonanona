@@ -17,3 +17,7 @@ mise run doctor                                # 도구·훅·1Password 점검
 ```
 
 비밀값은 1Password의 `nonanona` vault에 두고, 저장소에는 `op://` 참조만 담은 [`.env.tpl`](.env.tpl)을 둡니다. 비밀값이 필요한 명령만 `op run --env-file=.env.tpl -- <명령>`으로 실행합니다.
+
+## 라이선스
+
+코드는 [AGPL-3.0](LICENSE)입니다.

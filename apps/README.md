@@ -55,7 +55,7 @@ iOS 단위 테스트와 release 확인은 `IOS_DESTINATION`(기본 `platform=iOS
 
 ## 버전
 
-정확한 버전으로 고정했고, 모두 게시 후 7일이 지난 안정판이다(확인일 2026-11-21). Android 전이 의존성은 `apps/android/app/gradle.lockfile`에 고정한다(갱신: `./gradlew :app:dependencies --write-locks`).
+정확한 버전으로 고정했고, 모두 게시 후 7일이 지난 안정판이다(확인일 2026-11-21). Android 전이 의존성은 `apps/android/app/gradle.lockfile`(앱 304개), 플러그인 클래스패스는 `apps/android/buildscript-gradle.lockfile`(113개)에 고정한다(갱신: `./gradlew buildEnvironment :app:dependencies --write-locks`). 두 잠금 파일의 모든 항목이 게시 후 7일이 지났음을 Google Maven·Maven Central의 POM `Last-Modified`로 확인했다(가장 최근: navigation3 1.2.1, 2026-11-04). Dependabot은 `apps/android`의 Gradle 생태계를 7일 cooldown으로 본다. iOS는 원격 Swift 패키지가 없어 Dependabot 대상이 아니다.
 
 | 도구·의존성 | 버전 | 게시일과 근거 |
 | --- | --- | --- |

@@ -141,7 +141,7 @@ mise run android:e2e-adaptive -- [증거 폴더]                    # 접히는 
 
 접히는 기기 에뮬레이터는 설치된 시스템 이미지로 만든다: `avdmanager create avd -n Nonanona_Fold -k "system-images;android-36;google_apis;arm64-v8a" -d pixel_9_pro_fold`. iOS iPhone Duo 시뮬레이터는 iPhone Duo 전용 런타임으로 만든다: `xcrun simctl create "Nonanona Duo" com.apple.CoreSimulator.SimDeviceType.iPhone-Duo com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4`. 같은 시뮬레이터에서 E2E를 여러 번 돌리면 사진 앱에 가상 영수증이 겹쳐 쌓여 공유 단계가 흔들린다. 새 시뮬레이터에서 돌린다.
 
-**증거 공백**: iPhone Duo의 접기·펴기·반쯤 접기는 Device Hub GUI로만 바꿀 수 있어 확인하지 못했다(`simctl`·XCTest에 자세 명령이 없고, 이 세션의 GUI 자동화는 macOS 손쉬운 사용 권한이 없었다). iOS는 크기 종류·크기 변경, 장면 다시 활성화, division 영역 계산을 단위 테스트로 대신했다. iOS 넓은 창은 Pro Max 가로로만 봤다(Duo 안쪽 화면 미확인). 실기기, 태블릿, Android 실제 두 앱 분할 화면, 데스크톱 창은 확인하지 않았다. 입력 칸은 아직 없어 키보드가 가리는 경우는 해당이 없다.
+**증거 공백**: iPhone Duo의 접기·펴기·반쯤 접기는 Device Hub GUI로만 바꿀 수 있어 확인하지 못했다(`simctl`·XCTest에 자세 명령이 없다). 2026-11-22에 다시 시도했지만 막혔다: `orca computer permissions`(Orca 1.4.256)는 손쉬운 사용·화면 기록을 둘 다 `granted`로 보고하는데, `orca computer get-app-state`는 Device Hub와 Finder 모두 `permission_denied`(Accessibility permission is required)를 돌려줘 Device Hub의 자세 컨트롤에 닿지 못했다. 권한 설정은 바꾸지 않았다. iOS는 크기 종류·크기 변경, 장면 다시 활성화, division 영역 계산을 단위 테스트로 대신했다. iOS 넓은 창은 Pro Max 가로로만 봤다(Duo 안쪽 화면 미확인). 실기기, 태블릿, Android 실제 두 앱 분할 화면, 데스크톱 창은 확인하지 않았다. 입력 칸은 아직 없어 키보드가 가리는 경우는 해당이 없다.
 
 ## 로컬 Supabase 모드 (debug 전용)
 

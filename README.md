@@ -4,7 +4,7 @@
 
 여행이 끝난 뒤 영수증 사진과 결제 화면 캡처를 올리면 지출을 정리하고, 일행끼리 누가 누구에게 얼마를 보낼지 원화로 계산하는 서비스입니다.
 
-현재 기획 단계입니다. 제품 범위는 [docs/00-brief.md](docs/00-brief.md), 결정 사항은 [docs/decisions/](docs/decisions/)를 보세요.
+현재 기획 단계입니다. 제품 범위는 [docs/00-brief.md](docs/00-brief.md), 결정 기록은 [docs/adr/](docs/adr/)를 보세요.
 
 ## 개발 시작
 

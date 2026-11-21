@@ -93,10 +93,18 @@ fun InviteScreen(
                     .testTag("invite_screen"),
             verticalArrangement = Arrangement.spacedBy(Spacing.m),
         ) {
-            if ((join as? JoinState.Failed)?.failure == InviteAcceptFailure.InviteExpired) {
-                StatusLabel(stringResource(R.string.status_invite_expired), StatusRole.Error, Modifier.testTag("invite_status"))
-            } else {
-                StatusLabel(stringResource(R.string.status_invite_pending), StatusRole.Attention, Modifier.testTag("invite_status"))
+            when ((join as? JoinState.Failed)?.failure) {
+                InviteAcceptFailure.InviteExpired -> {
+                    StatusLabel(stringResource(R.string.status_invite_expired), StatusRole.Error, Modifier.testTag("invite_status"))
+                }
+
+                InviteAcceptFailure.InviteInvalid -> {
+                    StatusLabel(stringResource(R.string.status_invite_invalid), StatusRole.Error, Modifier.testTag("invite_status"))
+                }
+
+                else -> {
+                    StatusLabel(stringResource(R.string.status_invite_pending), StatusRole.Attention, Modifier.testTag("invite_status"))
+                }
             }
             Text(stringResource(R.string.invite_heading), style = MaterialTheme.typography.headlineSmall)
             Text(
@@ -123,8 +131,8 @@ fun InviteScreen(
                 JoinState.Idle -> {}
             }
             val failure = (join as? JoinState.Failed)?.failure
-            // 만료된 초대는 다시 시도해도 소용없으므로 버튼을 두지 않는다.
-            if (failure != InviteAcceptFailure.InviteExpired) {
+            // 만료되거나 쓸 수 없는 초대는 다시 시도해도 소용없으므로 버튼을 두지 않는다.
+            if (failure != InviteAcceptFailure.InviteExpired && failure != InviteAcceptFailure.InviteInvalid) {
                 val (label, action) =
                     when {
                         !signedIn && failure == InviteAcceptFailure.SessionExpired -> R.string.invite_action_relogin to onLogin
@@ -148,6 +156,7 @@ private fun InviteAcceptFailure.messageRes(): Int =
     when (this) {
         InviteAcceptFailure.SessionExpired -> R.string.invite_failure_session_expired
         InviteAcceptFailure.InviteExpired -> R.string.invite_failure_expired
+        InviteAcceptFailure.InviteInvalid -> R.string.invite_failure_invalid
         InviteAcceptFailure.Network -> R.string.failure_network
         InviteAcceptFailure.Unavailable -> R.string.invite_failure_unavailable
         InviteAcceptFailure.Unknown -> R.string.invite_failed

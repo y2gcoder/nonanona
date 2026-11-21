@@ -84,8 +84,17 @@ final class AppModel {
   }
 
   func signIn(with provider: SignInProvider) async {
+    let previous = login
     login = .signingIn
-    switch await graph.joinFlow.signIn(with: provider) {
+    let result: SignInResult
+    do {
+      result = try await graph.joinFlow.signIn(with: provider)
+    } catch {
+      // 화면을 떠나 작업이 취소됐다. 상태만 되돌리고 아무것도 지우지 않는다.
+      login = previous
+      return
+    }
+    switch result {
     case .signedIn(let session):
       self.session = session
       login = .hidden
@@ -100,7 +109,14 @@ final class AppModel {
 
   func joinPendingInvite() async {
     join = .joining
-    switch await graph.joinFlow.joinPendingInvite() {
+    let result: JoinResult
+    do {
+      result = try await graph.joinFlow.joinPendingInvite()
+    } catch {
+      join = .idle
+      return
+    }
+    switch result {
     case .joined(let room):
       self.room = room
       pendingInvite = nil
@@ -113,7 +129,7 @@ final class AppModel {
       // 세션만 지웠다. 초대 화면에서 다시 로그인하면 같은 초대로 이어서 참여한다.
       case .sessionExpired: session = nil
       // 초대를 지웠다. 홈의 초대 카드도 사라진다.
-      case .inviteExpired: pendingInvite = nil
+      case .inviteExpired, .inviteInvalid: pendingInvite = nil
       case .network, .unavailable, .unknown: break
       }
       join = .failed(failure)

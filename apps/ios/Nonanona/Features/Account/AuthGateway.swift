@@ -37,8 +37,8 @@ protocol AuthGateway: Sendable {
   /// 테스트 구현체만 값을 준다. 화면은 이 문구를 그대로 보여 준다.
   var testOnlyNotice: String? { get }
   func restoreSession() async -> AccountSession?
-  /// 실패하면 `SignInFailure`를 던진다.
-  func signIn(with provider: SignInProvider) async throws(SignInFailure) -> AccountSession
+  /// 실패하면 `SignInFailure`를 던진다. 작업이 취소되면 `CancellationError`를 그대로 던진다.
+  func signIn(with provider: SignInProvider) async throws -> AccountSession
   /// 서버가 세션 만료를 알렸을 때 기기에 남은 세션을 지운다. 초안과 보관한 초대는 건드리지 않는다.
   func endSession() async
 }

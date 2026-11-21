@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- debug 빌드 전용: 로컬 Supabase(에뮬레이터에서 본 호스트 10.0.2.2)에 붙는 로컬 모드. release에는 없다. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application android:networkSecurityConfig="@xml/debug_network_security_config" />
+</manifest>

@@ -31,30 +31,40 @@ struct JoinFlow: Sendable {
 
   func restoreSession() async -> AccountSession? { await auth.restoreSession() }
 
-  /// 실패해도 보관한 초대는 그대로 둔다.
-  func signIn(with provider: SignInProvider) async -> SignInResult {
+  /// 실패해도 보관한 초대는 그대로 둔다. 예상하지 못한 오류는 `.unknown`이 되고, 취소는 그대로 전한다.
+  func signIn(with provider: SignInProvider) async throws(CancellationError) -> SignInResult {
     do {
       return .signedIn(try await auth.signIn(with: provider))
+    } catch let failure as SignInFailure {
+      return .failed(failure)
+    } catch is CancellationError {
+      throw CancellationError()
     } catch {
-      return .failed(error)
+      return .failed(.unknown)
     }
   }
 
   /// 보관한 초대를 수락한다. 세션 만료면 세션만 지우고 초대는 남겨 다시 로그인한 뒤 이어 가게 한다.
-  /// 초대 만료면 다시 시도해도 소용없으므로 초대를 지운다. 그 밖의 실패는 초대를 남겨 다시 시도하게 한다.
-  func joinPendingInvite() async -> JoinResult {
+  /// 초대 만료·사용 불가면 다시 시도해도 소용없으므로 초대를 지운다. 그 밖의 실패는 초대를 남겨 다시 시도하게 한다.
+  func joinPendingInvite() async throws(CancellationError) -> JoinResult {
     guard let invite = pendingInvites.load() else { return .noPendingInvite }
+    let failure: InviteAcceptFailure
     do {
       let room = try await trips.acceptInvite(invite.code)
       pendingInvites.clear()
       return .joined(room)
+    } catch let error as InviteAcceptFailure {
+      failure = error
+    } catch is CancellationError {
+      throw CancellationError()
     } catch {
-      switch error {
-      case .sessionExpired: await auth.endSession()
-      case .inviteExpired: pendingInvites.clear()
-      case .network, .unavailable, .unknown: break
-      }
-      return .failed(error)
+      failure = .unknown
     }
+    switch failure {
+    case .sessionExpired: await auth.endSession()
+    case .inviteExpired, .inviteInvalid: pendingInvites.clear()
+    case .network, .unavailable, .unknown: break
+    }
+    return .failed(failure)
   }
 }

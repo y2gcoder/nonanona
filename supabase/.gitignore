@@ -1,0 +1,11 @@
+# Supabase
+.branches
+.temp
+
+# dotenvx
+.env.keys
+.env.local
+.env.*.local
+
+# scripts/local-backend.py가 만드는 로컬 실행 상태(키·가상 계정 비밀번호 포함)
+.run/

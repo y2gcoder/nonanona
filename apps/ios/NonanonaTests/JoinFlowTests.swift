@@ -31,6 +31,10 @@ private final class FakeTrips: TripGateway, @unchecked Sendable {
   }
 }
 
+private struct CancellingTrips: TripGateway {
+  func acceptInvite(_ code: InviteCode) async throws -> TripRoom { throw CancellationError() }
+}
+
 private let room = TripRoom(id: TripID(value: "trip-1"), name: "가상 여행", members: [])
 
 struct JoinFlowTests {
@@ -55,10 +59,10 @@ struct JoinFlowTests {
     let joinFlow = flow(auth: FakeAuth(.cancelled, .network))
     try joinFlow.receiveInvite(code)
 
-    #expect(await joinFlow.signIn(with: .apple) == .failed(.cancelled))
-    #expect(await joinFlow.signIn(with: .apple) == .failed(.network))
+    #expect(try await joinFlow.signIn(with: .apple) == .failed(.cancelled))
+    #expect(try await joinFlow.signIn(with: .apple) == .failed(.network))
     #expect(flow().pendingInvite()?.code == code)
-    guard case .signedIn = await joinFlow.signIn(with: .apple) else {
+    guard case .signedIn = try await joinFlow.signIn(with: .apple) else {
       Issue.record("retry should sign in")
       return
     }
@@ -73,41 +77,50 @@ struct JoinFlowTests {
     let joinFlow = flow(auth: auth, trips: trips)
     try joinFlow.receiveInvite(code)
 
-    #expect(await joinFlow.joinPendingInvite() == .failed(.sessionExpired))
+    #expect(try await joinFlow.joinPendingInvite() == .failed(.sessionExpired))
     #expect(auth.endedSessions == 1)
     #expect(flow().pendingInvite()?.code == code)
     #expect(drafts.list().map(\.id) == [draft.id])
 
-    _ = await joinFlow.signIn(with: .apple)
-    #expect(await joinFlow.joinPendingInvite() == .joined(room))
+    _ = try await joinFlow.signIn(with: .apple)
+    #expect(try await joinFlow.joinPendingInvite() == .joined(room))
     #expect(trips.attempts == [code, code])
     #expect(flow().pendingInvite() == nil)
     #expect(drafts.list().map(\.id) == [draft.id])
   }
 
-  @Test func expiredInviteIsClearedAndNotRetried() async throws {
+  @Test(arguments: [InviteAcceptFailure.inviteExpired, .inviteInvalid])
+  func deadInviteIsClearedAndNotRetried(failure: InviteAcceptFailure) async throws {
     let auth = FakeAuth()
-    let trips = FakeTrips(.inviteExpired)
+    let trips = FakeTrips(failure)
     let joinFlow = flow(auth: auth, trips: trips)
     try joinFlow.receiveInvite(code)
 
-    #expect(await joinFlow.joinPendingInvite() == .failed(.inviteExpired))
+    #expect(try await joinFlow.joinPendingInvite() == .failed(failure))
     #expect(flow().pendingInvite() == nil)
     #expect(auth.endedSessions == 0)
-    #expect(await joinFlow.joinPendingInvite() == .noPendingInvite)
+    #expect(try await joinFlow.joinPendingInvite() == .noPendingInvite)
     #expect(trips.attempts.count == 1)
+  }
+
+  @Test func cancellationPropagatesAndKeepsInvite() async throws {
+    let joinFlow = flow(trips: CancellingTrips())
+    try joinFlow.receiveInvite(code)
+
+    await #expect(throws: CancellationError.self) { try await joinFlow.joinPendingInvite() }
+    #expect(flow().pendingInvite()?.code == code)
   }
 
   @Test func retryableFailuresKeepInviteForRetry() async throws {
     let joinFlow = flow(trips: FakeTrips(.network, .unavailable, .unknown))
     try joinFlow.receiveInvite(code)
 
-    #expect(await joinFlow.joinPendingInvite() == .failed(.network))
-    #expect(await joinFlow.joinPendingInvite() == .failed(.unavailable))
-    #expect(await joinFlow.joinPendingInvite() == .failed(.unknown))
+    #expect(try await joinFlow.joinPendingInvite() == .failed(.network))
+    #expect(try await joinFlow.joinPendingInvite() == .failed(.unavailable))
+    #expect(try await joinFlow.joinPendingInvite() == .failed(.unknown))
     #expect(flow().pendingInvite()?.code == code)
 
-    #expect(await joinFlow.joinPendingInvite() == .joined(room))
+    #expect(try await joinFlow.joinPendingInvite() == .joined(room))
     #expect(flow().pendingInvite() == nil)
   }
 

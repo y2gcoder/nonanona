@@ -167,12 +167,18 @@ class AppViewModel(
                 mutableState.update {
                     when (result.failure) {
                         // 세션만 지웠다. 초대 화면에서 다시 로그인하면 같은 초대로 이어서 참여한다.
-                        InviteAcceptFailure.SessionExpired -> it.copy(session = null, join = JoinState.Failed(result.failure))
+                        InviteAcceptFailure.SessionExpired -> {
+                            it.copy(session = null, join = JoinState.Failed(result.failure))
+                        }
 
                         // 초대를 지웠다. 홈의 초대 카드도 사라진다.
-                        InviteAcceptFailure.InviteExpired -> it.copy(pendingInvite = null, join = JoinState.Failed(result.failure))
+                        InviteAcceptFailure.InviteExpired, InviteAcceptFailure.InviteInvalid -> {
+                            it.copy(pendingInvite = null, join = JoinState.Failed(result.failure))
+                        }
 
-                        else -> it.copy(join = JoinState.Failed(result.failure))
+                        else -> {
+                            it.copy(join = JoinState.Failed(result.failure))
+                        }
                     }
                 }
             }

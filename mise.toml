@@ -7,9 +7,16 @@ lefthook = "2.2.2"
 java = "temurin-21.0.9+10.0.LTS"
 # Kotlin 포매터·린터. 2025-11-14 게시.
 ktlint = "1.8.0"
+# 로컬 Supabase(Auth + Postgres) 실행. 2026-11-09 게시. 3.2.0(2026-11-16)은 7일이 지나지 않았다.
+# CLI v3은 기본 대상이 로컬이다: https://supabase.com/changelog/supabase-cli-v3 (확인일 2026-11-21)
+supabase = "3.1.0"
 # 스택 도구(node, pnpm 등)를 정확한 버전으로 추가한다.
 
 # OP_ACCOUNT는 mise.local.toml(gitignore)에 둔다. 예시는 mise.local.toml.example.
+
+[env]
+# Supabase CLI 사용 통계를 이 저장소의 명령에서 보내지 않는다(전역 설정은 건드리지 않는다).
+SUPABASE_TELEMETRY_DISABLED = "1"
 
 [tasks.setup]
 description = "최초 도구·훅 설치 (비밀값 불필요)"
@@ -40,9 +47,14 @@ dir = "apps/android"
 run = "./gradlew :app:assembleDebug :app:assembleRelease"
 
 [tasks."android:e2e"]
-description = "에뮬레이터 E2E. 실행 중인 에뮬레이터 하나가 필요하다. 인자: [증거 폴더]"
+description = "에뮬레이터 E2E(테스트 구현체). 실행 중인 에뮬레이터 하나가 필요하다. 인자: [증거 폴더]"
 dir = "apps/android"
-run = "./gradlew :app:assembleDebug && python3 -I scripts/e2e.py app/build/outputs/apk/debug/app-debug.apk"
+run = "./gradlew :app:assembleDebug -Pnonanona.backend=test && python3 -I scripts/e2e.py app/build/outputs/apk/debug/app-debug.apk"
+
+[tasks."android:e2e-local"]
+description = "에뮬레이터 E2E(로컬 Supabase 모드). local:up 뒤 실행한다. 초기화 → 로컬 모드 debug 빌드 → 실제 서버 흐름. 인자: [증거 폴더]"
+dir = "apps/android"
+run = "python3 -I ../../scripts/local-backend.py reset && ./gradlew :app:assembleDebug && python3 -I scripts/e2e_local.py app/build/outputs/apk/debug/app-debug.apk"
 
 [tasks."ios:lint"]
 description = "swift-format 검사(고정한 Xcode에 포함된 버전)"
@@ -71,9 +83,26 @@ dir = "apps/ios"
 run = "xcodebuild test -quiet -project Nonanona.xcodeproj -scheme NonanonaReleaseCheck -destination \"${IOS_DESTINATION:-platform=iOS Simulator,name=iPhone 18 Pro}\""
 
 [tasks."ios:e2e"]
-description = "시뮬레이터 E2E. 인자: <시뮬레이터 UDID> [증거 폴더]"
+description = "시뮬레이터 E2E(테스트 구현체). 인자: <시뮬레이터 UDID> [증거 폴더]"
 dir = "apps/ios"
 run = "scripts/e2e.sh"
+
+[tasks."ios:e2e-local"]
+description = "시뮬레이터 E2E(로컬 Supabase 모드). local:up 뒤 실행한다. 인자: <시뮬레이터 UDID> [증거 폴더]"
+dir = "apps/ios"
+run = "scripts/e2e-local.sh"
+
+[tasks."local:up"]
+description = "로컬 Supabase(Docker) 시작 → 가상 계정·초대 → 앱 로컬 모드 설정 파일(gitignore). 키는 출력하지 않는다"
+run = "python3 -I scripts/local-backend.py up"
+
+[tasks."local:reset"]
+description = "로컬 DB를 초기 상태(가상 계정·여행방·초대)로 되돌리고 앱 설정 파일을 새로 쓴다"
+run = "python3 -I scripts/local-backend.py reset"
+
+[tasks."local:down"]
+description = "로컬 Supabase 정지, 앱 설정 파일 삭제(debug 앱은 테스트 모드로 돌아간다)"
+run = "python3 -I scripts/local-backend.py down"
 
 [tasks.lint]
 description = "두 앱의 린트"

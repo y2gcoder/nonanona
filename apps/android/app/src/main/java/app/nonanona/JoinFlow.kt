@@ -65,7 +65,7 @@ class JoinFlow(
 
     /**
      * 보관한 초대를 수락한다. 세션 만료면 세션만 지우고 초대는 남겨 다시 로그인한 뒤 이어 가게 한다.
-     * 초대 만료면 다시 시도해도 소용없으므로 초대를 지운다. 그 밖의 실패는 초대를 남겨 다시 시도하게 한다.
+     * 초대 만료·사용 불가면 다시 시도해도 소용없으므로 초대를 지운다. 그 밖의 실패는 초대를 남겨 다시 시도하게 한다.
      */
     suspend fun joinPendingInvite(): JoinResult {
         val invite = pendingInvites.load() ?: return JoinResult.NoPendingInvite
@@ -83,7 +83,7 @@ class JoinFlow(
             }
         when (failure) {
             InviteAcceptFailure.SessionExpired -> auth.endSession()
-            InviteAcceptFailure.InviteExpired -> pendingInvites.clear()
+            InviteAcceptFailure.InviteExpired, InviteAcceptFailure.InviteInvalid -> pendingInvites.clear()
             InviteAcceptFailure.Network, InviteAcceptFailure.Unavailable, InviteAcceptFailure.Unknown -> Unit
         }
         return JoinResult.Failed(failure)

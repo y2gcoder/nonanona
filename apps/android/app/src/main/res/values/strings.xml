@@ -31,6 +31,7 @@
     <string name="invite_card_action">초대 보기</string>
     <string name="status_invite_pending">초대 대기 중</string>
     <string name="status_invite_expired">초대 만료됨</string>
+    <string name="status_invite_invalid">쓸 수 없는 초대</string>
     <string name="invite_title">여행방 초대</string>
     <string name="invite_heading">여행방에 초대받았어요</string>
     <string name="invite_body_signed_out">참여하려면 로그인해 주세요. 공유한 영수증 초안은 그대로 남아요.</string>
@@ -41,6 +42,7 @@
     <string name="invite_failed">참여하지 못했어요. 다시 시도해 주세요.</string>
     <string name="invite_failure_session_expired">로그인이 만료됐어요. 다시 로그인하면 이어서 참여해요.</string>
     <string name="invite_failure_expired">초대 링크가 만료됐어요. 방장에게 새 링크를 요청해 주세요.</string>
+    <string name="invite_failure_invalid">이 초대 링크는 쓸 수 없어요. 방장에게 새 링크를 요청해 주세요.</string>
     <string name="invite_failure_unavailable">지금은 여행방에 참여할 수 없어요. 잠시 후 다시 시도해 주세요.</string>
     <string name="invite_action_relogin">다시 로그인하기</string>
     <string name="action_retry">다시 시도</string>

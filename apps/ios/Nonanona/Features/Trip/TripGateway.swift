@@ -37,8 +37,10 @@ struct TripRoom: Hashable, Sendable {
 enum InviteAcceptFailure: Error, Equatable, Sendable {
   /// 로그인 세션이 만료됐다. 다시 로그인하면 같은 초대로 이어서 참여한다.
   case sessionExpired
-  /// 초대가 만료됐거나 더는 쓸 수 없다. 다시 시도하지 않고 새 링크를 요청한다.
+  /// 초대가 만료됐다. 다시 시도하지 않고 새 링크를 요청한다.
   case inviteExpired
+  /// 초대를 쓸 수 없다(이미 다른 사람이 썼거나, 방장이 취소했거나, 없는 링크). 다시 시도하지 않고 새 링크를 요청한다.
+  case inviteInvalid
   /// 연결 문제. 보관한 초대로 다시 시도한다.
   case network
   /// 여행방 기능을 지금 쓸 수 없다(연결 전 빌드, 서버 점검).
@@ -50,8 +52,8 @@ enum InviteAcceptFailure: Error, Equatable, Sendable {
 /// 여행방 데이터 경계. 첫 슬라이스는 초대 수락만 정의한다. 서버 SDK 호출은 구현체 안에 둔다(ADR-0003).
 /// 호출자는 로그인한 뒤에 부른다. 구현체는 인증 경계가 가진 세션으로 요청한다.
 protocol TripGateway: Sendable {
-  /// 실패하면 `InviteAcceptFailure`를 던진다.
-  func acceptInvite(_ code: InviteCode) async throws(InviteAcceptFailure) -> TripRoom
+  /// 실패하면 `InviteAcceptFailure`를 던진다. 작업이 취소되면 `CancellationError`를 그대로 던진다.
+  func acceptInvite(_ code: InviteCode) async throws -> TripRoom
 }
 
 /// release 빌드의 기본 구현체. 서버를 연결하기 전까지 어떤 초대도 수락하지 않는다.

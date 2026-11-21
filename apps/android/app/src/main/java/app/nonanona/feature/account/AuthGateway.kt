@@ -49,7 +49,7 @@ interface AuthGateway {
 
     suspend fun restoreSession(): AccountSession?
 
-    /** 실패하면 [SignInException]을 던진다. */
+    /** 실패하면 [SignInException]을 던진다. 취소되면 CancellationException을 그대로 던진다. */
     suspend fun signIn(provider: SignInProvider): AccountSession
 
     /** 서버가 세션 만료를 알렸을 때 기기에 남은 세션을 지운다. 초안과 보관한 초대는 건드리지 않는다. */

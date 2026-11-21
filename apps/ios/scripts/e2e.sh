@@ -18,12 +18,18 @@ log() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$OUT/ios-e2e.log"; }
 cd "$HERE"
 
 log "build-for-testing (Debug)"
+# 로컬 Supabase 설정(Config/Local.xcconfig)이 있어도 이 E2E는 테스트 구현체로 빌드한다.
 xcodebuild build-for-testing -project Nonanona.xcodeproj -scheme Nonanona \
-  -destination "platform=iOS Simulator,id=$UDID" -derivedDataPath "$WORK/dd" > "$WORK/build.log" 2>&1
+  -destination "platform=iOS Simulator,id=$UDID" -derivedDataPath "$WORK/dd" NONANONA_BACKEND=test > "$WORK/build.log" 2>&1
 log "fresh install, synthetic receipt into Photos"
 xcrun simctl uninstall "$UDID" "$APP_ID" || true
 xcrun simctl install "$UDID" "$WORK/dd/Build/Products/Debug-iphonesimulator/Nonanona.app"
 xcrun simctl addmedia "$UDID" "$FIXTURE"
+# 설치 직후에는 공유 확장이 공유 메뉴에 바로 등록되지 않을 수 있어 등록될 때까지 기다린다.
+for _ in $(seq 1 30); do
+  xcrun simctl spawn "$UDID" pluginkit -mA -p com.apple.share-services 2>/dev/null | grep -q "$APP_ID.share" && break
+  sleep 1
+done
 
 run_test() {
   log "test $1"

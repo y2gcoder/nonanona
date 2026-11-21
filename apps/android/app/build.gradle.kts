@@ -1,7 +1,22 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
+
+// 로컬 debug 모드. scripts/local-backend.py가 만든 local-backend.properties(gitignore)가 있을 때만 값이 채워진다.
+// release 빌드에는 이 필드가 생기지 않는다.
+val localBackend =
+    Properties().apply {
+        val file = rootProject.file("local-backend.properties")
+        if (file.isFile) file.reader(Charsets.UTF_8).use { load(it) }
+    }
+
+// -Pnonanona.backend=test로 설정 파일이 있어도 테스트 구현체로 빌드한다(테스트 모드 E2E).
+val localEnabled = localBackend.getProperty("backend") == "local" && providers.gradleProperty("nonanona.backend").orNull != "test"
+
+fun localValue(name: String): String = "\"" + (if (localEnabled) localBackend.getProperty(name).orEmpty() else "") + "\""
 
 android {
     namespace = "app.nonanona"
@@ -21,6 +36,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField("String", "LOCAL_SUPABASE_URL", localValue("supabaseUrl"))
+            buildConfigField("String", "LOCAL_PUBLISHABLE_KEY", localValue("publishableKey"))
+            buildConfigField("String", "LOCAL_TEST_EMAIL", localValue("testEmail"))
+            buildConfigField("String", "LOCAL_TEST_PASSWORD", localValue("testPassword"))
+        }
         release {
             // 서명 설정은 출시 준비에서 정한다. 로컬 release 빌드는 서명하지 않는다.
             isMinifyEnabled = false
@@ -32,7 +53,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 
     lint {
         warningsAsErrors = false

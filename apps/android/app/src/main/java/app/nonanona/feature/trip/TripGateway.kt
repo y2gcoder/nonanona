@@ -47,8 +47,11 @@ enum class InviteAcceptFailure {
     /** 로그인 세션이 만료됐다. 다시 로그인하면 같은 초대로 이어서 참여한다. */
     SessionExpired,
 
-    /** 초대가 만료됐거나 더는 쓸 수 없다. 다시 시도하지 않고 새 링크를 요청한다. */
+    /** 초대가 만료됐다. 다시 시도하지 않고 새 링크를 요청한다. */
     InviteExpired,
+
+    /** 초대를 쓸 수 없다(이미 다른 사람이 썼거나, 방장이 취소했거나, 없는 링크). 다시 시도하지 않고 새 링크를 요청한다. */
+    InviteInvalid,
 
     /** 연결 문제. 보관한 초대로 다시 시도한다. */
     Network,
@@ -69,7 +72,7 @@ class InviteAcceptException(
  * 호출자는 로그인한 뒤에 부른다. 구현체는 인증 경계가 가진 세션으로 요청한다.
  */
 interface TripGateway {
-    /** 실패하면 [InviteAcceptException]을 던진다. */
+    /** 실패하면 [InviteAcceptException]을 던진다. 취소되면 CancellationException을 그대로 던진다. */
     suspend fun acceptInvite(code: InviteCode): TripRoom
 }
 

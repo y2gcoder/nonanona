@@ -18,11 +18,13 @@ import app.nonanona.feature.trip.TripRoom
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.ByteArrayInputStream
 import java.io.File
+import kotlin.coroutines.cancellation.CancellationException
 
 class JoinFlowTest {
     @get:Rule val tmp = TemporaryFolder()
@@ -124,18 +126,30 @@ class JoinFlowTest {
         }
 
     @Test
-    fun expiredInviteIsClearedAndNotRetried() =
+    fun deadInviteIsClearedAndNotRetried() =
         runBlocking {
-            val auth = FakeAuth()
-            val trips = FakeTrips(InviteAcceptFailure.InviteExpired)
-            val joinFlow = flow(auth, trips)
+            for (failure in listOf(InviteAcceptFailure.InviteExpired, InviteAcceptFailure.InviteInvalid)) {
+                val auth = FakeAuth()
+                val trips = FakeTrips(failure)
+                val joinFlow = flow(auth, trips)
+                joinFlow.receiveInvite(code)
+
+                assertEquals(JoinResult.Failed(failure), joinFlow.joinPendingInvite())
+                assertNull(flow().pendingInvite())
+                assertEquals(0, auth.endedSessions)
+                assertEquals(JoinResult.NoPendingInvite, joinFlow.joinPendingInvite())
+                assertEquals(1, trips.attempts.size)
+            }
+        }
+
+    @Test
+    fun cancellationPropagatesAndKeepsInvite() =
+        runBlocking {
+            val joinFlow = flow(trips = FakeTrips(CancellationException("left the screen")))
             joinFlow.receiveInvite(code)
 
-            assertEquals(JoinResult.Failed(InviteAcceptFailure.InviteExpired), joinFlow.joinPendingInvite())
-            assertNull(flow().pendingInvite())
-            assertEquals(0, auth.endedSessions)
-            assertEquals(JoinResult.NoPendingInvite, joinFlow.joinPendingInvite())
-            assertEquals(1, trips.attempts.size)
+            assertThrows(CancellationException::class.java) { runBlocking { joinFlow.joinPendingInvite() } }
+            assertEquals(code, flow().pendingInvite()?.code)
         }
 
     @Test

@@ -182,8 +182,7 @@ def main():
         "am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE "
         f"-d file:///sdcard/Pictures/Nonanona/{FIXTURE.name}"
     )
-    permissions = u.sh(f"dumpsys package {PKG}")
-    assert "android.permission.INTERNET" not in permissions, "first slice must not request INTERNET"
+    # debug 빌드는 로컬 Supabase 모드를 위해 INTERNET을 요청한다. release APK에 없는지는 release 확인에서 본다.
 
     # 1) 앱이 꺼진 상태에서 파일 앱 공유 메뉴로 받는다(콜드 스타트).
     u.sh(f"am force-stop {PKG}")

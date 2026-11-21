@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import adbui as u  # noqa: E402
 
 PKG = "app.nonanona"
-FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "synthetic-receipt-r01.png"
+FIXTURE = Path(__file__).resolve().parents[2] / "fixtures" / "receipts/receipt-r01.png"
 INVITE = "nonanona://invite/SYNTHINVITE01"
 OUT = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(tempfile.mkdtemp(prefix="nonanona-android-e2e-"))
 LOG = []
@@ -58,7 +58,9 @@ def state(label):
     return dict(line.split("=", 1) for line in text.splitlines()[1:])
 
 
-def share_from_files(name):
+def share_from_files(name, folder="Nonanona"):
+    """파일 앱에서 한 장 또는 여러 장(names 목록)을 골라 시스템 공유 메뉴로 노나노나에 보낸다."""
+    names = [name] if isinstance(name, str) else list(name)
     u.sh("am force-stop com.google.android.documentsui")
     u.sh(
         "am start -a android.intent.action.VIEW -t vnd.android.document/root "
@@ -66,11 +68,15 @@ def share_from_files(name):
     )
     u.wait(contains="Files on", timeout=20)
     u.tap(u.scroll_to(text="Pictures"))
-    u.tap(u.scroll_to(text="Nonanona"))
+    u.tap(u.scroll_to(text=folder))
     time.sleep(1)
     if u.find(desc="List view"):
         u.tap(u.find(desc="List view"))
-    u.long_press(u.wait(text=name))
+    u.long_press(u.wait(text=names[0]))
+    for other in names[1:]:
+        u.tap(u.scroll_to(text=other))
+    if len(names) > 1:
+        assert u.wait(id="action_bar_title").text == f"{len(names)} selected"
     u.tap(u.wait(desc="Share"))
     u.wait(contains="Sharing", timeout=15)
     u.sh("input swipe 540 2000 540 600 400")

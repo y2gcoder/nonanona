@@ -3,7 +3,13 @@ package app.nonanona
 import android.content.ContentResolver
 import android.content.Context
 import app.nonanona.feature.account.AuthGateway
+import app.nonanona.feature.receiptimport.CanvasReceiptFlattener
+import app.nonanona.feature.receiptimport.MlKitReceiptRecognizer
+import app.nonanona.feature.receiptimport.ProcessingHooks
 import app.nonanona.feature.receiptimport.ReceiptDraftStore
+import app.nonanona.feature.receiptimport.ReceiptFlattener
+import app.nonanona.feature.receiptimport.ReceiptProcessor
+import app.nonanona.feature.receiptimport.ReceiptRecognizer
 import app.nonanona.feature.trip.TripGateway
 import java.io.File
 
@@ -11,7 +17,21 @@ import java.io.File
 class Adapters(
     val auth: AuthGateway,
     val trips: TripGateway,
+    /** 검증용 처리 속도·실패 주입. release는 항상 꺼짐. */
+    val processingHooks: ProcessingHooks = ProcessingHooks(),
+    /** 검토 화면이 정해지기 전의 개발용 확인. release는 null이라 화면에 버튼이 없다. */
+    val debugReceiptConfirm: DebugReceiptConfirm? = null,
 )
+
+/** debug 빌드만 제공하는 개발용 확인. 버튼 문구도 debug 리소스에서 온다. */
+interface DebugReceiptConfirm {
+    val label: String
+
+    suspend fun confirm(
+        processor: ReceiptProcessor,
+        itemId: String,
+    )
+}
 
 /** 앱 시작 지점. 저장소와 경계 구현체를 한 번만 만들어 연결한다. */
 class AppGraph(
@@ -21,6 +41,10 @@ class AppGraph(
     val adapters: Adapters = createAdapters(appContext)
     val contentResolver: ContentResolver = appContext.contentResolver
     val drafts = ReceiptDraftStore(File(appContext.filesDir, "receipt-import"))
+
+    /** ML Kit 번들 일본어 모델. 처음 쓸 때 만든다. */
+    val recognizer: ReceiptRecognizer by lazy { MlKitReceiptRecognizer() }
+    val flattener: ReceiptFlattener = CanvasReceiptFlattener
     val joinFlow =
         JoinFlow(
             auth = adapters.auth,

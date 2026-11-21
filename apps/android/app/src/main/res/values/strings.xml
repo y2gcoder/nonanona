@@ -23,8 +23,24 @@
     <string name="notice_draft_failed">사진을 초안에 담지 못했어요. 다시 시도해 주세요.</string>
     <string name="notice_too_many">사진은 한 번에 10장까지 담을 수 있어요.</string>
     <string name="draft_title">초안</string>
-    <string name="draft_body">로그인하지 않아도 이 기기에 보관돼요.</string>
+    <string name="draft_body">로그인하지 않아도 이 기기에 보관돼요. 사진은 이 기기 안에서만 읽어요.</string>
     <string name="draft_photo_description">영수증 사진 %1$d</string>
+    <string name="draft_photo_title">사진 %1$d</string>
+    <string name="processing_summary">읽음 %1$d/%2$d</string>
+    <plurals name="processing_recovered">
+        <item quantity="other">앱이 중간에 닫혀 이어서 읽은 사진 %d장</item>
+    </plurals>
+    <string name="processing_queued">대기 중</string>
+    <string name="processing_running">읽는 중</string>
+    <string name="processing_ready">확인 필요</string>
+    <string name="processing_failed">읽지 못함</string>
+    <string name="processing_confirmed">확인함</string>
+    <string name="processing_retry">다시 읽기</string>
+    <string name="processing_failure_unreadable">글자를 읽지 못했어요. 다시 읽거나 다른 사진을 골라 주세요.</string>
+    <string name="processing_failure_missing_total">합계 금액을 찾지 못했어요.</string>
+    <string name="processing_failure_missing_date">날짜를 찾지 못했어요.</string>
+    <string name="processing_failure_invalid_image">이미지를 열 수 없어요.</string>
+    <string name="processing_failure_recognition">읽는 중 문제가 생겼어요. 다시 읽어 주세요.</string>
 
     <string name="invite_card_title">초대받은 여행방이 있어요</string>
     <string name="invite_card_body">로그인하면 바로 참여할 수 있어요.</string>

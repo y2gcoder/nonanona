@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 첫 슬라이스는 기기 안에서만 동작하므로 INTERNET 권한을 요청하지 않는다. -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<!-- release 앱은 기기 안에서만 동작한다. ML Kit(번들 모델)이 병합하는 네트워크 권한을 지워, 사진·OCR 결과가
+     기기 밖으로 나갈 경로를 막는다. debug 빌드의 로컬 Supabase 모드는 src/debug 매니페스트가 INTERNET을 다시 준다. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
 
     <application
         android:name=".NonanonaApplication"

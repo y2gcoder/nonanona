@@ -11,7 +11,7 @@ ROOT="$(cd "$HERE/../.." && pwd)"
 OUT="${2:-$(mktemp -d)}"
 WORK="${WORK:-$(mktemp -d)}"
 mkdir -p "$WORK" "$OUT/screens"
-FIXTURE="$HERE/../fixtures/synthetic-receipt-r01.png"
+FIXTURE="$HERE/../fixtures/receipts/receipt-r01.png"
 APP_ID=app.nonanona
 GROUP=group.app.nonanona
 log() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$OUT/ios-e2e-local.log"; }

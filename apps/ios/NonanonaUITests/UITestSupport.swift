@@ -6,21 +6,28 @@ extension XCTestCase {
   var nonanona: XCUIApplication { XCUIApplication() }
 
   func shareFromPhotos(matching label: String) {
+    shareFromPhotos(matchingEach: [label])
+  }
+
+  /// 사진 앱에서 여러 장을 골라 공유한다. 사진 앱은 고른 순서가 아니라 보관함 격자 순서로 넘긴다.
+  func shareFromPhotos(matchingEach labels: [String]) {
     let photos = XCUIApplication(bundleIdentifier: "com.apple.mobileslideshow")
     photos.launch()
     if photos.buttons["Continue"].waitForExistence(timeout: 3) { photos.buttons["Continue"].tap() }
     if photos.buttons["Cancel"].exists { photos.buttons["Cancel"].tap() }
-    let photo = photos.images.matching(NSPredicate(format: "label CONTAINS %@", label)).firstMatch
-    XCTAssertTrue(photo.waitForExistence(timeout: 10), "가상 영수증이 사진 앱에 있어야 한다")
+    let first = photos.images.matching(NSPredicate(format: "label CONTAINS %@", labels[0])).firstMatch
+    XCTAssertTrue(first.waitForExistence(timeout: 10), "가상 영수증이 사진 앱에 있어야 한다")
     photos.buttons["Select"].tap()
-    photo.tap()
+    for label in labels {
+      photos.images.matching(NSPredicate(format: "label CONTAINS %@", label)).firstMatch.tap()
+    }
     photos.buttons["Share"].tap()
     let ours = photos.cells.matching(NSPredicate(format: "label == '노나노나'")).firstMatch
     XCTAssertTrue(ours.waitForExistence(timeout: 10), "공유 메뉴에 노나노나가 보여야 한다")
     ours.tap()
     let save = photos.buttons["share-save"]
     XCTAssertTrue(save.waitForExistence(timeout: 10))
-    XCTAssertTrue(photos.staticTexts["share-status"].label.contains("사진 1장"))
+    XCTAssertTrue(photos.staticTexts["share-status"].label.contains("사진 \(labels.count)장"))
     snapshot("ios-share-extension")
     save.tap()
     XCTAssertTrue(save.waitForNonExistence(timeout: 20), "공유 확장이 끝나야 한다")

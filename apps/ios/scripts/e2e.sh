@@ -9,7 +9,7 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${2:-$(mktemp -d)}"
 WORK="${WORK:-$(mktemp -d)}"
 mkdir -p "$WORK"
-FIXTURE="$HERE/../fixtures/synthetic-receipt-r01.png"
+FIXTURE="$HERE/../fixtures/receipts/receipt-r01.png"
 APP_ID=app.nonanona
 GROUP=group.app.nonanona
 mkdir -p "$OUT/screens"

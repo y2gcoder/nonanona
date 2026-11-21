@@ -95,10 +95,47 @@ class ReceiptDraftStore(
         )
     }
 
+    // 처리 파일(같은 초안 폴더 안, 앱 전용 저장소에서 나가지 않는다)
+
+    fun photoFile(
+        id: String,
+        fileName: String,
+    ) = File(File(draftsDir, id), fileName)
+
+    fun proposalFile(
+        id: String,
+        itemId: String,
+    ) = File(File(draftsDir, id), "proposals/$itemId.json")
+
+    fun artifactFile(
+        id: String,
+        fileName: String,
+    ) = File(File(draftsDir, id), "confirmed/$fileName")
+
+    private fun processingFile(id: String) = File(File(draftsDir, id), PROCESSING)
+
+    /** 초안의 처리 상태. 아직 처리를 시작하지 않았으면 null. */
+    fun loadProcessing(id: String): ProcessingManifest? =
+        processingFile(id).takeIf { it.isFile }?.let { ProcessingManifest.fromJson(it.readText(Charsets.UTF_8)) }
+
+    fun saveProcessing(manifest: ProcessingManifest) = writeAtomic(processingFile(manifest.draftId), manifest.toJson().toByteArray())
+
+    /** 임시 파일에 다 쓴 뒤 이름을 바꿔, 쓰는 도중 끝나도 반쯤 쓴 파일이 남지 않게 한다. */
+    fun writeAtomic(
+        file: File,
+        bytes: ByteArray,
+    ) {
+        file.parentFile?.mkdirs()
+        val staging = File(file.parentFile, ".${file.name}.partial")
+        staging.writeBytes(bytes)
+        if (!staging.renameTo(file)) throw IOException("cannot write ${file.name}")
+    }
+
     private fun safeExtension(raw: String): String = raw.lowercase().filter { it in 'a'..'z' || it in '0'..'9' }.ifEmpty { "img" }
 
     companion object {
         const val MAX_PHOTOS = 10
         private const val MANIFEST = "draft.properties"
+        private const val PROCESSING = "processing.json"
     }
 }

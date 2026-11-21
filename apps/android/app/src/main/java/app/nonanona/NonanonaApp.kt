@@ -64,7 +64,15 @@ fun NonanonaApp(viewModel: AppViewModel) {
                     )
                 }
                 entry<Route.Draft> { route ->
-                    DraftScreen(state.drafts.firstOrNull { it.id == route.id }, snackbarHostState, onBack = viewModel::back)
+                    DraftScreen(
+                        draft = state.drafts.firstOrNull { it.id == route.id },
+                        processing = state.processing[route.id],
+                        snackbarHostState = snackbarHostState,
+                        onRetry = { viewModel.retryPhoto(route.id, it) },
+                        debugConfirmLabel = viewModel.debugConfirmLabel,
+                        onDebugConfirm = { viewModel.debugConfirm(route.id, it) },
+                        onBack = viewModel::back,
+                    )
                 }
                 entry<Route.Invite> {
                     InviteScreen(

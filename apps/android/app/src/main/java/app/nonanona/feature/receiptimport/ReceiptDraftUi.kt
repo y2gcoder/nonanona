@@ -8,18 +8,22 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -94,11 +98,16 @@ fun DraftsEmpty(modifier: Modifier = Modifier) {
     }
 }
 
+/** 초안의 사진과 사진별 처리 상태. 검토·확인 화면은 디자인이 정해진 뒤 붙인다(지금은 상태만 보인다). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DraftScreen(
     draft: ReceiptDraft?,
+    processing: ProcessingManifest?,
     snackbarHostState: SnackbarHostState,
+    onRetry: (String) -> Unit,
+    debugConfirmLabel: String?,
+    onDebugConfirm: (String) -> Unit,
     onBack: () -> Unit,
 ) {
     Scaffold(
@@ -106,38 +115,117 @@ fun DraftScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         if (draft == null) return@Scaffold
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 112.dp),
-            contentPadding =
-                PaddingValues(
-                    start = Spacing.m,
-                    end = Spacing.m,
-                    top = padding.calculateTopPadding() + Spacing.s,
-                    bottom = padding.calculateBottomPadding() + Spacing.l,
-                ),
-            horizontalArrangement = Arrangement.spacedBy(Spacing.s),
-            verticalArrangement = Arrangement.spacedBy(Spacing.s),
+        LazyColumn(
+            contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding() + Spacing.l),
             modifier = Modifier.fillMaxSize().testTag("draft_screen"),
         ) {
-            item(span = { GridItemSpan(maxLineSpan) }) {
-                Column(verticalArrangement = Arrangement.spacedBy(Spacing.s), modifier = Modifier.padding(bottom = Spacing.s)) {
-                    Text(
-                        pluralStringResource(R.plurals.draft_photo_count, draft.photos.size, draft.photos.size),
-                        style = TextRoles.sectionTitle,
-                    )
+            item {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(Spacing.s),
+                    modifier = Modifier.padding(horizontal = Spacing.m, vertical = Spacing.s),
+                ) {
                     StatusLabel(stringResource(R.string.status_local_only), StatusRole.Neutral)
                     Text(stringResource(R.string.draft_body), style = TextRoles.supporting)
+                    if (processing != null) {
+                        Text(
+                            stringResource(R.string.processing_summary, processing.processedCount, processing.items.size),
+                            style = TextRoles.sectionTitle,
+                            modifier = Modifier.testTag("processing_summary"),
+                        )
+                        if (processing.recoveredCount > 0) {
+                            Text(
+                                pluralStringResource(R.plurals.processing_recovered, processing.recoveredCount, processing.recoveredCount),
+                                style = TextRoles.caption,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.testTag("processing_recovered"),
+                            )
+                        }
+                    }
                 }
             }
             itemsIndexed(draft.photos) { index, photo ->
-                PhotoThumbnail(
-                    photo,
-                    contentDescription = stringResource(R.string.draft_photo_description, index + 1),
-                    modifier = Modifier.aspectRatio(1f),
+                PhotoRow(
+                    position = index + 1,
+                    photo = photo,
+                    item = processing?.items?.firstOrNull { it.position == index + 1 },
+                    onRetry = onRetry,
+                    debugConfirmLabel = debugConfirmLabel,
+                    onDebugConfirm = onDebugConfirm,
                 )
             }
         }
     }
+}
+
+@Composable
+private fun PhotoRow(
+    position: Int,
+    photo: File,
+    item: ProcessingItem?,
+    onRetry: (String) -> Unit,
+    debugConfirmLabel: String?,
+    onDebugConfirm: (String) -> Unit,
+) {
+    ListItem(
+        leadingContent = {
+            PhotoThumbnail(photo, contentDescription = stringResource(R.string.draft_photo_description, position), size = 56.dp)
+        },
+        headlineContent = { Text(stringResource(R.string.draft_photo_title, position)) },
+        supportingContent = {
+            if (item == null) return@ListItem
+            Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                StatusLabel(stringResource(item.statusRes()), item.statusRole(), Modifier.testTag("item_${position}_status"))
+                item.detail()?.let { Text(it) }
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                    if (item.state == ItemState.Failed) {
+                        OutlinedButton(onClick = { onRetry(item.id) }, modifier = Modifier.testTag("item_${position}_retry")) {
+                            Text(stringResource(R.string.processing_retry))
+                        }
+                    }
+                    if (item.state == ItemState.Ready && debugConfirmLabel != null) {
+                        OutlinedButton(
+                            onClick = { onDebugConfirm(item.id) },
+                            modifier = Modifier.testTag("item_${position}_debug_confirm"),
+                        ) {
+                            Text(debugConfirmLabel)
+                        }
+                    }
+                }
+            }
+        },
+    )
+}
+
+private fun ProcessingItem.statusRes(): Int =
+    when (state) {
+        ItemState.Queued -> R.string.processing_queued
+        ItemState.Processing -> R.string.processing_running
+        ItemState.Ready -> R.string.processing_ready
+        ItemState.Failed -> R.string.processing_failed
+        ItemState.Confirmed -> R.string.processing_confirmed
+    }
+
+private fun ProcessingItem.statusRole(): StatusRole =
+    when (state) {
+        ItemState.Queued, ItemState.Processing -> StatusRole.Neutral
+        ItemState.Ready -> StatusRole.Attention
+        ItemState.Failed -> StatusRole.Error
+        ItemState.Confirmed -> StatusRole.Positive
+    }
+
+@Composable
+private fun ProcessingItem.detail(): String? {
+    confirmed?.fields?.let { return "${it.date} · %,d ${it.currency}".format(it.amountMinor) }
+    if (state != ItemState.Failed) return null
+    return stringResource(
+        when (failure) {
+            ProcessingFailure.Unreadable -> R.string.processing_failure_unreadable
+            ProcessingFailure.MissingTotal -> R.string.processing_failure_missing_total
+            ProcessingFailure.MissingDate -> R.string.processing_failure_missing_date
+            ProcessingFailure.InvalidImage -> R.string.processing_failure_invalid_image
+            ProcessingFailure.RecognitionError, null -> R.string.processing_failure_recognition
+        },
+    )
 }
 
 @Composable

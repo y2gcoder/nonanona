@@ -1,6 +1,8 @@
 package app.nonanona
 
 import android.content.Context
+import app.nonanona.feature.receiptimport.ProcessingHooks
+import app.nonanona.feature.receiptimport.ReceiptProcessor
 import app.nonanona.localbackend.LocalAuthGateway
 import app.nonanona.localbackend.LocalBackendConfig
 import app.nonanona.localbackend.LocalSupabaseSession
@@ -8,6 +10,7 @@ import app.nonanona.localbackend.LocalTripGateway
 import app.nonanona.testing.TestAuthGateway
 import app.nonanona.testing.TestTripGateway
 import java.io.File
+import java.util.Properties
 
 /**
  * debug 빌드 전용 연결. 기본은 가상 계정·가상 여행방을 돌려주는 테스트 구현체다.
@@ -26,6 +29,8 @@ internal fun createAdapters(context: Context): Adapters {
         return Adapters(
             auth = LocalAuthGateway(session, context.getString(R.string.local_login_notice)),
             trips = LocalTripGateway(session),
+            processingHooks = processingHooks(context),
+            debugReceiptConfirm = confirmWithSuggestions(context),
         )
     }
     val auth =
@@ -33,5 +38,35 @@ internal fun createAdapters(context: Context): Adapters {
             sessionFile = File(context.noBackupFilesDir, "test-auth/session.properties"),
             notice = context.getString(R.string.test_login_notice),
         )
-    return Adapters(auth = auth, trips = TestTripGateway(auth))
+    return Adapters(
+        auth = auth,
+        trips = TestTripGateway(auth),
+        processingHooks = processingHooks(context),
+        debugReceiptConfirm = confirmWithSuggestions(context),
+    )
 }
+
+/** 검증용: files/debug-processing.properties(delayMillisPerItem, failFirstAttemptAtPosition)가 있으면 읽는다. */
+private fun processingHooks(context: Context): ProcessingHooks {
+    val file = File(context.filesDir, "debug-processing.properties")
+    if (!file.isFile) return ProcessingHooks()
+    val p = Properties().apply { file.reader(Charsets.UTF_8).use { load(it) } }
+    return ProcessingHooks(
+        delayMillisPerItem = p.getProperty("delayMillisPerItem")?.toLongOrNull() ?: 0,
+        failFirstAttemptAtPosition = p.getProperty("failFirstAttemptAtPosition")?.toIntOrNull(),
+    )
+}
+
+/** 제안된 값과 가림을 그대로 확인한다. */
+private fun confirmWithSuggestions(context: Context) =
+    object : DebugReceiptConfirm {
+        override val label: String = context.getString(R.string.debug_receipt_confirm)
+
+        override suspend fun confirm(
+            processor: ReceiptProcessor,
+            itemId: String,
+        ) {
+            val proposal = processor.proposal(itemId)
+            processor.confirm(itemId, proposal.fields, proposal.suggestedMaskLineIds.toSet())
+        }
+    }

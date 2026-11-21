@@ -96,14 +96,16 @@ def screenshot(path):
         f.write(adb("exec-out", "screencap", "-p", binary=True))
 
 
-def scroll_to(timeout=20, **query):
-    """목록을 아래로 넘기며 찾는다."""
+def scroll_to(timeout=30, **query):
+    """목록을 아래로, 그다음 위로 넘기며 찾는다."""
     deadline = time.time() + timeout
-    while time.time() < deadline:
+    for swipe in ["540 1700 540 900"] * 6 + ["540 900 540 1700"] * 12:
         n = find(**query)
         if n and 150 < n.bounds[1] and n.bounds[3] < 2250:
             return n
-        sh("input swipe 540 1700 540 900 300")
+        if time.time() > deadline:
+            break
+        sh(f"input swipe {swipe} 300")
         time.sleep(0.6)
     raise TimeoutError(f"not found while scrolling: {query}")
 

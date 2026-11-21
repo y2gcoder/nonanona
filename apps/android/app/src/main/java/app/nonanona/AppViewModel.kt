@@ -12,8 +12,10 @@ import app.nonanona.feature.account.LoginState
 import app.nonanona.feature.account.SignInFailure
 import app.nonanona.feature.account.SignInProvider
 import app.nonanona.feature.receiptimport.DraftSource
+import app.nonanona.feature.receiptimport.ProcessingManifest
 import app.nonanona.feature.receiptimport.ReceiptDraft
 import app.nonanona.feature.receiptimport.ReceiptDraftStore
+import app.nonanona.feature.receiptimport.ReceiptProcessor
 import app.nonanona.feature.receiptimport.incomingPhoto
 import app.nonanona.feature.receiptimport.sharedImageUris
 import app.nonanona.feature.trip.InviteAcceptFailure
@@ -59,6 +61,8 @@ data class AppUiState(
     val login: LoginState = LoginState.Hidden,
     val join: JoinState = JoinState.Idle,
     val notice: Notice? = null,
+    /** 초안별 사진 처리 상태. 처리기가 디스크에 쓴 뒤 알려 준다. */
+    val processing: Map<String, ProcessingManifest> = emptyMap(),
 )
 
 /** 화면 상태와 화면 이동. 저장과 경계 호출은 저장소·JoinFlow에 맡긴다. */
@@ -77,6 +81,7 @@ class AppViewModel(
             val pending = io { graph.joinFlow.pendingInvite() }
             val session = graph.joinFlow.restoreSession()
             mutableState.update { it.copy(loaded = true, drafts = drafts, pendingInvite = pending, session = session) }
+            startProcessing(drafts)
             // 로그인 도중 앱이 종료됐다면 다시 열 때 그 초대 화면으로 돌아간다.
             if (pending != null && Route.Invite !in backStack) backStack.add(Route.Invite)
         }
@@ -105,6 +110,7 @@ class AppViewModel(
                     io { graph.drafts.create(source, uris.map(graph.contentResolver::incomingPhoto)) }
                 }
             val drafts = io { graph.drafts.list() }
+            startProcessing(drafts)
             mutableState.update {
                 it.copy(
                     drafts = drafts,
@@ -116,6 +122,56 @@ class AppViewModel(
     }
 
     fun noticeShown() = mutableState.update { it.copy(notice = null) }
+
+    private val processors = mutableMapOf<String, ReceiptProcessor>()
+
+    /** debug 빌드에서만 값이 있다(개발용 확인 버튼 문구). */
+    val debugConfirmLabel: String? get() = graph.adapters.debugReceiptConfirm?.label
+
+    /** 처리할 사진이 남은 초안마다 처리기를 만들어 돌린다. 처리기를 만들 때 끝나지 않은 사진을 대기열로 되돌린다. */
+    private fun startProcessing(drafts: List<ReceiptDraft>) {
+        for (draft in drafts) {
+            viewModelScope.launch {
+                val processor =
+                    processors[draft.id] ?: io {
+                        ReceiptProcessor(
+                            store = graph.drafts,
+                            draft = draft,
+                            recognizer = graph.recognizer,
+                            flattener = graph.flattener,
+                            hooks = graph.adapters.processingHooks,
+                            onChange = ::publish,
+                        )
+                    }.also { processors[draft.id] = it }
+                publish(processor.snapshot())
+                processor.run()
+            }
+        }
+    }
+
+    private fun publish(manifest: ProcessingManifest) =
+        mutableState.update { it.copy(processing = it.processing + (manifest.draftId to manifest)) }
+
+    /** 실패한 사진 한 장만 다시 읽는다. */
+    fun retryPhoto(
+        draftId: String,
+        itemId: String,
+    ) {
+        val processor = processors[draftId] ?: return
+        viewModelScope.launch {
+            runCatching { processor.retry(itemId) }
+            processor.run()
+        }
+    }
+
+    fun debugConfirm(
+        draftId: String,
+        itemId: String,
+    ) {
+        val processor = processors[draftId] ?: return
+        val action = graph.adapters.debugReceiptConfirm ?: return
+        viewModelScope.launch { runCatching { action.confirm(processor, itemId) } }
+    }
 
     fun navigate(route: Route) {
         backStack.add(route)

@@ -33,6 +33,9 @@ final class AppModel {
   var login: LoginState = .hidden
   private(set) var join: JoinState = .idle
   var importFailed = false
+  /// 초안별 사진 처리 상태. 처리기가 디스크에 쓴 뒤 알려 준다.
+  private(set) var processing: [String: ProcessingManifest] = [:]
+  private var processors: [String: ReceiptProcessor] = [:]
 
   let graph: AppGraph
   var signInProviders: [SignInProvider] { graph.auth.providers }
@@ -44,6 +47,7 @@ final class AppModel {
 
   func load() async {
     drafts = graph.drafts.list()
+    startProcessing()
     pendingInvite = graph.joinFlow.pendingInvite()
     session = await graph.joinFlow.restoreSession()
     loaded = true
@@ -54,7 +58,52 @@ final class AppModel {
   /// 공유 확장이 App Group에 초안을 더했을 수 있으므로 앱이 앞으로 올 때마다 다시 읽는다.
   func reloadDrafts() {
     drafts = graph.drafts.list()
+    startProcessing()
   }
+
+  /// 처리할 사진이 남은 초안마다 처리기를 만들어 돌린다. 처리기를 만들 때 끝나지 않은 사진을 대기열로 되돌린다.
+  func startProcessing() {
+    for draft in drafts {
+      if let processor = processors[draft.id] {
+        Task { await processor.run() }
+        continue
+      }
+      let processor: ReceiptProcessor
+      do {
+        processor = try ReceiptProcessor(
+          store: graph.drafts, draft: draft, recognizer: graph.recognizer, hooks: graph.processingHooks,
+          onChange: { [weak self] manifest in Task { @MainActor in self?.processing[manifest.draftID] = manifest } })
+      } catch {
+        continue
+      }
+      processors[draft.id] = processor
+      Task {
+        processing[draft.id] = await processor.snapshot()
+        await processor.run()
+      }
+    }
+  }
+
+  /// 실패한 사진 한 장만 다시 읽는다.
+  func retryPhoto(draftID: String, itemID: String) {
+    guard let processor = processors[draftID] else { return }
+    Task {
+      try? await processor.retry(itemID)
+      await processor.run()
+    }
+  }
+
+  #if DEBUG
+    /// 검토 화면이 정해지기 전의 개발용 확인: 제안된 값과 가림을 그대로 확인한다. release 빌드에는 없다.
+    func debugConfirmWithSuggestions(draftID: String, itemID: String) {
+      guard let processor = processors[draftID] else { return }
+      Task {
+        guard let proposal = try? await processor.proposal(itemID) else { return }
+        _ = try? await processor.confirm(
+          itemID, fields: proposal.fields, maskLineIDs: Set(proposal.suggestedMaskLineIDs))
+      }
+    }
+  #endif
 
   func handle(url: URL) {
     guard let code = InviteCode(link: url) else { return }

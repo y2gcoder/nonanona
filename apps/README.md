@@ -12,7 +12,7 @@ iOS(SwiftUI)와 Android(Kotlin, Compose) 네이티브 앱의 뼈대다. 이번 �
 
 | 책임 | iOS (`apps/ios`) | Android (`apps/android/app/src`) |
 | --- | --- | --- |
-| 영수증 가져오기: 공유·사진 선택으로 받은 사진을 초안 폴더에 원자적으로 저장 | `Packages/ReceiptImport`(앱과 공유 확장이 함께 쓰는 Swift 패키지), `NonanonaShare/`(공유 확장), `Nonanona/Features/ReceiptImport/` | `main/.../feature/receiptimport/` |
+| 영수증 가져오기: 공유·사진 선택으로 받은 사진(1~10장)을 초안 폴더에 원자적으로 저장, 사진별 기기 안 OCR 처리와 가림 확인(아래 "영수증 처리") | `Packages/ReceiptImport`(앱과 공유 확장이 함께 쓰는 Swift 패키지), `NonanonaShare/`(공유 확장), `Nonanona/Features/ReceiptImport/` | `main/.../feature/receiptimport/` |
 | 계정: 인증 경계 `AuthGateway`, 로그인 시트 | `Nonanona/Features/Account/` | `main/.../feature/account/` |
 | 여행방: 여행방 경계 `TripGateway`(초대 수락), 초대·여행방 화면 | `Nonanona/Features/Trip/` | `main/.../feature/trip/` |
 | 앱: 보관한 초대(`PendingInviteStore`), 로그인→초대 수락 순서(`JoinFlow`), 화면 상태와 이동, 구현체 연결 | `Nonanona/App/`(`AppModel`, `AppGraph`) | `main/.../`(`AppViewModel`, `AppGraph`) |
@@ -41,6 +41,40 @@ iOS(SwiftUI)와 Android(Kotlin, Compose) 네이티브 앱의 뼈대다. 이번 �
 | | `network`, `unavailable`, `unknown` | 초대를 남기고 "다시 시도"로 같은 요청을 보낸다 |
 
 어떤 실패도 기기에 저장한 초안을 건드리지 않는다. 판단은 두 앱의 `JoinFlow`에 있고 단위 테스트가 가짜 경계로 각 실패의 발생과 복구를 확인한다. debug 테스트 구현체는 가상 초대 코드 `SYNTHOFFLINE01`(첫 시도 연결 실패), `SYNTHEXPIRED01`(초대 만료), `SYNTHSESSION01`(첫 시도 세션 만료)로 같은 흐름을 기기에서 재현하고, 두 E2E가 정상 흐름 뒤에 이 세 경우를 확인한다.
+
+## 영수증 처리 (기기 안, 로컬 전용)
+
+native-batch-import 실험에서 검증한 처리 코어를 영수증 가져오기 기능 안으로 옮겼다(두 플랫폼 같은 모델). 실험의 화면, 기록 서버, 공유 payload는 옮기지 않았다. 검토·확인 화면과 업로드는 디자인(A/B)과 함께 따로 붙인다.
+
+- **처리 상태**: 초안마다 `processing.json`에 사진별 상태(`queued → processing → ready | failed → confirmed`), 시도 횟수, 실패 이유를 둔다. 상태는 화면에 알리기 전에 원자적으로 디스크에 먼저 쓴다. 처리기를 만들 때 `processing`으로 남은 사진(처리 중 앱 종료)을 `queued`로 되돌리고 `recoveredCount`를 늘린다. 끝난 사진은 다시 읽지 않는다.
+- **OCR**: 동시에 최대 2장. iOS는 Apple Vision(`ja-JP`), Android는 ML Kit 번들 일본어 모델(`text-recognition-japanese` 16.0.1). 사진에서 날짜·합계·가게와 가림 후보(전화·카드·회원·예약번호 줄)를 고른다. 실패는 문자열이 아니라 `ProcessingFailure`(`unreadable`, `missingTotal`, `missingDate`, `invalidImage`, `recognitionError`)로 남기고, 그 사진 하나만 "다시 읽기"로 대기열에 되돌린다.
+- **타입 분리**: 원본 사진(초안 폴더), `OCRProposal`(OCR 전문 포함, 기기 안 `proposals/`에만), `AllowedReceiptFields`(날짜·금액·통화·가게), `MaskedArtifact`(가림을 구운 새 PNG. 굽기 함수만 만들 수 있다), `ConfirmedReceipt`(허용 필드 + 가림 사본 이름·해시)는 서로 다른 타입이다.
+- **확인**: `confirm(item, fields, maskLineIDs)`만 가림을 픽셀에 굽는다(새 비트맵에 검은 띠, PNG 재인코딩 후 `IHDR/PLTE/tRNS/sRGB/IDAT/IEND` 외 청크 제거). 날짜 형식·금액·통화가 맞지 않거나 `ready`가 아니면 거절한다.
+- **기기 경계(fail closed)**: 기기 밖으로 보낼 수 있는 것은 `outboundReceipts()` 하나뿐이다. 확인한 영수증만 돌려주고, 그 전에 가림 사본이 있는지, 해시가 확인 당시와 같은지, 허용 청크만 있는지, 원본과 다른 바이트인지 다시 본다. 하나라도 어긋나면 아무것도 돌려주지 않는다. 지금은 이것을 부르는 업로드가 없다.
+- **저장 정책**: iOS는 App Group 컨테이너의 초안 폴더(백업 제외, `completeFileProtectionUntilFirstUserAuthentication`), Android는 앱 전용 `filesDir`(백업·기기 이전 제외 규칙). 임시 파일은 같은 폴더 안 숨김 파일로 쓰고 이름을 바꿔 공개한다.
+- **release 앱**: 네트워크 권한이 없다. ML Kit이 병합하는 `INTERNET`·`ACCESS_NETWORK_STATE`를 main 매니페스트에서 지웠다(debug는 로컬 Supabase 모드 때문에 `INTERNET`만 다시 받는다).
+- **화면(중립, 임시)**: 초안 화면에 "읽음 N/M", 이어서 읽은 사진 수, 사진별 상태 라벨(대기 중·읽는 중·확인 필요·읽지 못함·확인함)과 실패 이유, "다시 읽기"만 둔다. debug 빌드에만 "확인(개발용)"(제안값과 가림 후보를 그대로 확인)과 처리 늦추기·첫 시도 실패 주입(iOS 실행 환경 변수 `NONANONA_PROCESSING_DELAY_MS`·`NONANONA_FAIL_FIRST_ATTEMPT_POSITION`, Android `files/debug-processing.properties`)이 있다.
+
+### 확인한 것 (2026-11-21, 가상 영수증 10장)
+
+| 확인 | iOS | Android |
+| --- | --- | --- |
+| 단위 테스트 | `swift test`(macOS, 실제 Vision): 9장 날짜·합계가 정답과 같고 민감한 줄마다 가림 후보가 있음, r10 실패. 동시 처리 최대 2. 4장 완료·2장 처리 중 상태를 복사해 다시 열면 복구 2건, 6장만 다시 읽고 시도 횟수 `[1,1,1,1,2,2,1,1,1,1]`. 실패 1장 다시 읽기 뒤 나머지 9장 그대로. 가림 픽셀·메타데이터, 경계(확인 전 빈 목록, 사본을 원본으로 바꾸면 거절), 잘못된 값·상태 거절 | JVM(정답 줄 위치로 만든 OCR 대역, ImageIO 굽기): 같은 항목 4개 |
+| 기기 E2E: 진입 | 사진 앱에서 10장 선택 → 공유 → 노나노나 → 홈 화면처럼 앱 실행 | 파일 앱에서 10장 선택 → 시스템 공유 → 노나노나(콜드 스타트) |
+| 처리 도중 SIGKILL | 4/10 처리 시점: ready 2, failed 2(주입 1 + 사진 앱 순서로 1번에 온 r10), processing 2, queued 4 | 4/10: ready 3, failed 1(주입), processing 2, queued 4 |
+| 다시 열기 | 이어서 읽은 사진 2장, 10/10 처리 | 같음 |
+| 실패만 다시 읽기 | 주입 실패 사진 → 확인 필요, r10 → 다시 실패(`unreadable`), 다른 8장 라벨 그대로 | 같음 |
+| 최종 상태 | ready 8, confirmed 1, failed 1(r10), 시도 `[2,1,1,2,2,2,1,1,1,1]` | ready 8, confirmed 1, failed 1(r10), 시도 `[1,1,1,2,2,2,1,1,1,2]` |
+| 실제 OCR | Vision이 읽을 수 있는 9장 모두 날짜·합계를 읽음 | ML Kit이 읽을 수 있는 9장 모두 날짜·합계를 읽음 |
+| 가림 사본 호스트 검사 | r09: 민감한 줄 글자 픽셀 3,017개 모두 검정, 가림 띠 밖 표본 42,960개 변화 0, 청크 `IHDR/sRGB/IDAT/IEND`, 원본 표지 문자열 없음, 원본과 다른 바이트 | r01: 2,730개 모두 검정, 변화 0, 같은 청크, 표지 없음 |
+| OCR 전문 | 기기 안 `proposals/` 9개 파일에만 있음 | 같음 |
+| release | 개발용 버튼 문구·처리 훅 변수·테스트/로컬 구현체 0 | 개발용 문구 리소스·처리 훅 파일 이름·테스트/로컬 클래스 0, 네트워크 권한 없음 |
+| 기존 흐름 회귀 | 테스트 모드 E2E 4단계, 로컬 Supabase 모드 E2E 4단계 통과(서버 보고 참여 3·사용된 초대 3) | 같음 |
+
+```sh
+mise run ios:e2e-receipts -- <시뮬레이터 UDID> [증거 폴더]
+mise run android:e2e-receipts -- [증거 폴더]
+```
 
 ## 로컬 Supabase 모드 (debug 전용)
 
@@ -139,6 +173,8 @@ iOS 단위 테스트와 release 확인은 `IOS_DESTINATION`(기본 `platform=iOS
 | lifecycle(viewmodel-compose, runtime-compose) | 2.11.0 | 2026-06-17 |
 | Navigation 3 (navigation3-ui) | 1.2.1 | 2026-11-04 |
 | JUnit | 4.13.2 | 2021-02-13 (단위 테스트만) |
+| ML Kit 일본어 텍스트 인식(번들 모델) | 16.0.1 | 2024-08-07(최신 안정판). Play Services 전이 의존성 포함 잠금 338개 모두 7일 경과 |
+| org.json(JVM 단위 테스트 전용) | 20260814 | 2026-08-14. 앱은 플랫폼 org.json을 쓴다 |
 | Supabase CLI (`mise.toml`) | 3.1.0 | 2026-11-09. 3.2.0(2026-11-16)은 7일 전이라 쓰지 않는다. 로컬 스택 이미지는 CLI가 고정한 태그를 쓴다 |
 | compileSdk / targetSdk / minSdk | 37.1 / 36 / 26 | Compose 1.12·lifecycle 2.11이 compileSdk 37 이상을 요구한다. AGP 9.3.1이 검증한 상한인 37.1을 쓰고, 실행 동작은 targetSdk 36(앞선 실험과 같음)으로 둔다 |
 
@@ -151,6 +187,8 @@ iOS 단위 테스트와 release 확인은 `IOS_DESTINATION`(기본 `platform=iOS
 - 서버 오류 매핑은 로컬 스택(Auth, PostgREST, 이 저장소의 RPC 코드)에서 실제로 받은 값에 맞췄다. 클라우드 프로젝트의 응답, 실제 OAuth 오류, 속도 제한은 로컬에서 재현하지 않았다(429·5xx 매핑은 단위 테스트만).
 - 세션 만료는 서버에서 세션을 지우고 토큰 만료를 기다려 재현했다. 장기간 미사용, 다른 기기 로그아웃, 계정 정지는 확인하지 않았다.
 - 여행방 목록과 다시 열기, 초안을 여행방에 올리기는 다음 슬라이스다.
+- 영수증 처리: 검토·확인 화면(값 고치기, 가림 직접 고르기·그리기), 직접 입력, 업로드는 아직 없다. release에서는 처리 상태만 보이고 확인할 수 없다. 처리는 앱이 앞에 있을 때만 돈다(iOS 백그라운드 작업, Android WorkManager 없음). 실기기, 큰 HEIC·JPEG, EXIF 회전 사진, 저장 공간 부족, Google 포토 공유, 앱 안 사진 선택기로 10장 고르기는 확인하지 않았다. 가로 전체 띠 가림은 같은 행의 다른 정보도 덮는다. 공유 확장도 가져오기 패키지를 함께 링크해 OCR 코드가 들어 있다(쓰지는 않는다).
+- debug 빌드는 로컬 모드 때문에 INTERNET 권한이 있어, ML Kit 라이브러리가 debug에서 사용 통계를 보낼 수 있는지는 확인하지 않았다(release는 권한이 없다).
 - 초대 링크는 사용자 지정 스킴(`nonanona://`)이다. 운영 도메인의 Universal Links·App Links는 서버 준비와 함께 붙인다.
 - 번들 ID·applicationId(`app.nonanona`), App Group(`group.app.nonanona`), 앱 아이콘은 임시다. 실기기 서명과 스토어 등록 때 정한다.
 - 시뮬레이터·에뮬레이터만 확인했다. 실기기, Google 포토 앱의 공유(에뮬레이터는 계정 없이 쓸 수 없어 파일 앱으로 대신), 앱 안 사진 선택기의 E2E, 공유 확장 메모리 한도, 큰 HEIC는 확인하지 않았다.

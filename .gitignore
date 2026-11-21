@@ -18,4 +18,9 @@ gitleaks-report*
 .idea/
 .vscode/
 
-# 빌드 산출물은 스택에 맞춰 추가한다.
+# 빌드 산출물 (Android는 apps/android/.gitignore)
+**/xcuserdata/
+apps/ios/Packages/*/.build/
+apps/ios/Packages/*/.swiftpm/
+*.xcresult
+__pycache__/

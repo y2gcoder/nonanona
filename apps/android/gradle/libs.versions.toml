@@ -1,0 +1,26 @@
+# 정확한 버전만 쓴다. 게시 후 7일이 지난 안정판이며, 게시일은 Google Maven/Maven Central의 Last-Modified로 확인했다(확인일 2026-11-21).
+# Kotlin 2.4.21 + AGP 9.3.1 + Gradle 9.7.0 교집합: https://kotlinlang.org/docs/gradle-configure-project.html (확인일 2026-11-21)
+[versions]
+agp = "9.3.1"                    # 2026-07-23
+kotlin = "2.4.21"                # 2026-10-08
+compose-bom = "2026.09.00"       # 2026-09-09 (ui 1.12.1, material3 1.4.0)
+activity-compose = "1.13.0"      # 2026-03-11
+lifecycle = "2.11.0"             # 2026-06-17
+navigation3 = "1.2.1"            # 2026-11-04
+junit = "4.13.2"                 # 2021-02-13
+
+[libraries]
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
+compose-ui = { module = "androidx.compose.ui:ui" }
+compose-material3 = { module = "androidx.compose.material3:material3" }
+compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
+activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity-compose" }
+lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
+navigation3-ui = { module = "androidx.navigation3:navigation3-ui", version.ref = "navigation3" }
+junit = { module = "junit:junit", version.ref = "junit" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

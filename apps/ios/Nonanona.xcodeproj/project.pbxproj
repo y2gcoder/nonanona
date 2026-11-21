@@ -1,0 +1,114 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		4E4F4E41000000000000000C = {isa = PBXBuildFile; productRef = 4E4F4E41000000000000000B /* ReceiptImport */;};
+		4E4F4E41000000000000000E = {isa = PBXBuildFile; productRef = 4E4F4E41000000000000000D /* ReceiptImport */;};
+		4E4F4E41000000000000000F = {isa = PBXBuildFile; fileRef = 4E4F4E410000000000000002 /* NonanonaShare.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); };};
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		4E4F4E41000000000000001F = {isa = PBXContainerItemProxy; containerPortal = 4E4F4E41000000000000001D /* Project object */; proxyType = 1; remoteGlobalIDString = 4E4F4E41000000000000001E; remoteInfo = NonanonaShare;};
+		4E4F4E410000000000000022 = {isa = PBXContainerItemProxy; containerPortal = 4E4F4E41000000000000001D /* Project object */; proxyType = 1; remoteGlobalIDString = 4E4F4E410000000000000021; remoteInfo = Nonanona;};
+		4E4F4E410000000000000024 = {isa = PBXContainerItemProxy; containerPortal = 4E4F4E41000000000000001D /* Project object */; proxyType = 1; remoteGlobalIDString = 4E4F4E410000000000000021; remoteInfo = Nonanona;};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		4E4F4E410000000000000010 = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (4E4F4E41000000000000000F /* NonanonaShare.appex in Embed Foundation Extensions */, ); name = "Embed Foundation Extensions"; runOnlyForDeploymentPostprocessing = 0;};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		4E4F4E410000000000000001 = {isa = PBXFileReference; explicitFileType = "wrapper.application"; includeInIndex = 0; path = Nonanona.app; sourceTree = BUILT_PRODUCTS_DIR;};
+		4E4F4E410000000000000002 = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = NonanonaShare.appex; sourceTree = BUILT_PRODUCTS_DIR;};
+		4E4F4E410000000000000003 = {isa = PBXFileReference; explicitFileType = "wrapper.cfbundle"; includeInIndex = 0; path = NonanonaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR;};
+		4E4F4E410000000000000004 = {isa = PBXFileReference; explicitFileType = "wrapper.cfbundle"; includeInIndex = 0; path = NonanonaUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR;};
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		4E4F4E410000000000000005 = {isa = PBXFileSystemSynchronizedRootGroup; path = Nonanona; sourceTree = "<group>";};
+		4E4F4E410000000000000006 = {isa = PBXFileSystemSynchronizedRootGroup; path = NonanonaShare; sourceTree = "<group>";};
+		4E4F4E410000000000000007 = {isa = PBXFileSystemSynchronizedRootGroup; path = NonanonaTests; sourceTree = "<group>";};
+		4E4F4E410000000000000008 = {isa = PBXFileSystemSynchronizedRootGroup; path = NonanonaUITests; sourceTree = "<group>";};
+		4E4F4E410000000000000009 = {isa = PBXFileSystemSynchronizedRootGroup; path = Config; sourceTree = "<group>";};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		4E4F4E410000000000000012 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (4E4F4E41000000000000000C /* ReceiptImport in Frameworks */, ); runOnlyForDeploymentPostprocessing = 0;};
+		4E4F4E410000000000000015 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (4E4F4E41000000000000000E /* ReceiptImport in Frameworks */, ); runOnlyForDeploymentPostprocessing = 0;};
+		4E4F4E410000000000000018 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
+		4E4F4E41000000000000001B = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		4E4F4E410000000000000037 = {isa = PBXGroup; children = (4E4F4E410000000000000001, 4E4F4E410000000000000002, 4E4F4E410000000000000003, 4E4F4E410000000000000004, ); name = Products; sourceTree = "<group>";};
+		4E4F4E410000000000000038 = {isa = PBXGroup; children = (4E4F4E410000000000000005, 4E4F4E410000000000000006, 4E4F4E410000000000000007, 4E4F4E410000000000000008, 4E4F4E410000000000000009, 4E4F4E410000000000000037, ); sourceTree = "<group>";};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		4E4F4E410000000000000021 = {isa = PBXNativeTarget; buildConfigurationList = 4E4F4E410000000000000028; buildPhases = (4E4F4E410000000000000011, 4E4F4E410000000000000012, 4E4F4E410000000000000013, 4E4F4E410000000000000010, ); buildRules = ( ); dependencies = (4E4F4E410000000000000020, ); fileSystemSynchronizedGroups = (4E4F4E410000000000000005 /* Nonanona */, ); name = Nonanona; packageProductDependencies = (4E4F4E41000000000000000B /* ReceiptImport */, ); productName = Nonanona; productReference = 4E4F4E410000000000000001 /* Nonanona.app */; productType = "com.apple.product-type.application";};
+		4E4F4E41000000000000001E = {isa = PBXNativeTarget; buildConfigurationList = 4E4F4E41000000000000002B; buildPhases = (4E4F4E410000000000000014, 4E4F4E410000000000000015, 4E4F4E410000000000000016, ); buildRules = ( ); dependencies = (); fileSystemSynchronizedGroups = (4E4F4E410000000000000006 /* NonanonaShare */, ); name = NonanonaShare; packageProductDependencies = (4E4F4E41000000000000000D /* ReceiptImport */, ); productName = NonanonaShare; productReference = 4E4F4E410000000000000002 /* NonanonaShare.appex */; productType = "com.apple.product-type.app-extension";};
+		4E4F4E410000000000000035 = {isa = PBXNativeTarget; buildConfigurationList = 4E4F4E41000000000000002E; buildPhases = (4E4F4E410000000000000017, 4E4F4E410000000000000018, 4E4F4E410000000000000019, ); buildRules = ( ); dependencies = (4E4F4E410000000000000023, ); fileSystemSynchronizedGroups = (4E4F4E410000000000000007 /* NonanonaTests */, ); name = NonanonaTests; productName = NonanonaTests; productReference = 4E4F4E410000000000000003 /* NonanonaTests.xctest */; productType = "com.apple.product-type.bundle.unit-test";};
+		4E4F4E410000000000000036 = {isa = PBXNativeTarget; buildConfigurationList = 4E4F4E410000000000000031; buildPhases = (4E4F4E41000000000000001A, 4E4F4E41000000000000001B, 4E4F4E41000000000000001C, ); buildRules = ( ); dependencies = (4E4F4E410000000000000025, ); fileSystemSynchronizedGroups = (4E4F4E410000000000000008 /* NonanonaUITests */, ); name = NonanonaUITests; productName = NonanonaUITests; productReference = 4E4F4E410000000000000004 /* NonanonaUITests.xctest */; productType = "com.apple.product-type.bundle.ui-testing";};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		4E4F4E41000000000000001D = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 2720; LastUpgradeCheck = 2720; TargetAttributes = {4E4F4E410000000000000021 = {CreatedOnToolsVersion = 27.2; }; 4E4F4E41000000000000001E = {CreatedOnToolsVersion = 27.2; }; 4E4F4E410000000000000035 = {CreatedOnToolsVersion = 27.2; TestTargetID = 4E4F4E410000000000000021; }; 4E4F4E410000000000000036 = {CreatedOnToolsVersion = 27.2; TestTargetID = 4E4F4E410000000000000021; }; }; }; buildConfigurationList = 4E4F4E410000000000000034; developmentRegion = ko; hasScannedForEncodings = 0; knownRegions = (ko, Base, ); mainGroup = 4E4F4E410000000000000038; minimizedProjectReferenceProxies = 1; packageReferences = (4E4F4E41000000000000000A /* XCLocalSwiftPackageReference "Packages/ReceiptImport" */, ); preferredProjectObjectVersion = 77; productRefGroup = 4E4F4E410000000000000037 /* Products */; projectDirPath = ""; projectRoot = ""; targets = (4E4F4E410000000000000021, 4E4F4E41000000000000001E, 4E4F4E410000000000000035, 4E4F4E410000000000000036, );};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		4E4F4E410000000000000013 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0;};
+		4E4F4E410000000000000016 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0;};
+		4E4F4E410000000000000019 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0;};
+		4E4F4E41000000000000001C = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0;};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		4E4F4E410000000000000011 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0;};
+		4E4F4E410000000000000014 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0;};
+		4E4F4E410000000000000017 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0;};
+		4E4F4E41000000000000001A = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ( ); runOnlyForDeploymentPostprocessing = 0;};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		4E4F4E410000000000000020 = {isa = PBXTargetDependency; target = 4E4F4E41000000000000001E /* NonanonaShare */; targetProxy = 4E4F4E41000000000000001F /* PBXContainerItemProxy */;};
+		4E4F4E410000000000000023 = {isa = PBXTargetDependency; target = 4E4F4E410000000000000021 /* Nonanona */; targetProxy = 4E4F4E410000000000000022 /* PBXContainerItemProxy */;};
+		4E4F4E410000000000000025 = {isa = PBXTargetDependency; target = 4E4F4E410000000000000021 /* Nonanona */; targetProxy = 4E4F4E410000000000000024 /* PBXContainerItemProxy */;};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		4E4F4E410000000000000026 = {isa = XCBuildConfiguration; buildSettings = { CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; MARKETING_VERSION = 0.1.0; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; SWIFT_EMIT_LOC_STRINGS = YES; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = app.nonanona; CODE_SIGN_ENTITLEMENTS = Config/Nonanona.entitlements; INFOPLIST_FILE = Config/Nonanona-Info.plist; INFOPLIST_KEY_CFBundleDisplayName = "노나노나"; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait; INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO; }; name = Debug;};
+		4E4F4E410000000000000027 = {isa = XCBuildConfiguration; buildSettings = { CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; MARKETING_VERSION = 0.1.0; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; SWIFT_EMIT_LOC_STRINGS = YES; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = app.nonanona; CODE_SIGN_ENTITLEMENTS = Config/Nonanona.entitlements; INFOPLIST_FILE = Config/Nonanona-Info.plist; INFOPLIST_KEY_CFBundleDisplayName = "노나노나"; INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES; INFOPLIST_KEY_UILaunchScreen_Generation = YES; INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait; INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO; }; name = Release;};
+		4E4F4E410000000000000029 = {isa = XCBuildConfiguration; buildSettings = { CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; MARKETING_VERSION = 0.1.0; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; SWIFT_EMIT_LOC_STRINGS = YES; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = app.nonanona.share; CODE_SIGN_ENTITLEMENTS = Config/Nonanona.entitlements; INFOPLIST_FILE = Config/NonanonaShare-Info.plist; INFOPLIST_KEY_CFBundleDisplayName = "노나노나"; APPLICATION_EXTENSION_API_ONLY = YES; SKIP_INSTALL = YES; }; name = Debug;};
+		4E4F4E41000000000000002A = {isa = XCBuildConfiguration; buildSettings = { CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; MARKETING_VERSION = 0.1.0; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; SWIFT_EMIT_LOC_STRINGS = YES; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = app.nonanona.share; CODE_SIGN_ENTITLEMENTS = Config/Nonanona.entitlements; INFOPLIST_FILE = Config/NonanonaShare-Info.plist; INFOPLIST_KEY_CFBundleDisplayName = "노나노나"; APPLICATION_EXTENSION_API_ONLY = YES; SKIP_INSTALL = YES; }; name = Release;};
+		4E4F4E41000000000000002C = {isa = XCBuildConfiguration; buildSettings = { CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; MARKETING_VERSION = 0.1.0; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; SWIFT_EMIT_LOC_STRINGS = YES; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = app.nonanona.tests; BUNDLE_LOADER = "$(TEST_HOST)"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Nonanona.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Nonanona"; }; name = Debug;};
+		4E4F4E41000000000000002D = {isa = XCBuildConfiguration; buildSettings = { CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; MARKETING_VERSION = 0.1.0; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; SWIFT_EMIT_LOC_STRINGS = YES; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = app.nonanona.tests; BUNDLE_LOADER = "$(TEST_HOST)"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Nonanona.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Nonanona"; }; name = Release;};
+		4E4F4E41000000000000002F = {isa = XCBuildConfiguration; buildSettings = { CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; MARKETING_VERSION = 0.1.0; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; SWIFT_EMIT_LOC_STRINGS = YES; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = app.nonanona.uitests; TEST_TARGET_NAME = Nonanona; }; name = Debug;};
+		4E4F4E410000000000000030 = {isa = XCBuildConfiguration; buildSettings = { CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; MARKETING_VERSION = 0.1.0; PRODUCT_NAME = "$(TARGET_NAME)"; SWIFT_VERSION = 6.0; TARGETED_DEVICE_FAMILY = 1; SWIFT_EMIT_LOC_STRINGS = YES; GENERATE_INFOPLIST_FILE = YES; PRODUCT_BUNDLE_IDENTIFIER = app.nonanona.uitests; TEST_TARGET_NAME = Nonanona; }; name = Release;};
+		4E4F4E410000000000000032 = {isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; ENABLE_STRICT_OBJC_MSGSEND = YES; ENABLE_USER_SCRIPT_SANDBOXING = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; LOCALIZATION_PREFERS_STRING_CATALOGS = YES; SWIFT_STRICT_CONCURRENCY = complete; "CODE_SIGN_IDENTITY[sdk=iphonesimulator*]" = "-"; DEBUG_INFORMATION_FORMAT = dwarf; ENABLE_TESTABILITY = YES; ONLY_ACTIVE_ARCH = YES; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; GCC_OPTIMIZATION_LEVEL = 0; }; name = Debug;};
+		4E4F4E410000000000000033 = {isa = XCBuildConfiguration; buildSettings = { ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; ENABLE_STRICT_OBJC_MSGSEND = YES; ENABLE_USER_SCRIPT_SANDBOXING = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SDKROOT = iphoneos; LOCALIZATION_PREFERS_STRING_CATALOGS = YES; SWIFT_STRICT_CONCURRENCY = complete; "CODE_SIGN_IDENTITY[sdk=iphonesimulator*]" = "-"; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; SWIFT_COMPILATION_MODE = wholemodule; SWIFT_OPTIMIZATION_LEVEL = "-O"; VALIDATE_PRODUCT = YES; }; name = Release;};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		4E4F4E410000000000000028 = {isa = XCConfigurationList; buildConfigurations = (4E4F4E410000000000000026 /* Debug */, 4E4F4E410000000000000027 /* Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+		4E4F4E41000000000000002B = {isa = XCConfigurationList; buildConfigurations = (4E4F4E410000000000000029 /* Debug */, 4E4F4E41000000000000002A /* Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+		4E4F4E41000000000000002E = {isa = XCConfigurationList; buildConfigurations = (4E4F4E41000000000000002C /* Debug */, 4E4F4E41000000000000002D /* Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+		4E4F4E410000000000000031 = {isa = XCConfigurationList; buildConfigurations = (4E4F4E41000000000000002F /* Debug */, 4E4F4E410000000000000030 /* Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+		4E4F4E410000000000000034 = {isa = XCConfigurationList; buildConfigurations = (4E4F4E410000000000000032 /* Debug */, 4E4F4E410000000000000033 /* Release */, ); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		4E4F4E41000000000000000A = {isa = XCLocalSwiftPackageReference; relativePath = Packages/ReceiptImport;};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		4E4F4E41000000000000000B = {isa = XCSwiftPackageProductDependency; package = 4E4F4E41000000000000000A /* XCLocalSwiftPackageReference "Packages/ReceiptImport" */; productName = ReceiptImport;};
+		4E4F4E41000000000000000D = {isa = XCSwiftPackageProductDependency; package = 4E4F4E41000000000000000A /* XCLocalSwiftPackageReference "Packages/ReceiptImport" */; productName = ReceiptImport;};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 4E4F4E41000000000000001D /* Project object */;
+}

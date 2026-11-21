@@ -4,4 +4,9 @@ pre-commit:
     gitleaks:
       # 스테이징된 변경만 검사한다. 오탐은 .gitleaks.toml에 좁게 허용한다.
       run: gitleaks git --pre-commit --staged --redact --no-banner --config .gitleaks.toml
-    # 언어별 린터·포매터는 여기에 glob과 함께 추가한다.
+    swift-format:
+      glob: "apps/ios/**/*.swift"
+      run: xcrun swift-format lint --strict {staged_files}
+    ktlint:
+      glob: "apps/android/**/*.{kt,kts}"
+      run: ktlint {staged_files}

@@ -1,0 +1,4 @@
+# Gradle 기본값: Windows 배치 파일은 CRLF, 셸 스크립트는 LF, JAR은 바이너리.
+/gradlew text eol=lf
+*.bat text eol=crlf
+*.jar binary

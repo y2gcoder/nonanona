@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 디버그 빌드에만 들어가는 문구. release에는 이 파일이 없다. -->
+<resources>
+    <string name="test_login_notice">테스트 로그인 · 실제 계정에 연결하지 않아요</string>
+</resources>

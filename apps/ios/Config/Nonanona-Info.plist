@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- 나머지 키는 빌드 설정(INFOPLIST_KEY_*)으로 만든다. 운영 도메인의 Universal Links는 서버 준비와 함께 붙인다. -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.nonanona.invite</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>nonanona</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

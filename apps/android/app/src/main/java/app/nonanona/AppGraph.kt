@@ -33,14 +33,25 @@ class DraftUploadContext(
     val confirmedCount: Int,
     val state: UploadState,
     val signedIn: Boolean,
-    val onUpload: () -> Unit,
+    val onRequest: () -> Unit,
     val onLogin: () -> Unit,
 )
 
 /** debug 빌드만 제공하는 올리기 화면(문구도 debug 리소스). */
-fun interface DebugUploadUi {
+interface DebugUploadUi {
     @Composable
     fun Section(context: DraftUploadContext)
+
+    /**
+     * 올릴 곳·장수 최종 확인. 앱 맨 위(NonanonaApp)에서 한 번만 띄운다(iOS와 같은 구조). 창 크기·접기로 장면(한 칸↔두 칸)이
+     * 바뀌어 초안 화면이 다시 그려져도 확인 창은 그대로 남는다.
+     */
+    @Composable
+    fun Confirmation(
+        confirmation: UploadConfirmation,
+        onConfirm: (UploadConfirmation) -> Unit,
+        onCancel: () -> Unit,
+    )
 }
 
 /** debug 빌드만 제공하는 개발용 확인. 버튼 문구도 debug 리소스에서 온다. */

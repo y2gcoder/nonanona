@@ -4,29 +4,44 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia
 import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
+import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
+import androidx.compose.material3.adaptive.navigation3.rememberListDetailSceneStrategy
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation3.runtime.entryProvider
+import androidx.navigation3.scene.SinglePaneSceneStrategy
 import androidx.navigation3.ui.NavDisplay
+import app.nonanona.design.Spacing
+import app.nonanona.design.TextRoles
+import app.nonanona.design.rememberPaneDirective
 import app.nonanona.feature.account.LoginSheet
 import app.nonanona.feature.account.LoginState
 import app.nonanona.feature.receiptimport.DraftScreen
 import app.nonanona.feature.receiptimport.DraftSource
-import app.nonanona.feature.receiptimport.ItemState
 import app.nonanona.feature.receiptimport.ReceiptDraftStore
 import app.nonanona.feature.trip.InviteScreen
 import app.nonanona.feature.trip.TripRoomScreen
 
-@OptIn(ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalComposeUiApi::class, ExperimentalMaterial3AdaptiveApi::class)
 @Composable
 fun NonanonaApp(viewModel: AppViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -49,41 +64,52 @@ fun NonanonaApp(viewModel: AppViewModel) {
         snackbarHostState.showSnackbar(message)
     }
 
+    // 넓은 창(또는 세로 접힘이 나눈 창)에서는 목록(홈) 옆에 고른 화면을, 좁은 창에서는 한 화면씩 보인다.
+    val directive = rememberPaneDirective()
+    val listDetail = rememberListDetailSceneStrategy<Route>(directive = directive)
+    val twoPane = directive.maxHorizontalPartitions > 1
+    val top = viewModel.backStack.lastOrNull()
+
+    // 스낵바는 맨 위 화면 하나만 띄운다(두 칸이 같은 스낵바를 겹쳐 그리지 않게).
+    fun snackbarFor(route: Route) = snackbarHostState.takeIf { route == top }
+
     NavDisplay(
         backStack = viewModel.backStack,
         onBack = viewModel::back,
         modifier = Modifier.semantics { testTagsAsResourceId = true },
+        // 두 칸이 안 되면(좁은 창) 목록·상세 전략이 비켜서고 한 화면 전략이 그린다.
+        sceneStrategies = listOf(listDetail, SinglePaneSceneStrategy()),
         entryProvider =
             entryProvider {
-                entry<Route.Home> {
+                entry<Route.Home>(metadata = ListDetailSceneStrategy.listPane(detailPlaceholder = { DetailPlaceholder() })) {
                     HomeScreen(
                         state = state,
-                        snackbarHostState = snackbarHostState,
+                        snackbarHostState = snackbarFor(Route.Home),
+                        selectedDraftId = (top as? Route.Draft)?.id.takeIf { twoPane },
                         onPickPhotos = { pickPhotos.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly)) },
-                        onOpenDraft = { viewModel.navigate(Route.Draft(it)) },
-                        onOpenInvite = { viewModel.navigate(Route.Invite) },
+                        onOpenDraft = { viewModel.openDetail(Route.Draft(it)) },
+                        onOpenInvite = { viewModel.openDetail(Route.Invite) },
                     )
                 }
-                entry<Route.Draft> { route ->
+                entry<Route.Draft>(metadata = ListDetailSceneStrategy.detailPane()) { route ->
                     DraftScreen(
                         draft = state.drafts.firstOrNull { it.id == route.id },
                         processing = state.processing[route.id],
-                        snackbarHostState = snackbarHostState,
+                        snackbarHostState = snackbarFor(route),
                         onRetry = { viewModel.retryPhoto(route.id, it) },
                         debugConfirmLabel = viewModel.debugConfirmLabel,
                         onDebugConfirm = { viewModel.debugConfirm(route.id, it) },
-                        onBack = viewModel::back,
+                        onBack = viewModel::back.takeUnless { twoPane },
                         extraSection =
                             viewModel.debugUploadUi?.let { ui ->
                                 {
                                     ui.Section(
                                         DraftUploadContext(
                                             destination = state.room,
-                                            confirmedCount =
-                                                state.processing[route.id]?.items?.count { it.state == ItemState.Confirmed } ?: 0,
+                                            confirmedCount = state.confirmedCount(route.id),
                                             state = state.uploads[route.id] ?: UploadState.Idle,
                                             signedIn = state.session != null,
-                                            onUpload = { state.room?.let { viewModel.uploadConfirmedReceipts(route.id, it) } },
+                                            onRequest = { viewModel.requestUpload(route.id) },
                                             onLogin = viewModel::showLogin,
                                         ),
                                     )
@@ -91,21 +117,30 @@ fun NonanonaApp(viewModel: AppViewModel) {
                             },
                     )
                 }
-                entry<Route.Invite> {
+                entry<Route.Invite>(metadata = ListDetailSceneStrategy.detailPane()) {
                     InviteScreen(
                         signedIn = state.session != null,
                         join = state.join,
-                        snackbarHostState = snackbarHostState,
+                        snackbarHostState = snackbarFor(Route.Invite),
                         onLogin = viewModel::showLogin,
                         onJoin = viewModel::join,
-                        onBack = viewModel::back,
+                        onBack = viewModel::back.takeUnless { twoPane },
                     )
                 }
-                entry<Route.Room> {
-                    state.room?.let { room -> TripRoomScreen(room, state.drafts.size, snackbarHostState, onBack = viewModel::back) }
+                entry<Route.Room>(metadata = ListDetailSceneStrategy.detailPane()) {
+                    state.room?.let { room ->
+                        TripRoomScreen(room, state.drafts.size, snackbarFor(Route.Room), onBack = viewModel::back.takeUnless { twoPane })
+                    }
                 }
             },
     )
+
+    // 최종 확인과 로그인 시트는 화면 배치와 상관없이 한 번만 띄운다(상태는 ViewModel에 있다).
+    val confirmation = state.uploadConfirmation
+    val debugUploadUi = viewModel.debugUploadUi
+    if (confirmation != null && debugUploadUi != null) {
+        debugUploadUi.Confirmation(confirmation, viewModel::confirmUpload, viewModel::cancelUploadConfirmation)
+    }
 
     if (state.login != LoginState.Hidden) {
         LoginSheet(
@@ -114,6 +149,23 @@ fun NonanonaApp(viewModel: AppViewModel) {
             testOnlyNotice = viewModel.testOnlyNotice,
             onSignIn = viewModel::signIn,
             onDismiss = viewModel::dismissLogin,
+        )
+    }
+}
+
+/** 넓은 창에서 아직 아무것도 고르지 않았을 때 목록 옆에 보인다. 좁은 창에서는 보이지 않는다. */
+@Composable
+private fun DetailPlaceholder() {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(Spacing.l).testTag("detail_placeholder"),
+        verticalArrangement = Arrangement.spacedBy(Spacing.xs, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(stringResource(R.string.detail_placeholder_title), style = TextRoles.sectionTitle)
+        Text(
+            stringResource(R.string.detail_placeholder_body),
+            style = TextRoles.supporting,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
 }

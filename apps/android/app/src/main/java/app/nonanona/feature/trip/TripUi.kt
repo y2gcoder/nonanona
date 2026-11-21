@@ -38,6 +38,7 @@ import app.nonanona.design.Spacing
 import app.nonanona.design.StatusLabel
 import app.nonanona.design.StatusRole
 import app.nonanona.design.TextRoles
+import app.nonanona.design.readableWidth
 
 sealed interface JoinState {
     data object Idle : JoinState
@@ -74,20 +75,24 @@ fun PendingInviteCard(
 fun InviteScreen(
     signedIn: Boolean,
     join: JoinState,
-    snackbarHostState: SnackbarHostState,
+    snackbarHostState: SnackbarHostState?,
     onLogin: () -> Unit,
     onJoin: () -> Unit,
-    onBack: () -> Unit,
+    /** 목록 옆에 보일 때(두 칸)는 null. */
+    onBack: (() -> Unit)?,
 ) {
     Scaffold(
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.invite_title)) }, navigationIcon = { NavigateBackButton(onBack) }) },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            TopAppBar(title = { Text(stringResource(R.string.invite_title)) }, navigationIcon = { onBack?.let { NavigateBackButton(it) } })
+        },
+        snackbarHost = { snackbarHostState?.let { SnackbarHost(it) } },
     ) { padding ->
         Column(
             modifier =
                 Modifier
                     .fillMaxSize()
                     .padding(padding)
+                    .readableWidth()
                     .verticalScroll(rememberScrollState())
                     .padding(Spacing.m)
                     .testTag("invite_screen"),
@@ -167,16 +172,17 @@ private fun InviteAcceptFailure.messageRes(): Int =
 fun TripRoomScreen(
     room: TripRoom,
     localDraftCount: Int,
-    snackbarHostState: SnackbarHostState,
-    onBack: () -> Unit,
+    snackbarHostState: SnackbarHostState?,
+    /** 목록 옆에 보일 때(두 칸)는 null. */
+    onBack: (() -> Unit)?,
 ) {
     Scaffold(
-        topBar = { TopAppBar(title = { Text(room.name) }, navigationIcon = { NavigateBackButton(onBack) }) },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = { TopAppBar(title = { Text(room.name) }, navigationIcon = { onBack?.let { NavigateBackButton(it) } }) },
+        snackbarHost = { snackbarHostState?.let { SnackbarHost(it) } },
     ) { padding ->
         LazyColumn(
             contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding() + Spacing.l),
-            modifier = Modifier.fillMaxSize().testTag("room_screen"),
+            modifier = Modifier.fillMaxSize().readableWidth().testTag("room_screen"),
         ) {
             item {
                 Column(

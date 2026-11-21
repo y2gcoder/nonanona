@@ -19,7 +19,10 @@ extension XCTestCase {
     XCTAssertTrue(first.waitForExistence(timeout: 10), "가상 영수증이 사진 앱에 있어야 한다")
     photos.buttons["Select"].tap()
     for label in labels {
-      photos.images.matching(NSPredicate(format: "label CONTAINS %@", label)).firstMatch.tap()
+      // 낮은 창(예: iPhone Duo 바깥 화면)에서는 사진이 하단 선택 막대 아래에 있을 수 있다. 눌릴 때까지 격자를 올린다.
+      let image = photos.images.matching(NSPredicate(format: "label CONTAINS %@", label)).firstMatch
+      for _ in 0..<3 where !image.isHittable { photos.swipeUp(velocity: .slow) }
+      image.tap()
     }
     photos.buttons["Share"].tap()
     let ours = photos.cells.matching(NSPredicate(format: "label == '노나노나'")).firstMatch

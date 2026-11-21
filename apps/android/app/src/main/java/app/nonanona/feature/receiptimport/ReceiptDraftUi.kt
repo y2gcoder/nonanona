@@ -3,7 +3,6 @@ package app.nonanona.feature.receiptimport
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,9 +18,11 @@ import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -48,6 +49,7 @@ import app.nonanona.design.Spacing
 import app.nonanona.design.StatusLabel
 import app.nonanona.design.StatusRole
 import app.nonanona.design.TextRoles
+import app.nonanona.design.readableWidth
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -64,6 +66,7 @@ private fun ReceiptDraft.createdAtText(): String =
 @Composable
 fun DraftRow(
     draft: ReceiptDraft,
+    selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -73,7 +76,15 @@ fun DraftRow(
             DraftSource.Picker -> stringResource(R.string.draft_source_picker)
         }
     ListItem(
-        modifier = modifier.clickable(onClick = onClick),
+        modifier = modifier.selectable(selected = selected, onClick = onClick),
+        // 넓은 창에서 목록 옆에 열린 초안을 표시한다(좁은 창에서는 항상 고르지 않은 상태).
+        // 상태 라벨 바탕(surfaceContainerHighest)과 구분되는 한 단계 낮은 container를 쓴다.
+        colors =
+            if (selected) {
+                ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
+            } else {
+                ListItemDefaults.colors()
+            },
         headlineContent = { Text(pluralStringResource(R.plurals.draft_photo_count, draft.photos.size, draft.photos.size)) },
         supportingContent = {
             // 상태 라벨을 줄 끝이 아니라 아래에 두어 큰 글자에서도 날짜가 좁은 칸에 갇히지 않게 한다(iOS와 같은 배치).
@@ -104,22 +115,25 @@ fun DraftsEmpty(modifier: Modifier = Modifier) {
 fun DraftScreen(
     draft: ReceiptDraft?,
     processing: ProcessingManifest?,
-    snackbarHostState: SnackbarHostState,
+    snackbarHostState: SnackbarHostState?,
     onRetry: (String) -> Unit,
     debugConfirmLabel: String?,
     onDebugConfirm: (String) -> Unit,
-    onBack: () -> Unit,
+    /** 목록 옆에 보일 때(두 칸)는 null: 뒤로 가기 화살표를 두지 않는다. 시스템 뒤로 가기는 그대로다. */
+    onBack: (() -> Unit)?,
     /** 개발용 올리기처럼 앱 계층이 넣는 화면 조각. release에서는 null. */
     extraSection: (@Composable () -> Unit)? = null,
 ) {
     Scaffold(
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.draft_title)) }, navigationIcon = { NavigateBackButton(onBack) }) },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
+        topBar = {
+            TopAppBar(title = { Text(stringResource(R.string.draft_title)) }, navigationIcon = { onBack?.let { NavigateBackButton(it) } })
+        },
+        snackbarHost = { snackbarHostState?.let { SnackbarHost(it) } },
     ) { padding ->
         if (draft == null) return@Scaffold
         LazyColumn(
             contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding() + Spacing.l),
-            modifier = Modifier.fillMaxSize().testTag("draft_screen"),
+            modifier = Modifier.fillMaxSize().readableWidth().testTag("draft_screen"),
         ) {
             item {
                 Column(

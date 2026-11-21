@@ -79,4 +79,7 @@
     <plurals name="room_drafts_note">
         <item quantity="other">영수증 초안 %d장은 아직 이 기기에만 있어요.</item>
     </plurals>
+    <!-- 넓은 창에서 목록 옆이 비었을 때 -->
+    <string name="detail_placeholder_title">초안을 골라 주세요</string>
+    <string name="detail_placeholder_body">목록에서 초안을 고르면 여기에 보여요.</string>
 </resources>

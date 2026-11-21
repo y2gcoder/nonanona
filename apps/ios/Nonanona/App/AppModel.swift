@@ -22,6 +22,14 @@ enum UploadState: Equatable {
   case failed(ReceiptUploadFailure, uploadedBefore: Int)
 }
 
+/// 올리기 최종 확인 창이 묻고 있는 것. 창 크기·접기·회전으로 화면이 다시 그려져도 같은 초안·같은 올릴 곳을 묻는다.
+struct UploadConfirmation: Equatable {
+  let draftID: String
+  let tripID: TripID
+  let tripName: String
+  let count: Int
+}
+
 enum JoinState: Equatable {
   case idle
   case joining
@@ -31,7 +39,8 @@ enum JoinState: Equatable {
 /// 화면 상태와 화면 이동. 저장과 경계 호출은 저장소·`JoinFlow`에 맡긴다.
 @MainActor @Observable
 final class AppModel {
-  var path: [Route] = []
+  /// 목록 옆(넓은 창)이나 목록 위(좁은 창)에 보이는 화면. 안정 ID로만 가리키므로 창 크기가 바뀌어도 같은 화면이 남는다.
+  var selection: Route?
   private(set) var loaded = false
   private(set) var drafts: [ReceiptDraft] = []
   private(set) var session: AccountSession?
@@ -45,6 +54,8 @@ final class AppModel {
   private var processors: [String: ReceiptProcessor] = [:]
   /// 초안별 올리기 상태. 개발용 올리기 화면이 쓴다.
   private(set) var uploads: [String: UploadState] = [:]
+  /// 열려 있는 올리기 최종 확인. 화면이 아니라 모델에 두어 화면 배치가 바뀌어도 닫히지 않는다.
+  private(set) var uploadConfirmation: UploadConfirmation?
 
   let graph: AppGraph
   var signInProviders: [SignInProvider] { graph.auth.providers }
@@ -61,7 +72,7 @@ final class AppModel {
     session = await graph.joinFlow.restoreSession()
     loaded = true
     // 로그인 도중 앱이 종료됐다면 다시 열 때 그 초대 화면으로 돌아간다.
-    if pendingInvite != nil, !path.contains(.invite) { path.append(.invite) }
+    if pendingInvite != nil, selection != .invite { selection = .invite }
   }
 
   /// 공유 확장이 App Group에 초안을 더했을 수 있으므로 앱이 앞으로 올 때마다 다시 읽는다.
@@ -91,6 +102,27 @@ final class AppModel {
         await processor.run()
       }
     }
+  }
+
+  /// 올릴 곳과 장수를 묻는 최종 확인을 연다. 참여한 여행방, 로그인, 확인한 영수증이 있을 때만 연다.
+  func requestUpload(draftID: String) {
+    let count = confirmedCount(draftID: draftID)
+    guard let room, session != nil, count > 0, uploads[draftID] != .uploading else { return }
+    uploadConfirmation = UploadConfirmation(draftID: draftID, tripID: room.id, tripName: room.name, count: count)
+  }
+
+  func cancelUploadConfirmation() { uploadConfirmation = nil }
+
+  /// 사용자가 본 확인 창의 값 그대로 올린다. 그사이 올릴 곳이 바뀌었으면 올리지 않는다.
+  /// 확인 창이 닫히는 순서(바인딩이 먼저 풀리는지)에 기대지 않도록 모델의 확인 값이 아니라 받은 값으로 판단한다.
+  func confirmUpload(_ confirmation: UploadConfirmation) {
+    uploadConfirmation = nil
+    guard let room, room.id == confirmation.tripID else { return }
+    Task { await uploadConfirmedReceipts(draftID: confirmation.draftID, to: room) }
+  }
+
+  func confirmedCount(draftID: String) -> Int {
+    processing[draftID]?.items.filter { $0.state == .confirmed }.count ?? 0
   }
 
   /// 확인한 영수증을 참여한 여행방에 올린다. 사용자가 올릴 곳과 장수를 보고 최종 확인한 뒤에만 부른다.
@@ -160,7 +192,8 @@ final class AppModel {
     }
     room = nil
     join = .idle
-    path = [.invite]
+    uploadConfirmation = nil
+    selection = .invite
   }
 
   func importPhotos(_ photos: [IncomingPhoto], source: DraftSource) {
@@ -216,7 +249,8 @@ final class AppModel {
       self.room = room
       pendingInvite = nil
       join = .idle
-      path = [.room]
+      uploadConfirmation = nil
+      selection = .room
     case .noPendingInvite:
       join = .idle
     case .failed(let failure):

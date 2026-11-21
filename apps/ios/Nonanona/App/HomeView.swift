@@ -7,7 +7,8 @@ struct HomeView: View {
   @State private var pickedItems: [PhotosPickerItem] = []
 
   var body: some View {
-    List {
+    // 고른 행은 모델의 selection으로만 나타낸다. 넓은 창에서는 고른 행이 강조되고, 좁은 창에서는 그 화면이 위에 쌓인다.
+    List(selection: $model.selection) {
       Section {
         if let session = model.session {
           StatusLabel("로그인됨 · \(session.displayName)", role: .positive)
@@ -22,7 +23,7 @@ struct HomeView: View {
 
       if model.pendingInvite != nil {
         Section {
-          PendingInviteCard { model.path.append(.invite) }
+          PendingInviteCard { model.selection = .invite }
         }
       }
 
@@ -40,6 +41,10 @@ struct HomeView: View {
         Text("영수증 초안").textRole(.sectionTitle).foregroundStyle(.primary).textCase(nil)
       }
     }
+    // 분할 보기의 사이드바 기본 모양(sidebar) 대신 지금 디자인의 그룹 목록을 그대로 쓴다.
+    .listStyle(.insetGrouped)
+    .accessibilityIdentifier("home-screen")
+    .adaptiveContentMargins()
     .navigationTitle("노나노나")
     .toolbar {
       ToolbarItem(placement: .bottomBar) {

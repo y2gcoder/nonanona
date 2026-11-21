@@ -60,6 +60,7 @@ struct InviteView: View {
       .frame(maxWidth: .infinity, alignment: .leading)
       .padding(Spacing.m)
     }
+    .adaptiveContentMargins()
     .navigationTitle("여행방 초대")
     .navigationBarTitleDisplayMode(.inline)
     .accessibilityIdentifier("invite-screen")
@@ -126,6 +127,7 @@ struct TripRoomView: View {
         }
       }
     }
+    .adaptiveContentMargins()
     .navigationTitle(room.name)
     .accessibilityIdentifier("room-screen")
   }

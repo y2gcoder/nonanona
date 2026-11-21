@@ -3,9 +3,13 @@ package app.nonanona.feature.account
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -27,6 +31,7 @@ import app.nonanona.design.Spacing
 import app.nonanona.design.StatusLabel
 import app.nonanona.design.StatusRole
 import app.nonanona.design.TextRoles
+import app.nonanona.design.foldAwareOverlayPlacement
 
 sealed interface LoginState {
     data object Hidden : LoginState
@@ -49,15 +54,21 @@ fun LoginSheet(
     onSignIn: (SignInProvider) -> Unit,
     onDismiss: () -> Unit,
 ) {
+    // 세로 접힘이 창을 나누면 시트를 넓은 쪽에만 둔다(시스템이 시트를 접힘에서 옮겨 주지 않는다).
+    val placement = foldAwareOverlayPlacement()
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        modifier = placement?.let { Modifier.absoluteOffset(x = it.offsetX) } ?: Modifier,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        sheetMaxWidth = placement?.maxWidth ?: BottomSheetDefaults.SheetMaxWidth,
     ) {
         Column(
             modifier =
                 Modifier
                     .semantics { testTagsAsResourceId = true }
                     .testTag("login_sheet")
+                    // 낮은 창(가로, 큰 글자)에서도 모든 버튼에 스크롤로 닿는다.
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = Spacing.m)
                     .padding(bottom = Spacing.l),
             verticalArrangement = Arrangement.spacedBy(Spacing.m),

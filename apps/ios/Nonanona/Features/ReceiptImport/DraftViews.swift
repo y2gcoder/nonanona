@@ -80,9 +80,7 @@ struct DraftView: View {
       }
       #if DEBUG
         if let upload {
-          DebugUploadSection(
-            destination: upload.destination, confirmedCount: upload.confirmedCount, state: upload.state,
-            signedIn: upload.signedIn, onUpload: upload.onUpload, onLogin: upload.onLogin)
+          DebugUploadSection(context: upload)
         }
       #endif
       Section {
@@ -95,19 +93,20 @@ struct DraftView: View {
         Text("사진 \(photoURLs.count)장").textRole(.sectionTitle).foregroundStyle(.primary).textCase(nil)
       }
     }
+    .adaptiveContentMargins()
     .navigationTitle("초안")
     .navigationBarTitleDisplayMode(.inline)
     .accessibilityIdentifier("draft-screen")
   }
 }
 
-/// 초안 화면이 개발용 올리기 화면에 넘기는 값.
+/// 초안 화면이 개발용 올리기 화면에 넘기는 값. 최종 확인은 모델이 가지고 `RootView`가 띄운다(화면 배치가 바뀌어도 남는다).
 struct DraftUploadContext {
   let destination: TripRoom?
   let confirmedCount: Int
   let state: UploadState
   let signedIn: Bool
-  let onUpload: () -> Void
+  let onRequest: () -> Void
   let onLogin: () -> Void
 }
 

@@ -2,22 +2,25 @@ package app.nonanona
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.window.DialogProperties
 import app.nonanona.design.Spacing
 import app.nonanona.design.TextRoles
+import app.nonanona.design.foldAwareOverlayPlacement
 import app.nonanona.feature.trip.ReceiptUploadFailure
 
 /**
@@ -27,7 +30,6 @@ import app.nonanona.feature.trip.ReceiptUploadFailure
 object DebugUploadSection : DebugUploadUi {
     @Composable
     override fun Section(context: DraftUploadContext) {
-        var confirming by remember { mutableStateOf(false) }
         Column(
             verticalArrangement = Arrangement.spacedBy(Spacing.s),
             modifier = Modifier.padding(horizontal = Spacing.m, vertical = Spacing.s).testTag("upload_section"),
@@ -58,27 +60,40 @@ object DebugUploadSection : DebugUploadUi {
                 }
             }
             OutlinedButton(
-                onClick = { confirming = true },
+                onClick = context.onRequest,
                 enabled = context.confirmedCount > 0 && context.state != UploadState.Uploading && context.signedIn,
                 modifier = Modifier.testTag("upload_start"),
             ) {
                 Text(stringResource(R.string.debug_upload_start))
             }
-            if (confirming) {
-                AlertDialog(
-                    onDismissRequest = { confirming = false },
-                    title = { Text(stringResource(R.string.debug_upload_confirm_title, destination.name, context.confirmedCount)) },
-                    text = { Text(stringResource(R.string.debug_upload_confirm_body)) },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            confirming = false
-                            context.onUpload()
-                        }, modifier = Modifier.testTag("upload_final")) { Text(stringResource(R.string.debug_upload_final)) }
-                    },
-                    dismissButton = { TextButton(onClick = { confirming = false }) { Text(stringResource(R.string.debug_upload_cancel)) } },
-                )
-            }
         }
+    }
+
+    @OptIn(ExperimentalComposeUiApi::class)
+    @Composable
+    override fun Confirmation(
+        confirmation: UploadConfirmation,
+        onConfirm: (UploadConfirmation) -> Unit,
+        onCancel: () -> Unit,
+    ) {
+        // 세로 접힘이 창을 나누면 대화상자를 넓은 쪽 가운데에 둔다(시스템이 대화상자를 접힘에서 옮겨 주지 않는다).
+        val placement = foldAwareOverlayPlacement()
+        AlertDialog(
+            onDismissRequest = onCancel,
+            // 대화상자는 따로 창이므로 testTag를 리소스 id로 내보내는 설정을 여기서 다시 켠다(E2E가 찾는다).
+            modifier =
+                (placement?.let { Modifier.absoluteOffset(x = it.offsetX).widthIn(max = it.maxWidth - Spacing.l * 2) } ?: Modifier)
+                    .semantics { testTagsAsResourceId = true },
+            properties = DialogProperties(usePlatformDefaultWidth = placement == null),
+            title = { Text(stringResource(R.string.debug_upload_confirm_title, confirmation.tripName, confirmation.count)) },
+            text = { Text(stringResource(R.string.debug_upload_confirm_body)) },
+            confirmButton = {
+                TextButton(onClick = { onConfirm(confirmation) }, modifier = Modifier.testTag("upload_final")) {
+                    Text(stringResource(R.string.debug_upload_final))
+                }
+            },
+            dismissButton = { TextButton(onClick = onCancel) { Text(stringResource(R.string.debug_upload_cancel)) } },
+        )
     }
 
     @Composable

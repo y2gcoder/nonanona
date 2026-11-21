@@ -43,6 +43,7 @@ struct LoginSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(Spacing.m)
       }
+      .adaptiveContentMargins()
       .navigationTitle("로그인")
       .navigationBarTitleDisplayMode(.inline)
       .toolbar {

@@ -3,36 +3,44 @@
 
   /// 개발용 올리기: 참여한 여행방을 올릴 곳으로 보여 주고, 최종 확인을 받은 뒤에만 확인한 영수증을 올린다.
   /// 디자인이 정해지기 전의 검증용 화면이며 release 빌드에는 없다.
+  /// 올릴 곳·장수 최종 확인. 화면 맨 위(`RootView`)에서 한 번만 띄운다(Android AlertDialog와 같음).
+  /// 예전처럼 목록 행 안 버튼의 확인 시트로 두면 넓은 창에서 그 버튼을 가리키는 팝오버가 되는데, 열린 채 돌려 크기 종류가
+  /// 바뀌면 다시 뜨지 못하고 멈췄다(시뮬레이터에서 재현). 알림은 기준 뷰가 없고, 초안이 어느 열에 있든 한 번만 뜨며,
+  /// 시스템이 가운데(접힘을 피해) 둔다.
+  struct DebugUploadConfirmation: ViewModifier {
+    let confirmation: UploadConfirmation?
+    let onConfirm: (UploadConfirmation) -> Void
+    let onCancel: () -> Void
+
+    func body(content: Content) -> some View {
+      content.alert(
+        confirmation.map { "‘\($0.tripName)’에 영수증 \($0.count)장을 올릴까요?" } ?? "",
+        isPresented: Binding(get: { confirmation != nil }, set: { if !$0 { onCancel() } }),
+        presenting: confirmation
+      ) { confirmation in
+        Button("올리기") { onConfirm(confirmation) }.accessibilityIdentifier("upload-final")
+        Button("취소", role: .cancel, action: onCancel)
+      } message: { _ in
+        Text("가림을 확인한 사본과 날짜·금액·통화·가게만 올라가요.")
+      }
+    }
+  }
+
   struct DebugUploadSection: View {
-    let destination: TripRoom?
-    let confirmedCount: Int
-    let state: UploadState
-    let signedIn: Bool
-    let onUpload: () -> Void
-    let onLogin: () -> Void
-    @State private var confirming = false
+    let context: DraftUploadContext
 
     var body: some View {
       Section {
-        if let destination {
+        if let destination = context.destination {
           Text("올릴 곳: \(destination.name)").textRole(.body).accessibilityIdentifier("upload-destination")
-          Text("확인한 영수증 \(confirmedCount)장").textRole(.supporting)
+          Text("확인한 영수증 \(context.confirmedCount)장").textRole(.supporting)
           statusView
-          if !signedIn {
-            Button("다시 로그인하기", action: onLogin).accessibilityIdentifier("upload-login")
+          if !context.signedIn {
+            Button("다시 로그인하기", action: context.onLogin).accessibilityIdentifier("upload-login")
           }
-          Button("여행방에 올리기(개발용)") { confirming = true }
-            .disabled(confirmedCount == 0 || state == .uploading || !signedIn)
+          Button("여행방에 올리기(개발용)", action: context.onRequest)
+            .disabled(context.confirmedCount == 0 || context.state == .uploading || !context.signedIn)
             .accessibilityIdentifier("upload-start")
-            .confirmationDialog(
-              "‘\(destination.name)’에 영수증 \(confirmedCount)장을 올릴까요?", isPresented: $confirming,
-              titleVisibility: .visible
-            ) {
-              Button("올리기", action: onUpload).accessibilityIdentifier("upload-final")
-              Button("취소", role: .cancel) {}
-            } message: {
-              Text("가림을 확인한 사본과 날짜·금액·통화·가게만 올라가요.")
-            }
         } else {
           Text("참여한 여행방이 없어요. 초대 링크로 참여한 뒤 올릴 수 있어요.").textRole(.supporting)
         }
@@ -42,7 +50,7 @@
     }
 
     @ViewBuilder private var statusView: some View {
-      switch state {
+      switch context.state {
       case .idle: EmptyView()
       case .uploading:
         Text("올리는 중…").textRole(.supporting).accessibilityIdentifier("upload-status")

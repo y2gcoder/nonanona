@@ -4,7 +4,7 @@ iOS(SwiftUI)와 Android(Kotlin, Compose) 네이티브 앱의 뼈대다. 이번 �
 
 > 사진 앱·파일 앱에서 영수증 공유 → 로그인하지 않은 채 기기에 초안 저장 → 초대 링크 열기 → 로그인 → 열었던 초대의 여행방으로 돌아오기
 
-로그인 도중 앱 프로세스가 끝나도 초안과 열었던 초대는 남고, 다시 열면 그 초대 화면으로 돌아온다([ADR-0002](../docs/adr/0002-authentication-and-device-transfer.md)). debug 빌드는 같은 흐름을 **테스트 구현체**(기기 안, 기본값) 또는 **로컬 Supabase 모드**(Docker로 띄운 로컬 Auth + Postgres에 실제 HTTP로 로그인·초대 수락, 아래 절)로 돌린다. 실제 소셜 로그인, 클라우드 프로젝트, 운영 자격 증명은 없다. 화면 기준은 [모바일 디자인 기준](../docs/design/mobile-foundations.md)에 있다.
+로그인 도중 앱 프로세스가 끝나도 초안과 열었던 초대는 남고, 다시 열면 그 초대 화면으로 돌아온다([ADR-0002](../docs/adr/0002-authentication-and-device-transfer.md)). debug 빌드는 같은 흐름을 **테스트 구현체**(기기 안, 기본값) 또는 **로컬 Supabase 모드**(Docker로 띄운 로컬 Auth + Postgres에 실제 HTTP로 로그인·초대 수락, 아래 절)로 돌린다. 실제 소셜 로그인, 클라우드 프로젝트, 운영 자격 증명은 없다. 화면 기준은 [모바일 디자인 기준](../docs/design/mobile-foundations.md)에 있다. 두 앱은 첫 슬라이스부터 창 크기·회전·접히는 기기에 맞춰 배치한다(아래 "창 크기와 접기").
 
 ## 구성
 
@@ -111,6 +111,38 @@ mise run android:e2e-upload -- [증거 폴더]
 mise run local:down
 ```
 
+## 창 크기와 접기 (적응형 화면)
+
+기기 모델이 아니라 지금 창의 크기 종류·크기, 안전 영역, 시스템이 알려 주는 접힘으로 배치한다([ADR-0004](../docs/adr/0004-adaptive-layout.md), 크기별 기대치는 [디자인 기준](../docs/design/mobile-foundations.md#창-크기와-접기)). iOS는 세로·가로(양쪽)를 모두 지원한다(예전에는 세로 고정).
+
+- **목록·상세**: 홈이 목록, 초안·초대·여행방이 상세다. iOS `NavigationSplitView`(`.balanced`, 목록 숨기기 버튼 없음)는 가로 크기 종류가 regular이면 두 열, 아니면 한 화면씩 쌓는다. Android는 `NavDisplay`에 `ListDetailSceneStrategy`(material3-adaptive 1.3.0)를 주어 폭 840dp 이상이면 두 칸, 아니면 한 칸이다. 세로 separating hinge가 창을 나누면 폭과 상관없이 두 칸이고, 두 칸은 hinge 양쪽에 놓인다(`rememberPaneDirective`). 넓은 창에서 목록에서 고르면 상세를 바꾸고(쌓지 않음), 상세에는 뒤로 가기 화살표가 없다.
+- **읽기 폭·접힘 피하기**: 글 위주 목록·화면·시트는 넓은 창에서 640(pt·dp)으로 가운데에 둔다(iOS `adaptiveContentMargins`, Android `Modifier.readableWidth`). iOS 스크롤 여백은 `ReservedRegion` division 세로 접힘을 넓은 쪽으로 피하고, Android 로그인 시트·최종 확인은 hinge 넓은 쪽으로 옮긴다. 둘 다 같은 순수 함수 `ContentMargins.fitting`(두 앱 단위 테스트가 같은 경우를 본다)을 쓴다. 이 규칙은 `Design/Theme.swift`, `design/AdaptiveLayout.kt` 한 곳에 있다.
+- **상태**: 지금 화면(안정 ID), 처리기·처리 상태, 올리기 상태, 최종 확인(초안·여행방 ID·이름·장수), 로그인·참여 상태는 모델(iOS `AppModel`, Android `AppViewModel`)에 있어 창이 바뀌어도 남는다. 처리기를 다시 만들지 않으므로 OCR·올리기가 다시 시작되지 않는다. 최종 확인은 사용자가 본 값으로 올리고, 그사이 올릴 곳이 바뀌었으면 올리지 않는다(초대 링크를 새로 열면 확인을 닫는다).
+- **최종 확인 창**: 로그인 시트처럼 화면 맨 위(`RootView`, `NonanonaApp`)에서 한 번만 띄운다. iOS는 가운데 알림이다(예전의 행 안 확인 시트는 넓은 창에서 버튼을 가리키는 팝오버가 되어, 열린 채 회전하면 다시 뜨지 못하고 앱이 쉬지 못하는 상태로 멈췄다. Pro Max 시뮬레이터에서 재현).
+
+### 확인한 것 (2026-11-21, 가상 영수증 r01–r03)
+
+| 확인 | iOS | Android |
+| --- | --- | --- |
+| 단위 테스트 | `ContentMargins` 5건(좁은 창, 읽기 폭, 세로 접힘 한쪽·같으면 앞쪽, 창 밖 접힘, 가로 접힘). 처리 중 장면 다시 활성화 5번 → OCR 2번·시도 `[1,1]`·선택 유지. 최종 확인이 올릴 곳을 지키고 한 번만 올림, 올릴 곳이 바뀐 뒤의 예전 확인은 올리지 않음. 실제 창에 띄운 분할 보기를 669×951(regular) → 466×678(compact) → 951×669(regular) → 320×951(compact)로 바꿔도 접힘·펼침이 따라가고 선택 유지 | `ContentMargins` 6건(iOS와 같은 경우 + 폭 0인 hinge) |
+| E2E 기기 | iPhone 18 Pro Max(가로 regular), iPhone Duo 바깥 화면(466×678pt, iPhone Duo 런타임 iOS 27.2 24B91016s), iPhone 18 Pro(iOS 27.2) 시뮬레이터. 세 기기 모두 A1–A4 통과 | Pixel 9 Pro Fold 프로필 에뮬레이터(API 36, 안쪽 2076×2152px·바깥 1080×2424px, hinge x=1038px) |
+| 읽는 중 배치 바꾸기 | 세로 → 가로 → 세로: 같은 초안(사진 2장)·처리 상태. Pro Max 가로에서만 목록과 초안이 나란히 | 펼침(두 칸, 읽음 0/2) → 접기(바깥 화면 한 칸, 같은 초안 0/2) → 펴기(두 칸) → 반쯤 접기(목록 0–1038, 상세 1097–2076) |
+| 중복 OCR | 디스크의 사진별 시도 `[1,1]`, `[1]` | 같음 |
+| 접힘 피하기 | (반쯤 접기 확인하지 못함, 아래 공백) | 반쯤 접은 채 로그인 시트 (0–1038), 최종 확인 제목·버튼 (577–920)이 hinge 한쪽 |
+| 최종 확인 유지 | 열린 채 가로 → 세로: 같은 문장, 누를 수 있음 → 올림 1장(이미 올린 0장 포함) | 열린 채 접기 → 펴기: 같은 문장 → 올림 1장(이미 올린 0장 포함) |
+| 큰 글자 + 가로 | `accessibility-extra-large`: 초안 마지막 행, 로그인 시트 버튼까지 스크롤로 닿고 다시 로그인 | `font_scale 2.0`: 같음 |
+| 낮고 좁은 창 | 단위 테스트의 320×951 compact | `wm size 1300x1000`(533×410dp): 한 칸, 마지막 행까지 스크롤 |
+| 기존 흐름 회귀(바뀐 내비게이션·최종 확인) | `ios:e2e`, `ios:e2e-upload`(로컬 Supabase, 서버 객체·지출 1/1, 가림 사본 검사, 비구성원 차단) 통과. 단위 테스트, `ios:build`, `ios:release-check` 통과 | `android:e2e`, `android:e2e-receipts`, `android:e2e-local`, `android:e2e-upload`(같은 서버 검사) 통과(폰 에뮬레이터). 단위 테스트, lint(오류 0), release APK에 INTERNET·로컬·테스트·개발용 올리기 클래스 0 |
+
+```sh
+mise run ios:e2e-adaptive -- <시뮬레이터 UDID> [증거 폴더]       # 가로가 regular인 기기는 EXPECT_WIDE_LANDSCAPE=1
+mise run android:e2e-adaptive -- [증거 폴더]                    # 접히는 기기 에뮬레이터(emu fold/unfold/posture)
+```
+
+접히는 기기 에뮬레이터는 설치된 시스템 이미지로 만든다: `avdmanager create avd -n Nonanona_Fold -k "system-images;android-36;google_apis;arm64-v8a" -d pixel_9_pro_fold`. iOS iPhone Duo 시뮬레이터는 iPhone Duo 전용 런타임으로 만든다: `xcrun simctl create "Nonanona Duo" com.apple.CoreSimulator.SimDeviceType.iPhone-Duo com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4`. 같은 시뮬레이터에서 E2E를 여러 번 돌리면 사진 앱에 가상 영수증이 겹쳐 쌓여 공유 단계가 흔들린다. 새 시뮬레이터에서 돌린다.
+
+**증거 공백**: iPhone Duo의 접기·펴기·반쯤 접기는 Device Hub GUI로만 바꿀 수 있어 확인하지 못했다(`simctl`·XCTest에 자세 명령이 없고, 이 세션의 GUI 자동화는 macOS 손쉬운 사용 권한이 없었다). iOS는 크기 종류·크기 변경, 장면 다시 활성화, division 영역 계산을 단위 테스트로 대신했다. iOS 넓은 창은 Pro Max 가로로만 봤다(Duo 안쪽 화면 미확인). 실기기, 태블릿, Android 실제 두 앱 분할 화면, 데스크톱 창은 확인하지 않았다. 입력 칸은 아직 없어 키보드가 가리는 경우는 해당이 없다.
+
 ## 로컬 Supabase 모드 (debug 전용)
 
 debug 앱의 정상 진입 경로(공유, 초대 링크, 로그인 시트)를 그대로 두고, 인증·여행방 경계만 로컬 Supabase 스택에 실제 HTTP로 붙인다. SDK 없이 플랫폼 HTTP(iOS `URLSession`, Android `HttpURLConnection`)만 쓴다.
@@ -174,6 +206,8 @@ mise run android:build   # debug APK, 서명하지 않은 release APK
 mise run ios:release-check
 mise run ios:e2e -- <시뮬레이터 UDID> [증거 폴더]   # 테스트 구현체
 mise run android:e2e -- [증거 폴더]                 # 테스트 구현체, 실행 중인 에뮬레이터 하나
+mise run ios:e2e-adaptive -- <시뮬레이터 UDID> [증거 폴더]   # 창 크기·회전·큰 글자(위 "창 크기와 접기")
+mise run android:e2e-adaptive -- [증거 폴더]                 # 접히는 기기 에뮬레이터
 # 로컬 Supabase 모드는 위 "로컬 Supabase 모드" 절
 ```
 
@@ -192,7 +226,7 @@ iOS 단위 테스트와 release 확인은 `IOS_DESTINATION`(기본 `platform=iOS
 
 ## 버전
 
-정확한 버전으로 고정했고, 모두 게시 후 7일이 지난 안정판이다(확인일 2026-11-21). Android 전이 의존성은 `apps/android/app/gradle.lockfile`(앱 304개), 플러그인 클래스패스는 `apps/android/buildscript-gradle.lockfile`(113개)에 고정한다(갱신: `./gradlew buildEnvironment :app:dependencies --write-locks`). 두 잠금 파일의 모든 항목이 게시 후 7일이 지났음을 Google Maven·Maven Central의 POM `Last-Modified`로 확인했다(가장 최근: navigation3 1.2.1, 2026-11-04). Dependabot은 `apps/android`의 Gradle 생태계를 7일 cooldown으로 본다. iOS는 원격 Swift 패키지가 없어 Dependabot 대상이 아니다.
+정확한 버전으로 고정했고, 모두 게시 후 7일이 지난 안정판이다(확인일 2026-11-21). Android 전이 의존성은 `apps/android/app/gradle.lockfile`(앱 346개), 플러그인 클래스패스는 `apps/android/buildscript-gradle.lockfile`(113개)에 고정한다(갱신: `./gradlew buildEnvironment :app:dependencies --write-locks`). 두 잠금 파일의 모든 항목이 게시 후 7일이 지났음을 Google Maven·Maven Central의 POM `Last-Modified`로 확인했다(가장 최근: navigation3 1.2.1, 2026-11-04). Dependabot은 `apps/android`의 Gradle 생태계를 7일 cooldown으로 본다. iOS는 원격 Swift 패키지가 없어 Dependabot 대상이 아니다.
 
 | 도구·의존성 | 버전 | 게시일과 근거 |
 | --- | --- | --- |
@@ -207,6 +241,7 @@ iOS 단위 테스트와 release 확인은 `IOS_DESTINATION`(기본 `platform=iOS
 | activity-compose | 1.13.0 | 2026-03-11 |
 | lifecycle(viewmodel-compose, runtime-compose) | 2.11.0 | 2026-06-17 |
 | Navigation 3 (navigation3-ui) | 1.2.1 | 2026-11-04 |
+| material3-adaptive(adaptive, adaptive-layout, adaptive-navigation3) | 1.3.0 | 2026-08-12. Compose BOM 2026.09.00이 정하는 버전(따로 고정하지 않음). navigation3-ui 1.0.0 이상 요구. 함께 잠근 annotation-experimental 1.5.1(2025-07-16) |
 | JUnit | 4.13.2 | 2021-02-13 (단위 테스트만) |
 | ML Kit 일본어 텍스트 인식(번들 모델) | 16.0.1 | 2024-08-07(최신 안정판). Play Services 전이 의존성 포함 잠금 338개 모두 7일 경과 |
 | org.json(JVM 단위 테스트 전용) | 20260814 | 2026-08-14. 앱은 플랫폼 org.json을 쓴다 |

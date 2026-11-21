@@ -44,13 +44,13 @@ iOS(SwiftUI)와 Android(Kotlin, Compose) 네이티브 앱의 뼈대다. 이번 �
 
 ## 영수증 처리 (기기 안, 로컬 전용)
 
-native-batch-import 실험에서 검증한 처리 코어를 영수증 가져오기 기능 안으로 옮겼다(두 플랫폼 같은 모델). 실험의 화면, 기록 서버, 공유 payload는 옮기지 않았다. 검토·확인 화면과 업로드는 디자인(A/B)과 함께 따로 붙인다.
+native-batch-import 실험에서 검증한 처리 코어를 영수증 가져오기 기능 안으로 옮겼다(두 플랫폼 같은 모델). 실험의 화면, 기록 서버, 공유 payload는 옮기지 않았다. 검토·확인 화면은 디자인(A/B)과 함께 따로 붙인다. 올리기는 아래 "영수증 올리기"(로컬 Supabase 모드, debug 화면)에 있다.
 
 - **처리 상태**: 초안마다 `processing.json`에 사진별 상태(`queued → processing → ready | failed → confirmed`), 시도 횟수, 실패 이유를 둔다. 상태는 화면에 알리기 전에 원자적으로 디스크에 먼저 쓴다. 처리기를 만들 때 `processing`으로 남은 사진(처리 중 앱 종료)을 `queued`로 되돌리고 `recoveredCount`를 늘린다. 끝난 사진은 다시 읽지 않는다.
 - **OCR**: 동시에 최대 2장. iOS는 Apple Vision(`ja-JP`), Android는 ML Kit 번들 일본어 모델(`text-recognition-japanese` 16.0.1). 사진에서 날짜·합계·가게와 가림 후보(전화·카드·회원·예약번호 줄)를 고른다. 실패는 문자열이 아니라 `ProcessingFailure`(`unreadable`, `missingTotal`, `missingDate`, `invalidImage`, `recognitionError`)로 남기고, 그 사진 하나만 "다시 읽기"로 대기열에 되돌린다.
 - **타입 분리**: 원본 사진(초안 폴더), `OCRProposal`(OCR 전문 포함, 기기 안 `proposals/`에만), `AllowedReceiptFields`(날짜·금액·통화·가게), `MaskedArtifact`(가림을 구운 새 PNG. 굽기 함수만 만들 수 있다), `ConfirmedReceipt`(허용 필드 + 가림 사본 이름·해시)는 서로 다른 타입이다.
 - **확인**: `confirm(item, fields, maskLineIDs)`만 가림을 픽셀에 굽는다(새 비트맵에 검은 띠, PNG 재인코딩 후 `IHDR/PLTE/tRNS/sRGB/IDAT/IEND` 외 청크 제거). 날짜 형식·금액·통화가 맞지 않거나 `ready`가 아니면 거절한다.
-- **기기 경계(fail closed)**: 기기 밖으로 보낼 수 있는 것은 `outboundReceipts()` 하나뿐이다. 확인한 영수증만 돌려주고, 그 전에 가림 사본이 있는지, 해시가 확인 당시와 같은지, 허용 청크만 있는지, 원본과 다른 바이트인지 다시 본다. 하나라도 어긋나면 아무것도 돌려주지 않는다. 지금은 이것을 부르는 업로드가 없다.
+- **기기 경계(fail closed)**: 기기 밖으로 보낼 수 있는 것은 `outboundReceipts()` 하나뿐이다. 확인한 영수증만 돌려주고, 그 전에 가림 사본이 있는지, 해시가 확인 당시와 같은지, 허용 청크만 있는지, 원본과 다른 바이트인지 다시 본다. 하나라도 어긋나면 아무것도 돌려주지 않는다. 돌려주는 값은 검사한 바이트 그대로다(검사 뒤 파일을 다시 읽지 않는다). 올리기는 이것만 쓴다.
 - **저장 정책**: iOS는 App Group 컨테이너의 초안 폴더(백업 제외, `completeFileProtectionUntilFirstUserAuthentication`), Android는 앱 전용 `filesDir`(백업·기기 이전 제외 규칙). 임시 파일은 같은 폴더 안 숨김 파일로 쓰고 이름을 바꿔 공개한다.
 - **release 앱**: 네트워크 권한이 없다. ML Kit이 병합하는 `INTERNET`·`ACCESS_NETWORK_STATE`를 main 매니페스트에서 지웠다(debug는 로컬 Supabase 모드 때문에 `INTERNET`만 다시 받는다).
 - **화면(중립, 임시)**: 초안 화면에 "읽음 N/M", 이어서 읽은 사진 수, 사진별 상태 라벨(대기 중·읽는 중·확인 필요·읽지 못함·확인함)과 실패 이유, "다시 읽기"만 둔다. debug 빌드에만 "확인(개발용)"(제안값과 가림 후보를 그대로 확인)과 처리 늦추기·첫 시도 실패 주입(iOS 실행 환경 변수 `NONANONA_PROCESSING_DELAY_MS`·`NONANONA_FAIL_FIRST_ATTEMPT_POSITION`, Android `files/debug-processing.properties`)이 있다.
@@ -74,6 +74,41 @@ native-batch-import 실험에서 검증한 처리 코어를 영수증 가져오�
 ```sh
 mise run ios:e2e-receipts -- <시뮬레이터 UDID> [증거 폴더]
 mise run android:e2e-receipts -- [증거 폴더]
+```
+
+## 영수증 올리기 (로컬 Supabase 모드, debug 화면)
+
+확인한 영수증을 참여한 여행방에 올리는 좁은 세로 구간이다. 결제자·부담자·원화 환산·검토 같은 정산 흐름은 넣지 않았다.
+
+- **앱**: 초안 화면의 debug 전용 "여행방에 올리기(개발용)" 구역이 올릴 곳(참여한 여행방 이름)과 확인한 영수증 장수를 보여 주고, "‘여행방’에 영수증 N장을 올릴까요?" 최종 확인을 받은 뒤에만 올린다. 확인하지 않은 사진은 올리지 않는다. 보내는 것은 `outboundReceipts()`가 돌려준 가림 사본 바이트와 허용 필드(날짜·금액·통화·가게)뿐이다. 경계는 `TripGateway.submitReceipt` 하나이고(여행방 기능), 실패는 `ReceiptUploadFailure`(`sessionExpired`, `destinationUnavailable`, `network`, `unavailable`, `unknown`)로만 알린다. 세션 만료면 세션만 지우고, 초안·사본은 그대로 둔 채 다시 로그인 후 같은 요청 키로 다시 올린다. 화면 문구와 버튼은 iOS `#if DEBUG`, Android `src/debug`에만 있다.
+- **요청 키**: `(여행방, 사본 SHA-256)`으로 만든 결정적 UUID(두 플랫폼이 같은 값, 단위 테스트로 고정). 재시도·반복·앱을 다시 연 뒤 올리기가 모두 같은 키를 쓴다.
+- **서버**(`supabase/migrations/…_receipt_expenses.sql`): 비공개 버킷 `receipts`(PNG만, 2 MiB). 객체 이름은 `<trip>/<올린 사람>/<요청 키>.png`이고, 올리기 정책은 그 방 구성원이 자기 폴더에만, 읽기는 그 방 구성원만이다. 덮어쓰기·삭제 정책은 없다. `submit_receipt_expense` RPC(`private` 스키마 definer 본문)는 구성원인지(아니면 `trip_not_found`), 그 이름의 객체가 호출자 소유 PNG로 있는지(`artifact_missing`) 본 뒤 `expenses` 행을 만든다. `(trip, 요청 키)` 고유 제약과 요청 지문으로 같은 요청은 같은 행(`replayed`), 다른 내용은 `idempotency_conflict`. 지출 행 열: `id, trip_id, client_request_id, request_fingerprint, uploaded_by, expense_date, amount_minor, currency, merchant, artifact_path, artifact_sha256, created_at`. 구성원만 SELECT, 쓰기 권한 없음.
+- **원자성 없음**: Storage와 DB는 한 트랜잭션이 아니다. 사본만 올라가고 끊기면 행 없는 객체가 남는다. 지출은 행으로만 보이므로 반쯤 보이는 지출은 없고, 같은 키로 다시 시도하면 업로드는 "이미 있음"(`KeyAlreadyExists`)으로 넘어가고 행이 생긴다. 행 없는 객체를 지우는 작업은 아직 없다.
+- **실패 구분**: Storage는 잘못된 토큰과 권한 없음을 같은 `AccessDenied`로 알린다(로컬에서 확인). 앱은 이때 Auth(`/auth/v1/user`)로 세션이 유효한지 확인해, 무효면 `sessionExpired`, 유효면 `destinationUnavailable`로 닫는다.
+
+### 확인한 것 (2026-11-21, 가상 영수증 2장 중 1장만 확인)
+
+두 플랫폼 E2E가 같은 순서를 밟고, 단계마다 서버의 객체·지출 수를 본다(`scripts/local-backend.py upload-report`).
+
+| 단계 | iOS | Android | 서버(객체/지출) |
+| --- | --- | --- | --- |
+| 1장 확인, 초대로 참여, 최종 확인 창(올릴 곳·장수 표시) | 통과 | 통과 | 0 / 0 (확인 전 업로드 없음) |
+| API 게이트웨이 정지 중 최종 확인 | "인터넷에 연결할 수 없어요" | 같음 | 0 / 0 |
+| 서버에서 구성원 빼기 → 올리기 | "이 여행방에 올릴 수 없어요" | 같음 | 0 / 0 |
+| 서버 세션 삭제 + 토큰 만료 → 올리기 | "로그인이 만료됐어요" → 다시 로그인 | 같음 | 따로 재지 않음(다음 줄의 1 / 0에 포함) |
+| 다시 올리기(debug: 사본 저장 직후 첫 실패 주입) | 연결 실패로 보임 | 같음 | 1 / 0 (행 없는 객체, 지출로 안 보임) |
+| 다시 시도 | "올림 1장(이미 올린 0장 포함)" | 같음 | 1 / 1 |
+| 같은 영수증 다시 올리기 | "올림 1장(이미 올린 1장 포함)" | 같음 | 1 / 1 |
+| SIGKILL → 다시 열기 → 초대로 다시 들어가 올리기 | "이미 올린 1장" | 같음 | 1 / 1 |
+| 서버가 받은 사본 | 확인한 사본과 같은 해시, 기기의 어떤 원본과도 다름. r02: 민감한 줄 글자 픽셀 1,869개 모두 검정, 띠 밖 변화 0, 청크 `IHDR/sRGB/IDAT/IEND`, 원본 표지 없음 | r01: 2,730개 모두 검정, 변화 0, 같은 청크, 표지 없음 | 확인하지 않은 사진은 올라가지 않음(객체 1) |
+| 서버 지출 필드 | 2026-11-03 · 1,276 JPY · みなと珈琲(기기에서 확인한 값과 같음) | 2026-11-03 · 1,408 JPY · さくら食堂(같음) | 허용 열만 |
+| 비구성원 가상 계정 | 지출·여행방 0행, 방 폴더 목록 0, 구성원 객체 내려받기 `NoSuchKey`, 방 폴더에 올리기 `AccessDenied`, 제출 RPC `trip_not_found`, 익명 지출 조회 401 | 같음 | |
+
+```sh
+mise run local:up
+mise run ios:e2e-upload -- <시뮬레이터 UDID> [증거 폴더]
+mise run android:e2e-upload -- [증거 폴더]
+mise run local:down
 ```
 
 ## 로컬 Supabase 모드 (debug 전용)
@@ -186,10 +221,11 @@ iOS 단위 테스트와 release 확인은 `IOS_DESTINATION`(기본 `platform=iOS
 - release 빌드용 실제 구현체는 아직 없다(release는 계속 `Unavailable*`). 로컬 구현체는 debug 전용이며 세션을 앱 전용 파일에 둔다. 실제 구현체는 Keychain·암호화 저장소를 쓴다.
 - 서버 오류 매핑은 로컬 스택(Auth, PostgREST, 이 저장소의 RPC 코드)에서 실제로 받은 값에 맞췄다. 클라우드 프로젝트의 응답, 실제 OAuth 오류, 속도 제한은 로컬에서 재현하지 않았다(429·5xx 매핑은 단위 테스트만).
 - 세션 만료는 서버에서 세션을 지우고 토큰 만료를 기다려 재현했다. 장기간 미사용, 다른 기기 로그아웃, 계정 정지는 확인하지 않았다.
-- 여행방 목록과 다시 열기, 초안을 여행방에 올리기는 다음 슬라이스다.
-- 영수증 처리: 검토·확인 화면(값 고치기, 가림 직접 고르기·그리기), 직접 입력, 업로드는 아직 없다. release에서는 처리 상태만 보이고 확인할 수 없다. 처리는 앱이 앞에 있을 때만 돈다(iOS 백그라운드 작업, Android WorkManager 없음). 실기기, 큰 HEIC·JPEG, EXIF 회전 사진, 저장 공간 부족, Google 포토 공유, 앱 안 사진 선택기로 10장 고르기는 확인하지 않았다. 가로 전체 띠 가림은 같은 행의 다른 정보도 덮는다. 공유 확장도 가져오기 패키지를 함께 링크해 OCR 코드가 들어 있다(쓰지는 않는다).
+- 여행방 목록과 다시 열기는 다음 슬라이스다. 참여한 여행방은 앱 화면 상태에만 있어, 앱을 다시 열면 초대 링크로 다시 들어가야 올릴 곳이 생긴다.
+- 영수증 처리: 검토·확인 화면(값 고치기, 가림 직접 고르기·그리기)과 직접 입력은 아직 없다. release에서는 처리 상태만 보이고 확인·올리기를 할 수 없다. 처리는 앱이 앞에 있을 때만 돈다(iOS 백그라운드 작업, Android WorkManager 없음). 실기기, 큰 HEIC·JPEG, EXIF 회전 사진, 저장 공간 부족, Google 포토 공유, 앱 안 사진 선택기로 10장 고르기는 확인하지 않았다. 가로 전체 띠 가림은 같은 행의 다른 정보도 덮는다. 공유 확장도 가져오기 패키지를 함께 링크해 OCR 코드가 들어 있다(쓰지는 않는다).
 - debug 빌드는 로컬 모드 때문에 INTERNET 권한이 있어, ML Kit 라이브러리가 debug에서 사용 통계를 보낼 수 있는지는 확인하지 않았다(release는 권한이 없다).
 - 초대 링크는 사용자 지정 스킴(`nonanona://`)이다. 운영 도메인의 Universal Links·App Links는 서버 준비와 함께 붙인다.
 - 번들 ID·applicationId(`app.nonanona`), App Group(`group.app.nonanona`), 앱 아이콘은 임시다. 실기기 서명과 스토어 등록 때 정한다.
 - 시뮬레이터·에뮬레이터만 확인했다. 실기기, Google 포토 앱의 공유(에뮬레이터는 계정 없이 쓸 수 없어 파일 앱으로 대신), 앱 안 사진 선택기의 E2E, 공유 확장 메모리 한도, 큰 HEIC는 확인하지 않았다.
-- 10장 묶음 처리, OCR, 가림, 정산은 이번 범위가 아니다(앞선 실험에서 따로 검증했다).
+- 정산(결제자·부담자·원화 환산·방장 검토·확정·송금표)은 아직 없다. 지출 행에는 허용 필드와 사본 위치만 있다.
+- 영수증 올리기: 행 없는 사본(부분 실패)을 지우는 정리 작업이 없다. 같은 사본을 다른 여행방에 올리면 다른 요청 키라 별개 지출이 된다. 한 번에 여러 장을 올리다 중간에 실패하면 앞의 장은 이미 올라간 상태로 남는다(같은 확인으로 다시 올리면 앞의 장은 같은 지출로 수렴). 서버가 사본 내용(가림이 실제로 개인정보를 가렸는지)을 검사하지 않는다. 파일 검사(청크·해시·픽셀)는 가림이 의미상 충분하다는 증명이 아니다. 실기기, 느린 망, 큰 사본, 여러 계정이 같은 방에 동시에 올리기는 확인하지 않았다.

@@ -29,10 +29,16 @@ private final class FakeTrips: TripGateway, @unchecked Sendable {
     if !outcomes.isEmpty { throw outcomes.removeFirst() }
     return room
   }
+  func submitReceipt(_ upload: ReceiptExpenseUpload, to trip: TripID) async throws -> SubmittedExpense {
+    throw ReceiptUploadFailure.unknown
+  }
 }
 
 private struct CancellingTrips: TripGateway {
   func acceptInvite(_ code: InviteCode) async throws -> TripRoom { throw CancellationError() }
+  func submitReceipt(_ upload: ReceiptExpenseUpload, to trip: TripID) async throws -> SubmittedExpense {
+    throw ReceiptUploadFailure.unknown
+  }
 }
 
 private let room = TripRoom(id: TripID(value: "trip-1"), name: "가상 여행", members: [])

@@ -104,8 +104,8 @@ public actor ReceiptProcessor {
 
   /// 기기 밖으로 보낼 수 있는 것: 확인한 영수증만. 가림 사본이 확인 당시와 같고, 허용한 PNG 청크만 있고,
   /// 원본과 다른 바이트인지 다시 확인한다. 하나라도 어긋나면 아무것도 돌려주지 않는다.
-  public func outboundReceipts() throws -> [ConfirmedReceipt] {
-    try manifest.items.compactMap { item -> ConfirmedReceipt? in
+  public func outboundReceipts() throws -> [OutboundReceipt] {
+    try manifest.items.compactMap { item -> OutboundReceipt? in
       guard item.state == .confirmed, let receipt = item.confirmed else { return nil }
       guard let data = try? Data(contentsOf: store.artifactURL(draftID, receipt.artifactFileName)) else {
         throw BoundaryViolation.artifactMissing
@@ -117,7 +117,8 @@ public actor ReceiptProcessor {
       if (try? Data(contentsOf: store.photoURL(draftID, item.photoFileName))) == data {
         throw BoundaryViolation.artifactEqualsOriginal
       }
-      return receipt
+      // 검사한 바이트를 그대로 넘긴다. 검사 뒤에 파일을 다시 읽지 않는다.
+      return OutboundReceipt(receipt: receipt, artifactPNG: data)
     }
   }
 

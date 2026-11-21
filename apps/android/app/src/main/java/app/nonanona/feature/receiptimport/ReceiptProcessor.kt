@@ -129,7 +129,7 @@ class ReceiptProcessor(
      * 기기 밖으로 보낼 수 있는 것: 확인한 영수증만. 가림 사본이 확인 당시와 같고, 허용한 PNG 청크만 있고,
      * 원본과 다른 바이트인지 다시 확인한다. 하나라도 어긋나면 아무것도 돌려주지 않는다.
      */
-    suspend fun outboundReceipts(): List<ConfirmedReceipt> =
+    suspend fun outboundReceipts(): List<OutboundReceipt> =
         mutex.withLock {
             manifest.items.mapNotNull { item ->
                 val receipt = item.confirmed?.takeIf { item.state == ItemState.Confirmed } ?: return@mapNotNull null
@@ -143,7 +143,8 @@ class ReceiptProcessor(
                 if (store.photoFile(draftId, item.photoFileName).readBytes().contentEquals(bytes)) {
                     throw BoundaryViolation("artifact_equals_original")
                 }
-                receipt
+                // 검사한 바이트를 그대로 넘긴다. 검사 뒤에 파일을 다시 읽지 않는다.
+                OutboundReceipt(receipt, bytes)
             }
         }
 

@@ -33,6 +33,20 @@
         ])
     }
 
+    private let uploads = OSAllocatedUnfairLock<[UUID: String]>(initialState: [:])
+
+    /// 가상 여행방에 기기 안에서만 기록한다. 같은 요청 키는 같은 결과를 돌려준다.
+    func submitReceipt(_ upload: ReceiptExpenseUpload, to trip: TripID) async throws -> SubmittedExpense {
+      guard await auth.restoreSession() != nil else { throw ReceiptUploadFailure.sessionExpired }
+      try await Task.sleep(for: .milliseconds(200))
+      return uploads.withLock { stored in
+        if let id = stored[upload.requestID] { return SubmittedExpense(expenseID: id, replayed: true) }
+        let id = "test-expense-\(stored.count + 1)"
+        stored[upload.requestID] = id
+        return SubmittedExpense(expenseID: id, replayed: false)
+      }
+    }
+
     private func fixtureFailure(_ code: InviteCode) -> InviteAcceptFailure? {
       let first = failedOnce.withLock { $0.insert(code.value).inserted }
       switch code.value {

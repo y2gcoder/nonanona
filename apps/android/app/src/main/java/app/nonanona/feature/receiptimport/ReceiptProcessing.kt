@@ -72,6 +72,12 @@ data class ConfirmedReceipt(
     }
 }
 
+/** 기기 밖으로 보낼 수 있는 한 건: 확인한 영수증과, 경계 검사를 통과한 가림 사본 바이트. */
+class OutboundReceipt(
+    val receipt: ConfirmedReceipt,
+    val artifactPng: ByteArray,
+)
+
 enum class ItemState { Queued, Processing, Ready, Failed, Confirmed }
 
 data class ProcessingItem(

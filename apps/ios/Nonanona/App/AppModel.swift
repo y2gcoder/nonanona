@@ -15,6 +15,13 @@ enum LoginState: Equatable {
   case failed(SignInFailure)
 }
 
+enum UploadState: Equatable {
+  case idle
+  case uploading
+  case done(created: Int, replayed: Int)
+  case failed(ReceiptUploadFailure, uploadedBefore: Int)
+}
+
 enum JoinState: Equatable {
   case idle
   case joining
@@ -36,6 +43,8 @@ final class AppModel {
   /// 초안별 사진 처리 상태. 처리기가 디스크에 쓴 뒤 알려 준다.
   private(set) var processing: [String: ProcessingManifest] = [:]
   private var processors: [String: ReceiptProcessor] = [:]
+  /// 초안별 올리기 상태. 개발용 올리기 화면이 쓴다.
+  private(set) var uploads: [String: UploadState] = [:]
 
   let graph: AppGraph
   var signInProviders: [SignInProvider] { graph.auth.providers }
@@ -82,6 +91,43 @@ final class AppModel {
         await processor.run()
       }
     }
+  }
+
+  /// 확인한 영수증을 참여한 여행방에 올린다. 사용자가 올릴 곳과 장수를 보고 최종 확인한 뒤에만 부른다.
+  /// 기기 경계(`outboundReceipts`)를 지난 가림 사본과 허용 필드만 보낸다. 한 장이라도 실패하면 거기서 멈춘다.
+  func uploadConfirmedReceipts(draftID: String, to room: TripRoom) async {
+    guard let processor = processors[draftID], uploads[draftID] != .uploading else { return }
+    uploads[draftID] = .uploading
+    let outbound: [OutboundReceipt]
+    do {
+      outbound = try await processor.outboundReceipts()
+    } catch {
+      uploads[draftID] = .failed(.unknown, uploadedBefore: 0)
+      return
+    }
+    var created = 0
+    var replayed = 0
+    for item in outbound {
+      let fields = item.receipt.fields
+      let upload = ReceiptExpenseUpload(
+        requestID: ReceiptExpenseUpload.requestID(trip: room.id, artifactSHA256: item.receipt.artifactSHA256),
+        date: fields.date, amountMinor: fields.amountMinor, currency: fields.currency, merchant: fields.merchant,
+        artifactPNG: item.artifactPNG, artifactSHA256: item.receipt.artifactSHA256)
+      do {
+        let result = try await graph.trips.submitReceipt(upload, to: room.id)
+        if result.replayed { replayed += 1 } else { created += 1 }
+      } catch {
+        let failure = error as? ReceiptUploadFailure ?? .unknown
+        if failure == .sessionExpired {
+          // 세션만 지운다. 초안·확인한 사본은 그대로이고, 다시 로그인한 뒤 같은 요청 키로 다시 올린다.
+          await graph.auth.endSession()
+          session = nil
+        }
+        uploads[draftID] = .failed(failure, uploadedBefore: created + replayed)
+        return
+      }
+    }
+    uploads[draftID] = .done(created: created, replayed: replayed)
   }
 
   /// 실패한 사진 한 장만 다시 읽는다.

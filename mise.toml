@@ -61,6 +61,11 @@ description = "에뮬레이터 E2E(영수증 처리): 가상 영수증 10장 공
 dir = "apps/android"
 run = "./gradlew :app:assembleDebug -Pnonanona.backend=test && python3 -I scripts/e2e_receipts.py app/build/outputs/apk/debug/app-debug.apk"
 
+[tasks."android:e2e-upload"]
+description = "에뮬레이터 E2E(로컬 Supabase 모드, 영수증 올리기). local:up 뒤 실행한다. 초기화 → 로컬 모드 debug 빌드 → E2E. 인자: [증거 폴더]"
+dir = "apps/android"
+run = "python3 -I ../../scripts/local-backend.py reset && ./gradlew :app:assembleDebug && python3 -I scripts/e2e_upload.py app/build/outputs/apk/debug/app-debug.apk"
+
 [tasks."ios:lint"]
 description = "swift-format 검사(고정한 Xcode에 포함된 버전)"
 dir = "apps/ios"
@@ -96,6 +101,11 @@ run = "scripts/e2e.sh"
 description = "시뮬레이터 E2E(영수증 처리): 가상 영수증 10장 공유 → Vision OCR → 처리 중 SIGKILL → 이어서 처리 → 실패만 다시 읽기 → 가림 사본 검사. 인자: <시뮬레이터 UDID> [증거 폴더]"
 dir = "apps/ios"
 run = "scripts/e2e-receipts.sh"
+
+[tasks."ios:e2e-upload"]
+description = "시뮬레이터 E2E(로컬 Supabase 모드, 영수증 올리기). local:up 뒤 실행한다. 인자: <시뮬레이터 UDID> [증거 폴더]"
+dir = "apps/ios"
+run = "scripts/e2e-upload.sh"
 
 [tasks."ios:e2e-local"]
 description = "시뮬레이터 E2E(로컬 Supabase 모드). local:up 뒤 실행한다. 인자: <시뮬레이터 UDID> [증거 폴더]"

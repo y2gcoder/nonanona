@@ -56,6 +56,8 @@ struct DraftView: View {
   let onRetry: (String) -> Void
   /// debug 빌드에서만 값이 있다.
   let onDebugConfirm: ((String) -> Void)?
+  /// 개발용 올리기 화면에 넘길 값. debug 빌드에서만 그린다.
+  var upload: DraftUploadContext?
 
   var body: some View {
     List {
@@ -76,6 +78,13 @@ struct DraftView: View {
           }
         }
       }
+      #if DEBUG
+        if let upload {
+          DebugUploadSection(
+            destination: upload.destination, confirmedCount: upload.confirmedCount, state: upload.state,
+            signedIn: upload.signedIn, onUpload: upload.onUpload, onLogin: upload.onLogin)
+        }
+      #endif
       Section {
         ForEach(Array(photoURLs.enumerated()), id: \.offset) { index, url in
           PhotoRow(
@@ -90,6 +99,16 @@ struct DraftView: View {
     .navigationBarTitleDisplayMode(.inline)
     .accessibilityIdentifier("draft-screen")
   }
+}
+
+/// 초안 화면이 개발용 올리기 화면에 넘기는 값.
+struct DraftUploadContext {
+  let destination: TripRoom?
+  let confirmedCount: Int
+  let state: UploadState
+  let signedIn: Bool
+  let onUpload: () -> Void
+  let onLogin: () -> Void
 }
 
 private struct PhotoRow: View {

@@ -49,16 +49,30 @@
     }
 
     /// 만료가 가까우면 먼저 갱신한 뒤 Data API RPC를 부른다. 401이면 한 번 갱신하고 다시 부른다.
-    func rpc(_ name: String, body: [String: String]) async throws -> Data {
+    func rpc(_ name: String, body: [String: String?]) async throws -> Data {
+      try await authorized("rest/v1/rpc/\(name)", body: try JSONEncoder().encode(body), contentType: "application/json")
+    }
+
+    /// 인증한 요청. 만료가 가까우면 먼저 갱신하고, JWT를 거절하면 한 번 갱신해 다시 보낸다.
+    func authorized(_ path: String, body: Data, contentType: String) async throws -> Data {
       guard var session = stored() else { throw Failure(outcome: .http(status: 401, code: nil)) }
       if session.expiresAt.timeIntervalSinceNow < 5 { session = try await refresh(session) }
-      let path = "rest/v1/rpc/\(name)"
       do {
-        return try await send(path: path, body: body, bearer: session.accessToken)
+        return try await send(path: path, body: body, contentType: contentType, bearer: session.accessToken)
       } catch let failure as Failure where Self.isRejectedJWT(failure.outcome) {
         session = try await refresh(session)
-        return try await send(path: path, body: body, bearer: session.accessToken)
+        return try await send(path: path, body: body, contentType: contentType, bearer: session.accessToken)
       }
+    }
+
+    /// Auth가 지금 세션을 받아들이는지 확인한다(Storage는 잘못된 토큰과 권한 없음을 같은 코드로 알리므로 구분용).
+    func isSessionValid() async -> Bool {
+      guard let session = stored() else { return false }
+      var request = URLRequest(url: URL(string: "auth/v1/user", relativeTo: config.baseURL)!)
+      request.setValue(config.publishableKey, forHTTPHeaderField: "apikey")
+      request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+      guard let (_, response) = try? await urlSession.data(for: request) else { return true }
+      return (response as? HTTPURLResponse)?.statusCode == 200
     }
 
     /// PostgREST가 JWT를 받아들이지 않은 경우(PGRST301 잘못된 JWT, PGRST303 만료).
@@ -72,7 +86,10 @@
     }
 
     private func tokenRequest(grant: String, body: [String: String]) async throws -> Stored {
-      let data = try await send(path: "auth/v1/token?grant_type=\(grant)", body: body, bearer: nil)
+      let data = try await send(
+        path: "auth/v1/token?grant_type=\(grant)", body: try JSONEncoder().encode(body),
+        contentType: "application/json",
+        bearer: nil)
       let token = try JSONDecoder.supabase.decode(TokenResponse.self, from: data)
       let session = Stored(
         accessToken: token.accessToken, refreshToken: token.refreshToken,
@@ -84,13 +101,13 @@
       return session
     }
 
-    private func send(path: String, body: [String: String], bearer: String?) async throws -> Data {
+    private func send(path: String, body: Data, contentType: String, bearer: String?) async throws -> Data {
       var request = URLRequest(url: URL(string: path, relativeTo: config.baseURL)!)
       request.httpMethod = "POST"
-      request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+      request.setValue(contentType, forHTTPHeaderField: "Content-Type")
       request.setValue(config.publishableKey, forHTTPHeaderField: "apikey")
       if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization") }
-      request.httpBody = try JSONEncoder().encode(body)
+      request.httpBody = body
       let data: Data
       let response: URLResponse
       do {

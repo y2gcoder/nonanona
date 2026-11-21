@@ -21,6 +21,7 @@ import app.nonanona.feature.account.LoginSheet
 import app.nonanona.feature.account.LoginState
 import app.nonanona.feature.receiptimport.DraftScreen
 import app.nonanona.feature.receiptimport.DraftSource
+import app.nonanona.feature.receiptimport.ItemState
 import app.nonanona.feature.receiptimport.ReceiptDraftStore
 import app.nonanona.feature.trip.InviteScreen
 import app.nonanona.feature.trip.TripRoomScreen
@@ -72,6 +73,22 @@ fun NonanonaApp(viewModel: AppViewModel) {
                         debugConfirmLabel = viewModel.debugConfirmLabel,
                         onDebugConfirm = { viewModel.debugConfirm(route.id, it) },
                         onBack = viewModel::back,
+                        extraSection =
+                            viewModel.debugUploadUi?.let { ui ->
+                                {
+                                    ui.Section(
+                                        DraftUploadContext(
+                                            destination = state.room,
+                                            confirmedCount =
+                                                state.processing[route.id]?.items?.count { it.state == ItemState.Confirmed } ?: 0,
+                                            state = state.uploads[route.id] ?: UploadState.Idle,
+                                            signedIn = state.session != null,
+                                            onUpload = { state.room?.let { viewModel.uploadConfirmedReceipts(route.id, it) } },
+                                            onLogin = viewModel::showLogin,
+                                        ),
+                                    )
+                                }
+                            },
                     )
                 }
                 entry<Route.Invite> {

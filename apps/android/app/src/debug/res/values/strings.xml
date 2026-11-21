@@ -3,5 +3,21 @@
 <resources>
     <string name="test_login_notice">테스트 로그인 · 실제 계정에 연결하지 않아요</string>
     <string name="debug_receipt_confirm">확인(개발용)</string>
+    <string name="debug_upload_title">여행방에 올리기(개발용)</string>
+    <string name="debug_upload_no_trip">참여한 여행방이 없어요. 초대 링크로 참여한 뒤 올릴 수 있어요.</string>
+    <string name="debug_upload_destination">올릴 곳: %1$s</string>
+    <string name="debug_upload_count">확인한 영수증 %1$d장</string>
+    <string name="debug_upload_login">다시 로그인하기</string>
+    <string name="debug_upload_start">여행방에 올리기(개발용)</string>
+    <string name="debug_upload_confirm_title">‘%1$s’에 영수증 %2$d장을 올릴까요?</string>
+    <string name="debug_upload_confirm_body">가림을 확인한 사본과 날짜·금액·통화·가게만 올라가요.</string>
+    <string name="debug_upload_final">올리기</string>
+    <string name="debug_upload_cancel">취소</string>
+    <string name="debug_upload_uploading">올리는 중…</string>
+    <string name="debug_upload_done">올림 %1$d장(이미 올린 %2$d장 포함)</string>
+    <string name="debug_upload_session_expired">로그인이 만료됐어요. 다시 로그인한 뒤 다시 올려 주세요.</string>
+    <string name="debug_upload_destination_unavailable">이 여행방에 올릴 수 없어요. 여행방 구성원인지 확인해 주세요.</string>
+    <string name="debug_upload_unavailable">지금은 올릴 수 없어요. 잠시 후 다시 시도해 주세요.</string>
+    <string name="debug_upload_unknown">올리지 못했어요. 다시 시도해 주세요.</string>
     <string name="local_login_notice">로컬 테스트 계정 · 실제 소셜 로그인이 아니에요</string>
 </resources>

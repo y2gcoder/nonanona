@@ -12,6 +12,8 @@ import app.nonanona.feature.receiptimport.ReceiptDraftStore
 import app.nonanona.feature.trip.InviteAcceptException
 import app.nonanona.feature.trip.InviteAcceptFailure
 import app.nonanona.feature.trip.InviteCode
+import app.nonanona.feature.trip.ReceiptExpenseUpload
+import app.nonanona.feature.trip.SubmittedExpense
 import app.nonanona.feature.trip.TripGateway
 import app.nonanona.feature.trip.TripId
 import app.nonanona.feature.trip.TripRoom
@@ -62,6 +64,11 @@ class JoinFlowTest {
     ) : TripGateway {
         private val queue = ArrayDeque(outcomes.toList())
         val attempts = mutableListOf<InviteCode>()
+
+        override suspend fun submitReceipt(
+            upload: ReceiptExpenseUpload,
+            trip: TripId,
+        ): SubmittedExpense = error("not used")
 
         override suspend fun acceptInvite(code: InviteCode): TripRoom {
             attempts += code

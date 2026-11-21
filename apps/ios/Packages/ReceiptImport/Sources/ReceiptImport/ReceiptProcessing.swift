@@ -19,6 +19,12 @@ public struct ConfirmedReceipt: Codable, Equatable, Sendable {
   public let artifactSHA256: String
 }
 
+/// 기기 밖으로 보낼 수 있는 한 건: 확인한 영수증과, 경계 검사를 통과한 가림 사본 바이트.
+public struct OutboundReceipt: Equatable, Sendable {
+  public let receipt: ConfirmedReceipt
+  public let artifactPNG: Data
+}
+
 public struct ProcessingItem: Codable, Equatable, Identifiable, Sendable {
   public enum State: String, Codable, Sendable {
     case queued

@@ -117,8 +117,9 @@ port = 54324
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
+# 가림을 구운 영수증 사본만 비공개 버킷(receipts)에 둔다. 버킷과 정책은 마이그레이션이 만든다.
 [storage]
-enabled = false
+enabled = true
 # The maximum file size allowed (e.g. "5MB", "500KB").
 file_size_limit = "50MiB"
 
@@ -131,7 +132,7 @@ file_size_limit = "50MiB"
 
 # Allow connections via S3 compatible clients
 [storage.s3_protocol]
-enabled = true
+enabled = false
 
 # Image transformation API is available to Supabase Pro plan.
 # [storage.image_transformation]
@@ -150,7 +151,7 @@ max_catalogs = 2
 
 # Store vector embeddings in S3 for large and durable datasets
 [storage.vector]
-enabled = true
+enabled = false
 max_buckets = 10
 max_indexes = 5
 

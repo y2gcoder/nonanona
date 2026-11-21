@@ -195,7 +195,9 @@ class ReceiptProcessorTest {
                     .id
             val proposal = processor.proposal(id)
             val receipt = processor.confirm(id, proposal.fields, proposal.suggestedMaskLineIds.toSet())
-            assertEquals(listOf(receipt), processor.outboundReceipts())
+            val outbound = processor.outboundReceipts()
+            assertEquals(listOf(receipt), outbound.map { it.receipt })
+            assertArrayEquals(store.artifactFile(draft.id, receipt.artifactFileName).readBytes(), outbound.single().artifactPng)
 
             val artifact = store.artifactFile(draft.id, receipt.artifactFileName).readBytes()
             val original = store.photoFile(draft.id, draft.photos[0].name).readBytes()

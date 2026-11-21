@@ -8,6 +8,10 @@
   python3 -I scripts/local-backend.py api-stop|api-start   API 게이트웨이만 멈추고 다시 띄운다(연결 실패 재현)
   python3 -I scripts/local-backend.py revoke-sessions      가상 회원 계정의 서버 세션을 지운다(세션 만료 재현)
   python3 -I scripts/local-backend.py report               가상 회원 계정의 참여·초대 사용 수(비밀값 없음)
+  python3 -I scripts/local-backend.py upload-report        올린 객체·지출 행 수와 지출 열 이름(비밀값·ID 없음)
+  python3 -I scripts/local-backend.py fetch-artifact <파일> 올린 가림 사본을 관리자 권한으로 내려받는다(검사용)
+  python3 -I scripts/local-backend.py membership-remove|membership-restore   회원을 "가상 오사카 여행"에서 빼고 되돌린다
+  python3 -I scripts/local-backend.py outsider-check       구성원이 아닌 가상 계정이 지출·객체에 닿지 못하는지 확인
 
 키, 토큰, 가상 계정 비밀번호는 화면에 내지 않는다. CLI 출력은 supabase/.run/(gitignore, 권한 700)에만 남기고,
 앱이 읽을 값은 gitignore된 apps/android/local-backend.properties, apps/ios/Config/Local.xcconfig에만 쓴다.
@@ -157,6 +161,100 @@ def wait_for_gateway(timeout=60):
     sys.exit("[local-backend] API gateway did not come back")
 
 
+UPLOAD_TRIP = "가상 오사카 여행"
+
+
+def rows(sql, log_name):
+    out = query(sql, log_name)
+    start, end = out.find("["), out.rfind("]")
+    return json.loads(out[start:end + 1]) if start >= 0 else []
+
+
+def http(env, method, path, body=None, token=None, key=None, raw=None, content_type="application/json", headers=None):
+    """상태 코드와 서버가 정한 코드만 돌려준다(본문 원문은 필요할 때만, 화면에는 내지 않는다)."""
+    h = {"apikey": key or env["PUBLISHABLE_KEY"], "Content-Type": content_type, **(headers or {})}
+    if token:
+        h["Authorization"] = "Bearer " + token
+    data = raw if raw is not None else (json.dumps(body).encode() if body is not None else None)
+    req = urllib.request.Request(env["API_URL"] + path, method=method, data=data, headers=h)
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+def code_of(raw):
+    try:
+        b = json.loads(raw or b"{}")
+    except ValueError:
+        return None
+    if isinstance(b, list):
+        return f"{len(b)} rows"
+    return b.get("error_code") or (b.get("message") if str(b.get("code", "")).startswith("PT") else None) \
+        or b.get("code") or b.get("error") or b.get("statusCode")
+
+
+def upload_trip_ids():
+    r = rows(f"""select t.id as trip, u.id as member from public.trips t, auth.users u
+               where t.name = '{UPLOAD_TRIP}' and u.email = '{MEMBER[0]}'""", "upload-ids")
+    return r[0]["trip"], r[0]["member"]
+
+
+def upload_report():
+    r = rows(f"""select
+        (select count(*) from storage.objects where bucket_id = 'receipts') as objects,
+        (select count(*) from public.expenses) as expenses,
+        (select count(*) from public.expenses e where not exists (
+           select 1 from storage.objects o where o.bucket_id = 'receipts' and o.name = e.artifact_path)) as expenses_without_object,
+        (select count(*) from storage.objects o where o.bucket_id = 'receipts' and not exists (
+           select 1 from public.expenses e where e.artifact_path = o.name)) as objects_without_expense,
+        (select string_agg(column_name, ',' order by ordinal_position) from information_schema.columns
+           where table_schema = 'public' and table_name = 'expenses') as expense_columns,
+        (select json_agg(json_build_object('date', expense_date, 'amount_minor', amount_minor, 'currency', currency,
+           'merchant', merchant)) from public.expenses) as expense_fields""", "upload-report")
+    print(json.dumps(r[0], ensure_ascii=False))
+
+
+def outsider_check():
+    env = status()
+    trip, _ = upload_trip_ids()
+    objects = rows("select name from storage.objects where bucket_id = 'receipts' order by created_at limit 1", "outsider-objects")
+    password = secrets.token_urlsafe(24)
+    email = "outsider.local@example.com"
+    if not rows(f"select 1 as x from auth.users where email = '{email}'", "outsider-exists"):
+        admin_create_user(env, email, "마바", password)
+    else:
+        query(f"select 1", "outsider-noop")
+        sys.exit("[local-backend] outsider already exists: run reset first")
+    st, raw = http(env, "POST", "/auth/v1/token?grant_type=password", {"email": email, "password": password})
+    token = json.loads(raw)["access_token"]
+    uid = json.loads(raw)["user"]["id"]
+    png = (ROOT / "apps" / "fixtures" / "receipts" / "receipt-r01.png").read_bytes()
+    checks = []
+
+    def check(name, result, ok):
+        checks.append({"check": name, "status": result[0], "code": code_of(result[1]), "denied": ok(result)})
+
+    check("select expenses", http(env, "GET", "/rest/v1/expenses?select=id", token=token), lambda r: r[0] == 200 and json.loads(r[1]) == [])
+    check("select trips", http(env, "GET", "/rest/v1/trips?select=id", token=token), lambda r: r[0] == 200 and json.loads(r[1]) == [])
+    check("list trip objects", http(env, "POST", "/storage/v1/object/list/receipts", {"prefix": trip + "/"}, token=token),
+          lambda r: r[0] == 200 and json.loads(r[1]) == [])
+    if objects:
+        check("download member object", http(env, "GET", "/storage/v1/object/authenticated/receipts/" + objects[0]["name"], token=token),
+              lambda r: r[0] >= 400)
+    check("upload into trip folder", http(env, "POST", f"/storage/v1/object/receipts/{trip}/{uid}/{secrets.token_hex(4)}0000-0000-0000-0000-000000000000.png",
+                                          token=token, raw=png, content_type="image/png"), lambda r: r[0] >= 400)
+    check("submit expense rpc", http(env, "POST", "/rest/v1/rpc/submit_receipt_expense", {
+        "p_trip": trip, "p_request_id": "00000000-0000-4000-8000-000000000001", "p_expense_date": "2026-11-03",
+        "p_amount_minor": 1408, "p_currency": "JPY", "p_merchant": "x", "p_artifact_sha256": "0" * 64}, token=token),
+        lambda r: r[0] == 404 and code_of(r[1]) == "trip_not_found")
+    check("anon select expenses", http(env, "GET", "/rest/v1/expenses?select=id"), lambda r: r[0] >= 400 or json.loads(r[1]) == [])
+    print(json.dumps(checks, ensure_ascii=False))
+    if not all(c["denied"] for c in checks):
+        sys.exit("[local-backend] outsider check FAILED")
+
+
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "up":
@@ -190,8 +288,30 @@ def main():
               where u.email = '{MEMBER[0]}') as member_sessions
         """, "report")
         start, end = out.find("["), out.rfind("]")
-        rows = json.loads(out[start:end + 1]) if start >= 0 else out
-        print(json.dumps(rows, ensure_ascii=False))
+        result = json.loads(out[start:end + 1]) if start >= 0 else out
+        print(json.dumps(result, ensure_ascii=False))
+    elif cmd == "upload-report":
+        upload_report()
+    elif cmd == "fetch-artifact":
+        env = status()
+        path = rows("select artifact_path as p from public.expenses order by created_at limit 1", "fetch-path")[0]["p"]
+        st, raw = http(env, "GET", "/storage/v1/object/receipts/" + path, key=env["SECRET_KEY"], token=env["SECRET_KEY"])
+        if st != 200:
+            sys.exit(f"[local-backend] fetch failed: HTTP {st}")
+        Path(sys.argv[2]).write_bytes(raw)
+        log("fetched the uploaded artifact (admin) for host inspection")
+    elif cmd == "membership-remove":
+        query(f"""delete from public.trip_members where role = 'member'
+                  and trip_id = (select id from public.trips where name = '{UPLOAD_TRIP}')
+                  and user_id = (select id from auth.users where email = '{MEMBER[0]}')""", "membership-remove")
+        log("member removed from the upload trip (destination now invalid for the app)")
+    elif cmd == "membership-restore":
+        query(f"""insert into public.trip_members (trip_id, user_id, role, display_name)
+                  select t.id, u.id, 'member', '{MEMBER[1]}' from public.trips t, auth.users u
+                  where t.name = '{UPLOAD_TRIP}' and u.email = '{MEMBER[0]}' on conflict do nothing""", "membership-restore")
+        log("member restored to the upload trip")
+    elif cmd == "outsider-check":
+        outsider_check()
     else:
         sys.exit(__doc__)
 

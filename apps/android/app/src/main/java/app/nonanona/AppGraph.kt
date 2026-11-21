@@ -2,6 +2,7 @@ package app.nonanona
 
 import android.content.ContentResolver
 import android.content.Context
+import androidx.compose.runtime.Composable
 import app.nonanona.feature.account.AuthGateway
 import app.nonanona.feature.receiptimport.CanvasReceiptFlattener
 import app.nonanona.feature.receiptimport.MlKitReceiptRecognizer
@@ -11,6 +12,7 @@ import app.nonanona.feature.receiptimport.ReceiptFlattener
 import app.nonanona.feature.receiptimport.ReceiptProcessor
 import app.nonanona.feature.receiptimport.ReceiptRecognizer
 import app.nonanona.feature.trip.TripGateway
+import app.nonanona.feature.trip.TripRoom
 import java.io.File
 
 /** 빌드 종류마다 다른 경계 구현체. debug는 src/debug, release는 src/release의 `createAdapters`가 만든다. */
@@ -21,7 +23,25 @@ class Adapters(
     val processingHooks: ProcessingHooks = ProcessingHooks(),
     /** 검토 화면이 정해지기 전의 개발용 확인. release는 null이라 화면에 버튼이 없다. */
     val debugReceiptConfirm: DebugReceiptConfirm? = null,
+    /** 개발용 올리기 화면. release는 null이라 올리기 동작이 화면에 없다. */
+    val debugUploadUi: DebugUploadUi? = null,
 )
+
+/** 초안 화면이 개발용 올리기 화면에 넘기는 값. */
+class DraftUploadContext(
+    val destination: TripRoom?,
+    val confirmedCount: Int,
+    val state: UploadState,
+    val signedIn: Boolean,
+    val onUpload: () -> Unit,
+    val onLogin: () -> Unit,
+)
+
+/** debug 빌드만 제공하는 올리기 화면(문구도 debug 리소스). */
+fun interface DebugUploadUi {
+    @Composable
+    fun Section(context: DraftUploadContext)
+}
 
 /** debug 빌드만 제공하는 개발용 확인. 버튼 문구도 debug 리소스에서 온다. */
 interface DebugReceiptConfirm {

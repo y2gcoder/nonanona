@@ -109,6 +109,8 @@ fun DraftScreen(
     debugConfirmLabel: String?,
     onDebugConfirm: (String) -> Unit,
     onBack: () -> Unit,
+    /** 개발용 올리기처럼 앱 계층이 넣는 화면 조각. release에서는 null. */
+    extraSection: (@Composable () -> Unit)? = null,
 ) {
     Scaffold(
         topBar = { TopAppBar(title = { Text(stringResource(R.string.draft_title)) }, navigationIcon = { NavigateBackButton(onBack) }) },
@@ -143,6 +145,7 @@ fun DraftScreen(
                     }
                 }
             }
+            extraSection?.let { section -> item { section() } }
             itemsIndexed(draft.photos) { index, photo ->
                 PhotoRow(
                     position = index + 1,

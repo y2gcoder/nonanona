@@ -7,6 +7,7 @@ struct AppGraph: Sendable {
   static let appGroup = "group.app.nonanona"
 
   let auth: any AuthGateway
+  let trips: any TripGateway
   let drafts: ReceiptDraftStore
   let joinFlow: JoinFlow
   let recognizer: any ReceiptRecognizer
@@ -21,7 +22,10 @@ struct AppGraph: Sendable {
       if let local = LocalBackendConfig.fromBundle() {
         let session = LocalSupabaseSession(config: local, file: support.appending(path: "local-auth/session.json"))
         auth = LocalAuthGateway(session: session)
-        trips = LocalTripGateway(session: session)
+        trips = LocalTripGateway(
+          session: session,
+          failOnceAfterStorage: ProcessInfo.processInfo.environment["NONANONA_UPLOAD_FAIL_AFTER_STORAGE_ONCE"] == "1"
+            ? LocalTripGateway.FailOnce() : nil)
       } else {
         let test = TestAuthGateway(sessionFile: support.appending(path: "test-auth/session.json"))
         auth = test
@@ -42,7 +46,7 @@ struct AppGraph: Sendable {
       let hooks = ProcessingHooks()
     #endif
     return AppGraph(
-      auth: auth, drafts: drafts, joinFlow: JoinFlow(auth: auth, trips: trips, pendingInvites: pending),
+      auth: auth, trips: trips, drafts: drafts, joinFlow: JoinFlow(auth: auth, trips: trips, pendingInvites: pending),
       recognizer: VisionReceiptRecognizer(), processingHooks: hooks)
   }
 

@@ -35,6 +35,28 @@ struct LocalBackendMappingTests {
     #expect(LocalAuthGateway.signInFailure(outcome) == expected)
   }
 
+  @Test(arguments: [
+    (Outcome.transport, ReceiptUploadFailure.network),
+    (.http(status: 404, code: "trip_not_found"), .destinationUnavailable),
+    (.http(status: 400, code: "refresh_token_not_found"), .sessionExpired),
+    (.http(status: 401, code: "not_authenticated"), .sessionExpired),
+    (.http(status: 503, code: nil), .unavailable),
+    (.http(status: 409, code: "artifact_missing"), .unknown),
+    (.http(status: 409, code: "idempotency_conflict"), .unknown),
+  ])
+  func uploadMapping(outcome: Outcome, expected: ReceiptUploadFailure) {
+    #expect(LocalTripGateway.uploadFailure(outcome) == expected)
+  }
+
+  /// 같은 여행방·같은 사본이면 같은 요청 키(두 플랫폼이 같은 값을 만든다), 다른 여행방이면 다른 키.
+  @Test func uploadRequestIDIsDeterministicAndSharedAcrossPlatforms() {
+    let sha = String(repeating: "a", count: 64)
+    let key = ReceiptExpenseUpload.requestID(trip: TripID(value: "trip-1"), artifactSHA256: sha)
+    #expect(key.uuidString.lowercased() == "a58ef2bd-d738-5416-93a2-4dd4a40cb4d1")
+    #expect(key == ReceiptExpenseUpload.requestID(trip: TripID(value: "trip-1"), artifactSHA256: sha))
+    #expect(key != ReceiptExpenseUpload.requestID(trip: TripID(value: "trip-2"), artifactSHA256: sha))
+  }
+
   @Test func serverCodeReadsOnlyMachineFields() {
     func code(_ json: String) -> String? { LocalSupabaseSession.serverCode(Data(json.utf8)) }
     #expect(code(#"{"code":400,"error_code":"refresh_token_not_found","msg":"x"}"#) == "refresh_token_not_found")

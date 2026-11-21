@@ -212,7 +212,10 @@ struct ReceiptProcessorTests {
     let id = try #require(await processor.snapshot().items.first?.id)
     let proposal = try await processor.proposal(id)
     let receipt = try await processor.confirm(id, fields: proposal.fields, maskLineIDs: [])
-    #expect(try await processor.outboundReceipts() == [receipt], "확인한 한 장만")
+    let outbound = try await processor.outboundReceipts()
+    #expect(outbound.map(\.receipt) == [receipt], "확인한 한 장만")
+    let stored = try Data(contentsOf: store.artifactURL(draft.id, receipt.artifactFileName))
+    #expect(outbound.first?.artifactPNG == stored)
 
     // 가림 사본이 원본으로 바뀌면 내보내지 않는다.
     let original = try Data(contentsOf: store.photoURL(draft.id, draft.photoFileNames[0]))

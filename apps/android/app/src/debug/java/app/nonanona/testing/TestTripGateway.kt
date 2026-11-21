@@ -4,11 +4,16 @@ import app.nonanona.feature.account.AuthGateway
 import app.nonanona.feature.trip.InviteAcceptException
 import app.nonanona.feature.trip.InviteAcceptFailure
 import app.nonanona.feature.trip.InviteCode
+import app.nonanona.feature.trip.ReceiptExpenseUpload
+import app.nonanona.feature.trip.ReceiptUploadException
+import app.nonanona.feature.trip.ReceiptUploadFailure
+import app.nonanona.feature.trip.SubmittedExpense
 import app.nonanona.feature.trip.TripGateway
 import app.nonanona.feature.trip.TripId
 import app.nonanona.feature.trip.TripMember
 import app.nonanona.feature.trip.TripRoom
 import kotlinx.coroutines.delay
+import java.util.UUID
 
 /**
  * debug 빌드 전용 여행방 구현체. 가상 여행방 하나로 초대를 수락한다. 로그인 전에는 세션 만료로 거절한다.
@@ -36,6 +41,21 @@ class TestTripGateway(
                     TripMember(displayName = session.displayName, isHost = false, isMe = true),
                 ),
         )
+    }
+
+    private val uploads = mutableMapOf<UUID, String>()
+
+    /** 가상 여행방에 기기 안에서만 기록한다. 같은 요청 키는 같은 결과를 돌려준다. */
+    override suspend fun submitReceipt(
+        upload: ReceiptExpenseUpload,
+        trip: TripId,
+    ): SubmittedExpense {
+        auth.restoreSession() ?: throw ReceiptUploadException(ReceiptUploadFailure.SessionExpired)
+        delay(200)
+        return synchronized(uploads) {
+            uploads[upload.requestId]?.let { SubmittedExpense(it, replayed = true) }
+                ?: SubmittedExpense("test-expense-${uploads.size + 1}", replayed = false).also { uploads[upload.requestId] = it.expenseId }
+        }
     }
 
     private fun fixtureFailure(code: InviteCode): InviteAcceptFailure? =

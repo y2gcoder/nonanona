@@ -105,18 +105,46 @@ class LocalSupabaseSession(
     suspend fun rpc(
         name: String,
         body: JSONObject,
-    ): JSONObject =
+    ): JSONObject = JSONObject(String(authorized("/rest/v1/rpc/$name", body.toString().toByteArray(), "application/json")))
+
+    /** 인증한 요청. 만료가 가까우면 먼저 갱신하고, JWT를 거절하면 한 번 갱신해 다시 보낸다. */
+    suspend fun authorized(
+        path: String,
+        body: ByteArray,
+        contentType: String,
+    ): ByteArray =
         lock.withLock {
             var session = read() ?: throw LocalBackendException(Outcome.Http(401, null))
             if (session.expiresAtMillis - clock() < 5_000) session = refresh(session)
-            val path = "/rest/v1/rpc/$name"
             try {
-                send(path, body, session.accessToken)
+                send(path, body, contentType, session.accessToken)
             } catch (e: LocalBackendException) {
                 if (!isRejectedJwt(e.outcome)) throw e
-                send(path, body, refresh(session).accessToken)
+                send(path, body, contentType, refresh(session).accessToken)
             }
         }
+
+    /** Auth가 지금 세션을 받아들이는지 확인한다(Storage는 잘못된 토큰과 권한 없음을 같은 코드로 알리므로 구분용). */
+    suspend fun isSessionValid(): Boolean {
+        val token = stored()?.accessToken ?: return false
+        return try {
+            runInterruptible(Dispatchers.IO) {
+                val connection = URI(config.baseUrl + "/auth/v1/user").toURL().openConnection() as HttpURLConnection
+                try {
+                    connection.connectTimeout = TIMEOUT_MILLIS
+                    connection.readTimeout = TIMEOUT_MILLIS
+                    connection.setRequestProperty("apikey", config.publishableKey)
+                    connection.setRequestProperty("Authorization", "Bearer $token")
+                    connection.responseCode == 200
+                } finally {
+                    connection.disconnect()
+                }
+            }
+        } catch (e: IOException) {
+            currentCoroutineContext().ensureActive()
+            true
+        }
+    }
 
     private suspend fun refresh(session: Stored): Stored = token("refresh_token", JSONObject().put("refresh_token", session.refreshToken))
 
@@ -124,7 +152,8 @@ class LocalSupabaseSession(
         grant: String,
         body: JSONObject,
     ): Stored {
-        val json = send("/auth/v1/token?grant_type=$grant", body, bearer = null)
+        val json =
+            JSONObject(String(send("/auth/v1/token?grant_type=$grant", body.toString().toByteArray(), "application/json", bearer = null)))
         val user = json.getJSONObject("user")
         val session =
             Stored(
@@ -140,9 +169,10 @@ class LocalSupabaseSession(
 
     private suspend fun send(
         path: String,
-        body: JSONObject,
+        body: ByteArray,
+        contentType: String,
         bearer: String?,
-    ): JSONObject {
+    ): ByteArray {
         val result =
             try {
                 runInterruptible(Dispatchers.IO) {
@@ -152,13 +182,13 @@ class LocalSupabaseSession(
                         connection.connectTimeout = TIMEOUT_MILLIS
                         connection.readTimeout = TIMEOUT_MILLIS
                         connection.doOutput = true
-                        connection.setRequestProperty("Content-Type", "application/json")
+                        connection.setRequestProperty("Content-Type", contentType)
                         connection.setRequestProperty("apikey", config.publishableKey)
                         bearer?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
-                        connection.outputStream.use { it.write(body.toString().toByteArray()) }
+                        connection.outputStream.use { it.write(body) }
                         val status = connection.responseCode
                         val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-                        status to stream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                        status to (stream?.use { it.readBytes() } ?: ByteArray(0))
                     } finally {
                         connection.disconnect()
                     }
@@ -168,9 +198,9 @@ class LocalSupabaseSession(
                 currentCoroutineContext().ensureActive()
                 throw LocalBackendException(Outcome.Transport)
             }
-        val (status, text) = result
-        if (status in 200..299) return JSONObject(text)
-        val error = runCatching { JSONObject(text) }.getOrNull()
+        val (status, bytes) = result
+        if (status in 200..299) return bytes
+        val error = runCatching { JSONObject(String(bytes)) }.getOrNull()
         val code =
             serverCode(
                 errorCode = error?.optString("error_code")?.takeIf { it.isNotEmpty() },

@@ -2,6 +2,9 @@ package app.nonanona
 
 import app.nonanona.feature.account.SignInFailure
 import app.nonanona.feature.trip.InviteAcceptFailure
+import app.nonanona.feature.trip.ReceiptExpenseUpload
+import app.nonanona.feature.trip.ReceiptUploadFailure
+import app.nonanona.feature.trip.TripId
 import app.nonanona.localbackend.LocalAuthGateway
 import app.nonanona.localbackend.LocalBackendConfig
 import app.nonanona.localbackend.LocalTripGateway
@@ -10,6 +13,7 @@ import app.nonanona.localbackend.isRejectedJwt
 import app.nonanona.localbackend.serverCode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -35,6 +39,31 @@ class LocalBackendMappingTest {
                 Outcome.Http(410, null) to InviteAcceptFailure.Unknown,
             )
         cases.forEach { (outcome, expected) -> assertEquals("$outcome", expected, LocalTripGateway.acceptFailure(outcome)) }
+    }
+
+    @Test
+    fun uploadMapping() {
+        val cases =
+            mapOf(
+                Outcome.Transport to ReceiptUploadFailure.Network,
+                Outcome.Http(404, "trip_not_found") to ReceiptUploadFailure.DestinationUnavailable,
+                Outcome.Http(400, "refresh_token_not_found") to ReceiptUploadFailure.SessionExpired,
+                Outcome.Http(401, "not_authenticated") to ReceiptUploadFailure.SessionExpired,
+                Outcome.Http(503, null) to ReceiptUploadFailure.Unavailable,
+                Outcome.Http(409, "artifact_missing") to ReceiptUploadFailure.Unknown,
+                Outcome.Http(409, "idempotency_conflict") to ReceiptUploadFailure.Unknown,
+            )
+        cases.forEach { (outcome, expected) -> assertEquals("$outcome", expected, LocalTripGateway.uploadFailure(outcome)) }
+    }
+
+    /** 같은 여행방·같은 사본이면 같은 요청 키(두 플랫폼이 같은 값을 만든다), 다른 여행방이면 다른 키. */
+    @Test
+    fun uploadRequestIdIsDeterministicAndSharedAcrossPlatforms() {
+        val sha = "a".repeat(64)
+        val key = ReceiptExpenseUpload.requestId(TripId("trip-1"), sha)
+        assertEquals("a58ef2bd-d738-5416-93a2-4dd4a40cb4d1", key.toString())
+        assertEquals(key, ReceiptExpenseUpload.requestId(TripId("trip-1"), sha))
+        assertNotEquals(key, ReceiptExpenseUpload.requestId(TripId("trip-2"), sha))
     }
 
     @Test

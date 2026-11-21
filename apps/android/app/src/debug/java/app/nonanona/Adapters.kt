@@ -28,8 +28,9 @@ internal fun createAdapters(context: Context): Adapters {
         val session = LocalSupabaseSession(local, File(context.noBackupFilesDir, "local-auth/session.properties"))
         return Adapters(
             auth = LocalAuthGateway(session, context.getString(R.string.local_login_notice)),
-            trips = LocalTripGateway(session),
+            trips = LocalTripGateway(session, failOnceAfterStorage = debugFlag(context, "uploadFailAfterStorageOnce")),
             processingHooks = processingHooks(context),
+            debugUploadUi = DebugUploadSection,
             debugReceiptConfirm = confirmWithSuggestions(context),
         )
     }
@@ -43,7 +44,18 @@ internal fun createAdapters(context: Context): Adapters {
         trips = TestTripGateway(auth),
         processingHooks = processingHooks(context),
         debugReceiptConfirm = confirmWithSuggestions(context),
+        debugUploadUi = DebugUploadSection,
     )
+}
+
+/** 검증용: files/debug-processing.properties의 참/거짓 설정을 읽는다. */
+private fun debugFlag(
+    context: Context,
+    name: String,
+): Boolean {
+    val file = File(context.filesDir, "debug-processing.properties")
+    if (!file.isFile) return false
+    return Properties().apply { file.reader(Charsets.UTF_8).use { load(it) } }.getProperty(name) == "true"
 }
 
 /** 검증용: files/debug-processing.properties(delayMillisPerItem, failFirstAttemptAtPosition)가 있으면 읽는다. */

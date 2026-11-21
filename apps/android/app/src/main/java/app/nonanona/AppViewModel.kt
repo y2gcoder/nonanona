@@ -11,6 +11,7 @@ import app.nonanona.feature.account.AccountSession
 import app.nonanona.feature.account.LoginState
 import app.nonanona.feature.account.SignInFailure
 import app.nonanona.feature.account.SignInProvider
+import app.nonanona.feature.receiptimport.BoundaryViolation
 import app.nonanona.feature.receiptimport.DraftSource
 import app.nonanona.feature.receiptimport.ProcessingManifest
 import app.nonanona.feature.receiptimport.ReceiptDraft
@@ -21,6 +22,9 @@ import app.nonanona.feature.receiptimport.sharedImageUris
 import app.nonanona.feature.trip.InviteAcceptFailure
 import app.nonanona.feature.trip.InviteCode
 import app.nonanona.feature.trip.JoinState
+import app.nonanona.feature.trip.ReceiptExpenseUpload
+import app.nonanona.feature.trip.ReceiptUploadException
+import app.nonanona.feature.trip.ReceiptUploadFailure
 import app.nonanona.feature.trip.TripRoom
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +44,22 @@ sealed interface Route {
     data object Invite : Route
 
     data object Room : Route
+}
+
+sealed interface UploadState {
+    data object Idle : UploadState
+
+    data object Uploading : UploadState
+
+    data class Done(
+        val created: Int,
+        val replayed: Int,
+    ) : UploadState
+
+    data class Failed(
+        val failure: ReceiptUploadFailure,
+        val uploadedBefore: Int,
+    ) : UploadState
 }
 
 sealed interface Notice {
@@ -63,6 +83,8 @@ data class AppUiState(
     val notice: Notice? = null,
     /** 초안별 사진 처리 상태. 처리기가 디스크에 쓴 뒤 알려 준다. */
     val processing: Map<String, ProcessingManifest> = emptyMap(),
+    /** 초안별 올리기 상태. 개발용 올리기 화면이 쓴다. */
+    val uploads: Map<String, UploadState> = emptyMap(),
 )
 
 /** 화면 상태와 화면 이동. 저장과 경계 호출은 저장소·JoinFlow에 맡긴다. */
@@ -127,6 +149,7 @@ class AppViewModel(
 
     /** debug 빌드에서만 값이 있다(개발용 확인 버튼 문구). */
     val debugConfirmLabel: String? get() = graph.adapters.debugReceiptConfirm?.label
+    val debugUploadUi: DebugUploadUi? get() = graph.adapters.debugUploadUi
 
     /** 처리할 사진이 남은 초안마다 처리기를 만들어 돌린다. 처리기를 만들 때 끝나지 않은 사진을 대기열로 되돌린다. */
     private fun startProcessing(drafts: List<ReceiptDraft>) {
@@ -151,6 +174,66 @@ class AppViewModel(
 
     private fun publish(manifest: ProcessingManifest) =
         mutableState.update { it.copy(processing = it.processing + (manifest.draftId to manifest)) }
+
+    /**
+     * 확인한 영수증을 참여한 여행방에 올린다. 사용자가 올릴 곳과 장수를 보고 최종 확인한 뒤에만 부른다.
+     * 기기 경계(outboundReceipts)를 지난 가림 사본과 허용 필드만 보낸다. 한 장이라도 실패하면 거기서 멈춘다.
+     */
+    fun uploadConfirmedReceipts(
+        draftId: String,
+        room: TripRoom,
+    ) {
+        val processor = processors[draftId] ?: return
+        if (state.value.uploads[draftId] == UploadState.Uploading) return
+        setUpload(draftId, UploadState.Uploading)
+        viewModelScope.launch {
+            val outbound =
+                try {
+                    processor.outboundReceipts()
+                } catch (e: BoundaryViolation) {
+                    setUpload(draftId, UploadState.Failed(ReceiptUploadFailure.Unknown, 0))
+                    return@launch
+                }
+            var created = 0
+            var replayed = 0
+            for (item in outbound) {
+                val fields = item.receipt.fields
+                val upload =
+                    ReceiptExpenseUpload(
+                        requestId = ReceiptExpenseUpload.requestId(room.id, item.receipt.artifactSha256),
+                        date = fields.date,
+                        amountMinor = fields.amountMinor,
+                        currency = fields.currency,
+                        merchant = fields.merchant,
+                        artifactPng = item.artifactPng,
+                        artifactSha256 = item.receipt.artifactSha256,
+                    )
+                val failure =
+                    try {
+                        val result = graph.adapters.trips.submitReceipt(upload, room.id)
+                        if (result.replayed) replayed++ else created++
+                        null
+                    } catch (e: ReceiptUploadException) {
+                        e.failure
+                    }
+                if (failure != null) {
+                    if (failure == ReceiptUploadFailure.SessionExpired) {
+                        // 세션만 지운다. 초안·확인한 사본은 그대로이고, 다시 로그인한 뒤 같은 요청 키로 다시 올린다.
+                        graph.adapters.auth.endSession()
+                        mutableState.update { it.copy(session = null) }
+                    }
+                    setUpload(draftId, UploadState.Failed(failure, created + replayed))
+                    return@launch
+                }
+            }
+            setUpload(draftId, UploadState.Done(created, replayed))
+        }
+    }
+
+    private fun setUpload(
+        draftId: String,
+        upload: UploadState,
+    ) = mutableState.update { it.copy(uploads = it.uploads + (draftId to upload)) }
 
     /** 실패한 사진 한 장만 다시 읽는다. */
     fun retryPhoto(

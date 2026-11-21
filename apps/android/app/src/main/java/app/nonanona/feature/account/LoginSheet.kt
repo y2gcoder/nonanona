@@ -28,7 +28,17 @@ import app.nonanona.design.StatusLabel
 import app.nonanona.design.StatusRole
 import app.nonanona.design.TextRoles
 
-enum class LoginState { Hidden, Choosing, SigningIn, Failed }
+sealed interface LoginState {
+    data object Hidden : LoginState
+
+    data object Choosing : LoginState
+
+    data object SigningIn : LoginState
+
+    data class Failed(
+        val failure: SignInFailure,
+    ) : LoginState
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
@@ -83,19 +93,25 @@ fun LoginSheet(
                     }
                 }
 
-                LoginState.Failed -> {
+                is LoginState.Failed -> {
+                    // 다시 시도는 같은 제공자 버튼으로 한다. 제공자 원문은 보여 주지 않는다.
                     Text(
-                        stringResource(R.string.login_failed),
+                        stringResource(state.failure.messageRes()),
                         style = TextRoles.supporting,
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.testTag("login_failed"),
                     )
                 }
 
-                LoginState.Hidden, LoginState.Choosing -> {
-                    Unit
-                }
+                LoginState.Hidden, LoginState.Choosing -> {}
             }
         }
     }
 }
+
+private fun SignInFailure.messageRes(): Int =
+    when (this) {
+        SignInFailure.Network -> R.string.failure_network
+        SignInFailure.Unavailable -> R.string.login_failure_unavailable
+        SignInFailure.Cancelled, SignInFailure.Unknown -> R.string.login_failed
+    }

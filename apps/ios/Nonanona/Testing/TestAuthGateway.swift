@@ -14,13 +14,25 @@
       return try? JSONDecoder().decode(AccountSession.self, from: data)
     }
 
-    func signIn(with provider: SignInProvider) async throws -> AccountSession {
-      try await Task.sleep(for: .milliseconds(600))
+    func signIn(with provider: SignInProvider) async throws(SignInFailure) -> AccountSession {
+      do {
+        try await Task.sleep(for: .milliseconds(600))
+      } catch {
+        throw .cancelled
+      }
       let session = AccountSession(accountID: AccountID(value: "test-account-0001"), displayName: "가나")
-      try FileManager.default.createDirectory(
-        at: sessionFile.deletingLastPathComponent(), withIntermediateDirectories: true)
-      try JSONEncoder().encode(session).write(to: sessionFile, options: .atomic)
+      do {
+        try FileManager.default.createDirectory(
+          at: sessionFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONEncoder().encode(session).write(to: sessionFile, options: .atomic)
+      } catch {
+        throw .unknown
+      }
       return session
+    }
+
+    func endSession() async {
+      try? FileManager.default.removeItem(at: sessionFile)
     }
   }
 #endif

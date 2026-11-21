@@ -122,6 +122,54 @@ def capture_core_screen_variants():
     log("captured core screen: light, dark, font_scale 2.0")
 
 
+def open_invite(code):
+    u.sh(f"am start -a android.intent.action.VIEW -d nonanona://invite/{code}")
+    u.wait(text="여행방에 초대받았어요", timeout=20)
+
+
+def invite_failures_recover():
+    """debug 테스트 구현체의 가상 초대 코드로 실패와 복구를 확인한다. 앞 단계의 초안과 로그인 상태를 이어 쓴다."""
+    # 연결 실패 → 같은 초대로 다시 시도 → 참여.
+    open_invite("SYNTHOFFLINE01")
+    u.tap(u.wait(id="invite_primary"))
+    u.wait(contains="인터넷에 연결할 수 없어요", timeout=15)
+    assert u.texts_within("invite_primary") == ["다시 시도"]
+    shot("android-invite-network-failure")
+    u.tap(u.wait(id="invite_primary"))
+    u.wait(id="room_status", timeout=20)
+    u.back()
+
+    # 만료된 초대 → 새 링크 요청 문구, 다시 시도 버튼 없음, 초대 카드 사라짐.
+    open_invite("SYNTHEXPIRED01")
+    u.tap(u.wait(id="invite_primary"))
+    u.wait(contains="방장에게 새 링크를 요청해 주세요", timeout=15)
+    assert u.texts_within("invite_status") == ["초대 만료됨"]
+    assert not u.find(id="invite_primary"), "expired invite offers no retry"
+    shot("android-invite-expired")
+    u.back()
+    u.wait(id="draft_row", timeout=15)
+    assert not u.find(id="pending_invite_card")
+
+    # 세션 만료 → 로그아웃 상태지만 초안과 초대는 남음 → 다시 로그인 → 같은 초대로 참여.
+    open_invite("SYNTHSESSION01")
+    u.tap(u.wait(id="invite_primary"))
+    u.wait(contains="로그인이 만료됐어요", timeout=15)
+    assert u.texts_within("invite_primary") == ["다시 로그인하기"]
+    shot("android-invite-session-expired")
+    expired = state("after-session-expired")
+    assert expired["drafts"] == "1" and expired["pending_invite"] == "SYNTHSESSION01" and expired["test_session"] == "no", expired
+    u.back()
+    u.wait(id="pending_invite_card", timeout=15)
+    assert u.texts_within("account_status") == ["로그인 안 됨"] and u.find(id="draft_row")
+    u.tap(u.wait(id="pending_invite_open"))
+    u.tap(u.wait(id="invite_primary"))
+    u.tap(u.wait(id="login_google", timeout=15))
+    u.wait(id="room_status", timeout=20)
+    after = state("after-invite-failures")
+    assert after["drafts"] == "1" and after["pending_invite"] == "none" and after["test_session"] == "yes", after
+    log("invite failures: network retry, expired without retry, session expired re-login")
+
+
 def main():
     apk = sys.argv[1]
     (OUT / "screens").mkdir(parents=True, exist_ok=True)
@@ -196,6 +244,7 @@ def main():
     shot("android-home-signed-in")
     after = state("after-sign-in-and-join")
     assert after["drafts"] == "1" and after["pending_invite"] == "none" and after["test_session"] == "yes", after
+    invite_failures_recover()
     log("PASS")
 
 

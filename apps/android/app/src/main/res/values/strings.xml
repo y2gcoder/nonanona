@@ -30,6 +30,7 @@
     <string name="invite_card_body">로그인하면 바로 참여할 수 있어요.</string>
     <string name="invite_card_action">초대 보기</string>
     <string name="status_invite_pending">초대 대기 중</string>
+    <string name="status_invite_expired">초대 만료됨</string>
     <string name="invite_title">여행방 초대</string>
     <string name="invite_heading">여행방에 초대받았어요</string>
     <string name="invite_body_signed_out">참여하려면 로그인해 주세요. 공유한 영수증 초안은 그대로 남아요.</string>
@@ -38,6 +39,12 @@
     <string name="invite_action_join">참여하기</string>
     <string name="invite_joining">참여하는 중…</string>
     <string name="invite_failed">참여하지 못했어요. 다시 시도해 주세요.</string>
+    <string name="invite_failure_session_expired">로그인이 만료됐어요. 다시 로그인하면 이어서 참여해요.</string>
+    <string name="invite_failure_expired">초대 링크가 만료됐어요. 방장에게 새 링크를 요청해 주세요.</string>
+    <string name="invite_failure_unavailable">지금은 여행방에 참여할 수 없어요. 잠시 후 다시 시도해 주세요.</string>
+    <string name="invite_action_relogin">다시 로그인하기</string>
+    <string name="action_retry">다시 시도</string>
+    <string name="failure_network">인터넷에 연결할 수 없어요. 연결을 확인하고 다시 시도해 주세요.</string>
 
     <string name="login_title">로그인</string>
     <string name="login_body">여행방을 만들거나 초대를 수락하려면 로그인해요.</string>
@@ -45,6 +52,7 @@
     <string name="login_in_progress">로그인하는 중…</string>
     <string name="login_failed">로그인하지 못했어요. 다시 시도해 주세요.</string>
     <string name="login_unavailable">지금은 로그인할 수 없어요.</string>
+    <string name="login_failure_unavailable">지금은 로그인할 수 없어요. 잠시 후 다시 시도해 주세요.</string>
 
     <string name="room_status_joined">참여함</string>
     <string name="room_members">일행</string>

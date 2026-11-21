@@ -9,12 +9,14 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import app.nonanona.feature.account.AccountSession
 import app.nonanona.feature.account.LoginState
+import app.nonanona.feature.account.SignInFailure
 import app.nonanona.feature.account.SignInProvider
 import app.nonanona.feature.receiptimport.DraftSource
 import app.nonanona.feature.receiptimport.ReceiptDraft
 import app.nonanona.feature.receiptimport.ReceiptDraftStore
 import app.nonanona.feature.receiptimport.incomingPhoto
 import app.nonanona.feature.receiptimport.sharedImageUris
+import app.nonanona.feature.trip.InviteAcceptFailure
 import app.nonanona.feature.trip.InviteCode
 import app.nonanona.feature.trip.JoinState
 import app.nonanona.feature.trip.TripRoom
@@ -130,13 +132,18 @@ class AppViewModel(
     fun signIn(provider: SignInProvider) {
         viewModelScope.launch {
             mutableState.update { it.copy(login = LoginState.SigningIn) }
-            val session = runCatching { graph.joinFlow.signIn(provider) }.getOrNull()
-            if (session == null) {
-                mutableState.update { it.copy(login = LoginState.Failed) }
-                return@launch
+            when (val result = graph.joinFlow.signIn(provider)) {
+                is SignInResult.SignedIn -> {
+                    mutableState.update { it.copy(session = result.session, login = LoginState.Hidden) }
+                    joinPendingInvite()
+                }
+
+                // 취소는 오류로 보이지 않고 고르기 상태로 돌아간다. 초안과 보관한 초대는 그대로다.
+                is SignInResult.Failed -> {
+                    val next = if (result.failure == SignInFailure.Cancelled) LoginState.Choosing else LoginState.Failed(result.failure)
+                    mutableState.update { it.copy(login = next) }
+                }
             }
-            mutableState.update { it.copy(session = session, login = LoginState.Hidden) }
-            joinPendingInvite()
         }
     }
 
@@ -146,14 +153,30 @@ class AppViewModel(
 
     private suspend fun joinPendingInvite() {
         mutableState.update { it.copy(join = JoinState.Joining) }
-        val result = runCatching { io { graph.joinFlow.joinPendingInvite() } }
-        val room = result.getOrNull()
-        if (result.isFailure || room == null) {
-            mutableState.update { it.copy(join = if (result.isFailure) JoinState.Failed else JoinState.Idle) }
-            return
+        when (val result = io { graph.joinFlow.joinPendingInvite() }) {
+            is JoinResult.Joined -> {
+                mutableState.update { it.copy(room = result.room, pendingInvite = null, join = JoinState.Idle) }
+                showOnly(Route.Home, Route.Room)
+            }
+
+            JoinResult.NoPendingInvite -> {
+                mutableState.update { it.copy(join = JoinState.Idle) }
+            }
+
+            is JoinResult.Failed -> {
+                mutableState.update {
+                    when (result.failure) {
+                        // 세션만 지웠다. 초대 화면에서 다시 로그인하면 같은 초대로 이어서 참여한다.
+                        InviteAcceptFailure.SessionExpired -> it.copy(session = null, join = JoinState.Failed(result.failure))
+
+                        // 초대를 지웠다. 홈의 초대 카드도 사라진다.
+                        InviteAcceptFailure.InviteExpired -> it.copy(pendingInvite = null, join = JoinState.Failed(result.failure))
+
+                        else -> it.copy(join = JoinState.Failed(result.failure))
+                    }
+                }
+            }
         }
-        mutableState.update { it.copy(room = room, pendingInvite = null, join = JoinState.Idle) }
-        showOnly(Route.Home, Route.Room)
     }
 
     private fun openInvite(code: InviteCode) {

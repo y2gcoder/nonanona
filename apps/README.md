@@ -27,6 +27,20 @@ iOS(SwiftUI)와 Android(Kotlin, Compose) 네이티브 앱의 뼈대다. 이번 �
 - release 앱에서 로그인 시트를 열면 "지금은 로그인할 수 없어요."만 보이고 로그인 버튼이 없다. iOS는 `mise run ios:release-check`로, Android는 release APK를 로컬 디버그 키로 서명해 설치하고 같은 화면을 확인했다.
 - Android 앱은 INTERNET 권한을 요청하지 않는다.
 
+### 실패 처리
+
+경계 구현체는 실패를 기능이 가진 작은 타입으로만 알린다. 화면 문구와 다음 동작은 이 값으로 정하고, 제공자·서버의 원문이나 코드는 화면에 보이지 않는다. 실제 제공자·Supabase 오류를 이 값으로 옮기는 일은 실제 구현체를 붙일 때 한다.
+
+| 기능 | 값 | 앱 동작 |
+| --- | --- | --- |
+| 계정 `SignInFailure` | `cancelled` | 오류로 보이지 않고 로그인 시트의 고르기 상태로 돌아간다 |
+| | `network`, `unavailable`, `unknown` | 시트에 문구를 보이고 같은 제공자 버튼으로 다시 시도한다 |
+| 여행방 `InviteAcceptFailure` | `sessionExpired` | 기기의 세션만 지운다. 초대는 남고 "다시 로그인하기" 후 같은 초대로 참여한다 |
+| | `inviteExpired` | 보관한 초대를 지우고 새 링크를 요청하라고 안내한다. 다시 시도 버튼은 없다 |
+| | `network`, `unavailable`, `unknown` | 초대를 남기고 "다시 시도"로 같은 요청을 보낸다 |
+
+어떤 실패도 기기에 저장한 초안을 건드리지 않는다. 판단은 두 앱의 `JoinFlow`에 있고 단위 테스트가 가짜 경계로 각 실패의 발생과 복구를 확인한다. debug 테스트 구현체는 가상 초대 코드 `SYNTHOFFLINE01`(첫 시도 연결 실패), `SYNTHEXPIRED01`(초대 만료), `SYNTHSESSION01`(첫 시도 세션 만료)로 같은 흐름을 기기에서 재현하고, 두 E2E가 정상 흐름 뒤에 이 세 경우를 확인한다.
+
 ## 명령
 
 저장소 루트에서 `mise run setup`, `mise run doctor`. Android SDK 위치는 `ANDROID_HOME` 또는 `apps/android/local.properties`(`sdk.dir=…`, gitignore)로 정한다.
@@ -52,6 +66,7 @@ iOS 단위 테스트와 release 확인은 `IOS_DESTINATION`(기본 `platform=iOS
 3. 로그인 시트가 열린 채로 앱 프로세스를 SIGKILL로 끝낸다. 디스크에 초안 1장·사진 1장·보관한 초대가 있고 세션은 없는지 확인한다.
 4. 홈 화면 아이콘(iOS)·런처 인텐트(Android)로 다시 연다. 초대 화면으로 돌아오고, 홈에 초안과 초대 카드가 그대로 있다. 이 화면을 라이트·다크·큰 글자로 찍는다.
 5. 테스트 로그인 → "가상 도쿄 여행" 여행방(참여함, 일행 2명). 보관한 초대는 지워지고 초안은 남는다.
+6. 가상 초대 코드로 연결 실패 → 다시 시도, 초대 만료(다시 시도 없음, 초대 카드 사라짐), 세션 만료 → 로그아웃 상태에서도 초안·초대 유지 → 다시 로그인 → 참여를 확인한다.
 
 ## 버전
 

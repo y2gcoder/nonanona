@@ -39,7 +39,15 @@ import app.nonanona.design.StatusLabel
 import app.nonanona.design.StatusRole
 import app.nonanona.design.TextRoles
 
-enum class JoinState { Idle, Joining, Failed }
+sealed interface JoinState {
+    data object Idle : JoinState
+
+    data object Joining : JoinState
+
+    data class Failed(
+        val failure: InviteAcceptFailure,
+    ) : JoinState
+}
 
 @Composable
 fun PendingInviteCard(
@@ -85,7 +93,11 @@ fun InviteScreen(
                     .testTag("invite_screen"),
             verticalArrangement = Arrangement.spacedBy(Spacing.m),
         ) {
-            StatusLabel(stringResource(R.string.status_invite_pending), StatusRole.Attention)
+            if ((join as? JoinState.Failed)?.failure == InviteAcceptFailure.InviteExpired) {
+                StatusLabel(stringResource(R.string.status_invite_expired), StatusRole.Error, Modifier.testTag("invite_status"))
+            } else {
+                StatusLabel(stringResource(R.string.status_invite_pending), StatusRole.Attention, Modifier.testTag("invite_status"))
+            }
             Text(stringResource(R.string.invite_heading), style = MaterialTheme.typography.headlineSmall)
             Text(
                 stringResource(if (signedIn) R.string.invite_body_signed_in else R.string.invite_body_signed_out),
@@ -99,29 +111,47 @@ fun InviteScreen(
                     }
                 }
 
-                JoinState.Failed -> {
+                is JoinState.Failed -> {
                     Text(
-                        stringResource(R.string.invite_failed),
+                        stringResource(join.failure.messageRes()),
                         style = TextRoles.supporting,
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.testTag("invite_failed"),
                     )
                 }
 
-                JoinState.Idle -> {
-                    Unit
-                }
+                JoinState.Idle -> {}
             }
-            Button(
-                onClick = if (signedIn) onJoin else onLogin,
-                enabled = join != JoinState.Joining,
-                modifier = Modifier.fillMaxWidth().testTag("invite_primary"),
-            ) {
-                Text(stringResource(if (signedIn) R.string.invite_action_join else R.string.invite_action_login))
+            val failure = (join as? JoinState.Failed)?.failure
+            // 만료된 초대는 다시 시도해도 소용없으므로 버튼을 두지 않는다.
+            if (failure != InviteAcceptFailure.InviteExpired) {
+                val (label, action) =
+                    when {
+                        !signedIn && failure == InviteAcceptFailure.SessionExpired -> R.string.invite_action_relogin to onLogin
+                        !signedIn -> R.string.invite_action_login to onLogin
+                        failure != null -> R.string.action_retry to onJoin
+                        else -> R.string.invite_action_join to onJoin
+                    }
+                Button(
+                    onClick = action,
+                    enabled = join != JoinState.Joining,
+                    modifier = Modifier.fillMaxWidth().testTag("invite_primary"),
+                ) {
+                    Text(stringResource(label))
+                }
             }
         }
     }
 }
+
+private fun InviteAcceptFailure.messageRes(): Int =
+    when (this) {
+        InviteAcceptFailure.SessionExpired -> R.string.invite_failure_session_expired
+        InviteAcceptFailure.InviteExpired -> R.string.invite_failure_expired
+        InviteAcceptFailure.Network -> R.string.failure_network
+        InviteAcceptFailure.Unavailable -> R.string.invite_failure_unavailable
+        InviteAcceptFailure.Unknown -> R.string.invite_failed
+    }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

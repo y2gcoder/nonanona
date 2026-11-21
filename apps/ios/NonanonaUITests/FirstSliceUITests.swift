@@ -73,6 +73,61 @@ final class FirstSliceUITests: XCTestCase {
     snapshot("ios-home-signed-in")
   }
 
+  /// debug 테스트 구현체의 가상 초대 코드로 실패와 복구를 확인한다. 앞 단계의 초안과 로그인 상태를 이어 쓴다.
+  func test4_InviteFailuresRecoverWithoutLosingDraft() throws {
+    app.activate()
+    XCTAssertTrue(app.staticTexts["로그인됨 · 가나"].waitForExistence(timeout: 10))
+
+    // 연결 실패 → 같은 초대로 다시 시도 → 참여.
+    openLink("nonanona://invite/SYNTHOFFLINE01")
+    app.buttons["invite-primary"].tap()
+    XCTAssertTrue(failureText(contains: "인터넷에 연결할 수 없어요").waitForExistence(timeout: 10))
+    XCTAssertEqual(app.buttons["invite-primary"].label, "다시 시도")
+    snapshot("ios-invite-network-failure")
+    app.buttons["invite-primary"].tap()
+    XCTAssertTrue(app.staticTexts["참여함"].waitForExistence(timeout: 15))
+    app.navigationBars.buttons.element(boundBy: 0).tap()
+
+    // 만료된 초대 → 새 링크 요청 문구, 다시 시도 버튼 없음, 초대 카드 사라짐.
+    openLink("nonanona://invite/SYNTHEXPIRED01")
+    app.buttons["invite-primary"].tap()
+    XCTAssertTrue(failureText(contains: "방장에게 새 링크를 요청해 주세요").waitForExistence(timeout: 10))
+    XCTAssertTrue(app.staticTexts["초대 만료됨"].exists)
+    XCTAssertFalse(app.buttons["invite-primary"].exists, "만료된 초대는 다시 시도하지 않는다")
+    snapshot("ios-invite-expired")
+    app.navigationBars.buttons.element(boundBy: 0).tap()
+    XCTAssertTrue(app.buttons["draft-row"].waitForExistence(timeout: 10))
+    XCTAssertFalse(app.staticTexts["초대받은 여행방이 있어요"].exists)
+
+    // 세션 만료 → 로그아웃 상태지만 초안과 초대는 남음 → 다시 로그인 → 같은 초대로 참여.
+    openLink("nonanona://invite/SYNTHSESSION01")
+    app.buttons["invite-primary"].tap()
+    XCTAssertTrue(failureText(contains: "로그인이 만료됐어요").waitForExistence(timeout: 10))
+    XCTAssertEqual(app.buttons["invite-primary"].label, "다시 로그인하기")
+    snapshot("ios-invite-session-expired")
+    app.navigationBars.buttons.element(boundBy: 0).tap()
+    XCTAssertTrue(app.staticTexts["로그인 안 됨"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.buttons["draft-row"].exists, "세션이 만료돼도 초안은 남는다")
+    XCTAssertTrue(app.staticTexts["초대받은 여행방이 있어요"].exists, "세션이 만료돼도 초대는 남는다")
+    app.buttons["pending-invite-open"].tap()
+    app.buttons["invite-primary"].tap()
+    let apple = app.buttons["login-apple"]
+    XCTAssertTrue(apple.waitForExistence(timeout: 10))
+    apple.tap()
+    XCTAssertTrue(app.staticTexts["참여함"].waitForExistence(timeout: 15))
+  }
+
+  private func openLink(_ link: String) {
+    XCUIDevice.shared.system.open(URL(string: link)!)
+    let open = springboard.buttons["열기"].exists ? springboard.buttons["열기"] : springboard.buttons["Open"]
+    if open.waitForExistence(timeout: 3) { open.tap() }
+    XCTAssertTrue(app.staticTexts["여행방에 초대받았어요"].waitForExistence(timeout: 15))
+  }
+
+  private func failureText(contains text: String) -> XCUIElement {
+    app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+  }
+
   private func shareFromPhotos(matching label: String) {
     photos.launch()
     if photos.buttons["Continue"].waitForExistence(timeout: 3) { photos.buttons["Continue"].tap() }

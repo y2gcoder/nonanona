@@ -4,6 +4,7 @@ import app.nonanona.feature.account.AccountId
 import app.nonanona.feature.account.AccountSession
 import app.nonanona.feature.account.AuthGateway
 import app.nonanona.feature.account.SignInException
+import app.nonanona.feature.account.SignInFailure
 import app.nonanona.feature.account.SignInProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -31,7 +32,7 @@ class TestAuthGateway(
         }
 
     override suspend fun signIn(provider: SignInProvider): AccountSession {
-        if (provider !in providers) throw SignInException("unsupported provider")
+        if (provider !in providers) throw SignInException(SignInFailure.Unavailable)
         delay(SIMULATED_LATENCY_MILLIS)
         val session = AccountSession(AccountId("test-account-0001"), "가나")
         withContext(Dispatchers.IO) {
@@ -44,6 +45,10 @@ class TestAuthGateway(
             sessionFile.writer(Charsets.UTF_8).use { props.store(it, null) }
         }
         return session
+    }
+
+    override suspend fun endSession() {
+        withContext(Dispatchers.IO) { sessionFile.delete() }
     }
 
     private companion object {

@@ -4,19 +4,24 @@ import app.nonanona.feature.account.AccountId
 import app.nonanona.feature.account.AccountSession
 import app.nonanona.feature.account.AuthGateway
 import app.nonanona.feature.account.SignInException
+import app.nonanona.feature.account.SignInFailure
 import app.nonanona.feature.account.SignInProvider
+import app.nonanona.feature.receiptimport.DraftSource
+import app.nonanona.feature.receiptimport.IncomingPhoto
+import app.nonanona.feature.receiptimport.ReceiptDraftStore
+import app.nonanona.feature.trip.InviteAcceptException
+import app.nonanona.feature.trip.InviteAcceptFailure
 import app.nonanona.feature.trip.InviteCode
-import app.nonanona.feature.trip.TripException
 import app.nonanona.feature.trip.TripGateway
 import app.nonanona.feature.trip.TripId
 import app.nonanona.feature.trip.TripRoom
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.io.ByteArrayInputStream
 import java.io.File
 
 class JoinFlowTest {
@@ -24,89 +29,135 @@ class JoinFlowTest {
 
     private val code = InviteCode("SYNTHINVITE01")
     private val session = AccountSession(AccountId("account-1"), "가나")
+    private val room = TripRoom(TripId("trip-1"), "가상 여행", emptyList())
 
-    private class FakeAuth(
-        var fail: Boolean = false,
+    /** 다음 로그인 시도의 결과를 차례로 정하는 가짜 인증 경계. */
+    private inner class FakeAuth(
+        vararg outcomes: Any,
     ) : AuthGateway {
+        private val queue = ArrayDeque(outcomes.toList())
+        var endedSessions = 0
         override val providers = listOf(SignInProvider.Google)
         override val testOnlyNotice: String? = null
 
         override suspend fun restoreSession(): AccountSession? = null
 
         override suspend fun signIn(provider: SignInProvider): AccountSession =
-            if (fail) throw SignInException("cancelled") else AccountSession(AccountId("account-1"), "가나")
-    }
+            when (val next = queue.removeFirstOrNull() ?: session) {
+                is SignInFailure -> throw SignInException(next)
+                is Exception -> throw next
+                else -> next as AccountSession
+            }
 
-    private class FakeTrips(
-        var fail: Boolean = false,
-    ) : TripGateway {
-        val accepted = mutableListOf<InviteCode>()
-
-        override suspend fun acceptInvite(code: InviteCode): TripRoom {
-            if (fail) throw TripException("offline")
-            accepted += code
-            return TripRoom(TripId("trip-1"), "가상 여행", emptyList())
+        override suspend fun endSession() {
+            endedSessions++
         }
     }
 
+    /** 다음 수락 시도의 결과를 차례로 정하는 가짜 여행방 경계. 비면 수락한다. */
+    private inner class FakeTrips(
+        vararg outcomes: Any,
+    ) : TripGateway {
+        private val queue = ArrayDeque(outcomes.toList())
+        val attempts = mutableListOf<InviteCode>()
+
+        override suspend fun acceptInvite(code: InviteCode): TripRoom {
+            attempts += code
+            return when (val next = queue.removeFirstOrNull()) {
+                null -> room
+                is InviteAcceptFailure -> throw InviteAcceptException(next)
+                else -> throw next as Exception
+            }
+        }
+    }
+
+    private val inviteFile get() = File(tmp.root, "account/pending-invite.properties")
+
     private fun flow(
-        file: File,
         auth: AuthGateway = FakeAuth(),
         trips: TripGateway = FakeTrips(),
-    ) = JoinFlow(auth, trips, PendingInviteStore(file)) { 42L }
+    ) = JoinFlow(auth, trips, PendingInviteStore(inviteFile)) { 42L }
 
     @Test
     fun pendingInviteSurvivesRestartBeforeSignIn() {
-        val file = File(tmp.root, "account/pending-invite.properties")
-        flow(file).receiveInvite(code)
+        flow().receiveInvite(code)
 
-        val afterRestart = flow(file).pendingInvite()
-
-        assertEquals(PendingInvite(code, 42L), afterRestart)
+        assertEquals(PendingInvite(code, 42L), flow().pendingInvite())
     }
 
     @Test
-    fun failedSignInKeepsPendingInvite() =
+    fun failedOrCancelledSignInKeepsPendingInviteAndRetrySignsIn() =
         runBlocking {
-            val file = File(tmp.root, "pending.properties")
-            val joinFlow = flow(file, auth = FakeAuth(fail = true))
+            val auth = FakeAuth(SignInFailure.Cancelled, SignInFailure.Network, IllegalStateException("provider detail"))
+            val joinFlow = flow(auth = auth)
             joinFlow.receiveInvite(code)
 
-            assertTrue(runCatching { joinFlow.signIn(SignInProvider.Google) }.isFailure)
-            assertEquals(code, flow(file).pendingInvite()?.code)
+            assertEquals(SignInResult.Failed(SignInFailure.Cancelled), joinFlow.signIn(SignInProvider.Google))
+            assertEquals(SignInResult.Failed(SignInFailure.Network), joinFlow.signIn(SignInProvider.Google))
+            // 예상하지 못한 예외는 원문 없이 Unknown이 된다.
+            assertEquals(SignInResult.Failed(SignInFailure.Unknown), joinFlow.signIn(SignInProvider.Google))
+            assertEquals(code, flow().pendingInvite()?.code)
+
+            assertEquals(SignInResult.SignedIn(session), joinFlow.signIn(SignInProvider.Google))
         }
 
     @Test
-    fun failedAcceptKeepsPendingInvite() =
+    fun sessionExpiredEndsSessionKeepsInviteAndDraftThenJoinsAfterSignIn() =
         runBlocking {
-            val file = File(tmp.root, "pending.properties")
-            val joinFlow = flow(file, trips = FakeTrips(fail = true))
+            val drafts = ReceiptDraftStore(File(tmp.root, "receipt-import"))
+            val draft = drafts.create(DraftSource.Share, listOf(IncomingPhoto("png") { ByteArrayInputStream(byteArrayOf(1)) }))
+            val auth = FakeAuth()
+            val trips = FakeTrips(InviteAcceptFailure.SessionExpired)
+            val joinFlow = flow(auth, trips)
             joinFlow.receiveInvite(code)
+
+            assertEquals(JoinResult.Failed(InviteAcceptFailure.SessionExpired), joinFlow.joinPendingInvite())
+            assertEquals(1, auth.endedSessions)
+            assertEquals(code, flow().pendingInvite()?.code)
+            assertEquals(listOf(draft.id), drafts.list().map { it.id })
+
             joinFlow.signIn(SignInProvider.Google)
-
-            assertTrue(runCatching { joinFlow.joinPendingInvite() }.isFailure)
-            assertEquals(code, flow(file).pendingInvite()?.code)
+            assertEquals(JoinResult.Joined(room), joinFlow.joinPendingInvite())
+            assertEquals(listOf(code, code), trips.attempts)
+            assertNull(flow().pendingInvite())
+            assertEquals(listOf(draft.id), drafts.list().map { it.id })
         }
 
     @Test
-    fun acceptedInviteIsClearedAndReturnsRoom() =
+    fun expiredInviteIsClearedAndNotRetried() =
         runBlocking {
-            val file = File(tmp.root, "pending.properties")
-            val trips = FakeTrips()
-            val joinFlow = flow(file, trips = trips)
+            val auth = FakeAuth()
+            val trips = FakeTrips(InviteAcceptFailure.InviteExpired)
+            val joinFlow = flow(auth, trips)
             joinFlow.receiveInvite(code)
-            assertEquals(session, joinFlow.signIn(SignInProvider.Google))
 
-            val room = joinFlow.joinPendingInvite()
+            assertEquals(JoinResult.Failed(InviteAcceptFailure.InviteExpired), joinFlow.joinPendingInvite())
+            assertNull(flow().pendingInvite())
+            assertEquals(0, auth.endedSessions)
+            assertEquals(JoinResult.NoPendingInvite, joinFlow.joinPendingInvite())
+            assertEquals(1, trips.attempts.size)
+        }
 
-            assertEquals(TripId("trip-1"), room?.id)
-            assertEquals(listOf(code), trips.accepted)
-            assertNull(flow(file).pendingInvite())
+    @Test
+    fun retryableFailuresKeepInviteForRetry() =
+        runBlocking {
+            val trips =
+                FakeTrips(InviteAcceptFailure.Network, InviteAcceptFailure.Unavailable, IllegalStateException("server detail"))
+            val joinFlow = flow(trips = trips)
+            joinFlow.receiveInvite(code)
+
+            assertEquals(JoinResult.Failed(InviteAcceptFailure.Network), joinFlow.joinPendingInvite())
+            assertEquals(JoinResult.Failed(InviteAcceptFailure.Unavailable), joinFlow.joinPendingInvite())
+            assertEquals(JoinResult.Failed(InviteAcceptFailure.Unknown), joinFlow.joinPendingInvite())
+            assertEquals(code, flow().pendingInvite()?.code)
+
+            assertEquals(JoinResult.Joined(room), joinFlow.joinPendingInvite())
+            assertNull(flow().pendingInvite())
         }
 
     @Test
     fun noPendingInviteMeansNothingToJoin() =
         runBlocking {
-            assertNull(flow(File(tmp.root, "none.properties")).joinPendingInvite())
+            assertEquals(JoinResult.NoPendingInvite, flow().joinPendingInvite())
         }
 }

@@ -12,13 +12,13 @@ enum LoginState: Equatable {
   case hidden
   case choosing
   case signingIn
-  case failed
+  case failed(SignInFailure)
 }
 
 enum JoinState: Equatable {
   case idle
   case joining
-  case failed
+  case failed(InviteAcceptFailure)
 }
 
 /// 화면 상태와 화면 이동. 저장과 경계 호출은 저장소·`JoinFlow`에 맡긴다.
@@ -85,28 +85,38 @@ final class AppModel {
 
   func signIn(with provider: SignInProvider) async {
     login = .signingIn
-    guard let session = try? await graph.joinFlow.signIn(with: provider) else {
-      login = .failed
-      return
+    switch await graph.joinFlow.signIn(with: provider) {
+    case .signedIn(let session):
+      self.session = session
+      login = .hidden
+      await joinPendingInvite()
+    // 취소는 오류로 보이지 않고 고르기 상태로 돌아간다. 초안과 보관한 초대는 그대로다.
+    case .failed(.cancelled):
+      login = .choosing
+    case .failed(let failure):
+      login = .failed(failure)
     }
-    self.session = session
-    login = .hidden
-    await joinPendingInvite()
   }
 
   func joinPendingInvite() async {
     join = .joining
-    do {
-      guard let room = try await graph.joinFlow.joinPendingInvite() else {
-        join = .idle
-        return
-      }
+    switch await graph.joinFlow.joinPendingInvite() {
+    case .joined(let room):
       self.room = room
       pendingInvite = nil
       join = .idle
       path = [.room]
-    } catch {
-      join = .failed
+    case .noPendingInvite:
+      join = .idle
+    case .failed(let failure):
+      switch failure {
+      // 세션만 지웠다. 초대 화면에서 다시 로그인하면 같은 초대로 이어서 참여한다.
+      case .sessionExpired: session = nil
+      // 초대를 지웠다. 홈의 초대 카드도 사라진다.
+      case .inviteExpired: pendingInvite = nil
+      case .network, .unavailable, .unknown: break
+      }
+      join = .failed(failure)
     }
   }
 }

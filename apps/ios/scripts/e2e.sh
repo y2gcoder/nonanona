@@ -86,6 +86,12 @@ grep -q "drafts=1" "$OUT/ios-state-after-sign-in-and-join.txt"
 grep -q "pending_invite=none" "$OUT/ios-state-after-sign-in-and-join.txt"
 grep -q "test_session=yes" "$OUT/ios-state-after-sign-in-and-join.txt"
 
+run_test test4_InviteFailuresRecoverWithoutLosingDraft
+state after-invite-failures
+grep -q "drafts=1" "$OUT/ios-state-after-invite-failures.txt"
+grep -q "pending_invite=none" "$OUT/ios-state-after-invite-failures.txt"
+grep -q "test_session=yes" "$OUT/ios-state-after-invite-failures.txt"
+
 log "collect screenshots"
 python3 -I - "$WORK/attachments" "$OUT/screens" <<'PY'
 import json, pathlib, subprocess, sys

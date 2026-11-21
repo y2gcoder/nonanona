@@ -30,8 +30,9 @@ struct LoginSheet: View {
               ProgressView()
               Text("로그인하는 중…").textRole(.supporting)
             }
-          case .failed:
-            Text("로그인하지 못했어요. 다시 시도해 주세요.")
+          // 다시 시도는 같은 제공자 버튼으로 한다. 제공자 원문은 보여 주지 않는다.
+          case .failed(let failure):
+            Text(failure.message)
               .textRole(.supporting)
               .foregroundStyle(.red)
               .accessibilityIdentifier("login-failed")
@@ -74,6 +75,16 @@ struct LoginSheet: View {
       .buttonStyle(.bordered)
       .disabled(state == .signingIn)
       .accessibilityIdentifier("login-google")
+    }
+  }
+}
+
+extension SignInFailure {
+  fileprivate var message: String {
+    switch self {
+    case .network: "인터넷에 연결할 수 없어요. 연결을 확인하고 다시 시도해 주세요."
+    case .unavailable: "지금은 로그인할 수 없어요. 잠시 후 다시 시도해 주세요."
+    case .cancelled, .unknown: "로그인하지 못했어요. 다시 시도해 주세요."
     }
   }
 }

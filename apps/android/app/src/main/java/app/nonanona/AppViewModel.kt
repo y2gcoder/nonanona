@@ -19,6 +19,7 @@ import app.nonanona.feature.receiptimport.ItemState
 import app.nonanona.feature.receiptimport.MaskPreview
 import app.nonanona.feature.receiptimport.MaskRegion
 import app.nonanona.feature.receiptimport.OcrProposal
+import app.nonanona.feature.receiptimport.OutboundManualEntry
 import app.nonanona.feature.receiptimport.OutboundReceipt
 import app.nonanona.feature.receiptimport.ProcessingItem
 import app.nonanona.feature.receiptimport.ProcessingManifest
@@ -33,14 +34,18 @@ import app.nonanona.feature.receiptimport.Validation
 import app.nonanona.feature.receiptimport.incomingPhoto
 import app.nonanona.feature.receiptimport.nextToReview
 import app.nonanona.feature.receiptimport.sharedImageUris
+import app.nonanona.feature.settlement.ExpenseTarget
+import app.nonanona.feature.settlement.RoomController
 import app.nonanona.feature.trip.InviteAcceptFailure
 import app.nonanona.feature.trip.InviteCode
 import app.nonanona.feature.trip.JoinState
+import app.nonanona.feature.trip.ManualExpenseUpload
 import app.nonanona.feature.trip.ReceiptExpenseUpload
 import app.nonanona.feature.trip.ReceiptUploadException
 import app.nonanona.feature.trip.ReceiptUploadFailure
 import app.nonanona.feature.trip.TripId
 import app.nonanona.feature.trip.TripRoom
+import app.nonanona.feature.trip.TripSummary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -66,6 +71,16 @@ sealed interface Route {
     data object Invite : Route
 
     data object Room : Route
+
+    /** 방장의 지출 검토. 세 번째 칸(extra)이라 두 칸이면 장부 옆, 한 칸이면 그 위에 쌓인다. */
+    data class Expense(
+        val target: ExpenseTarget,
+    ) : Route
+
+    /** 송금표(미리보기·확정본). 장부 옆 세 번째 칸. */
+    data class Settlement(
+        val trip: TripId,
+    ) : Route
 }
 
 sealed interface UploadState {
@@ -94,8 +109,12 @@ data class UploadConfirmation(
     val tripName: String,
     /** 동의한 시점의 영수증(바뀌지 않는 사진 ID·가린 사본 해시·확인한 값). 보내기 직전에 하나라도 다르면 보내지 않는다. */
     val receipts: List<SharedReceipt>,
+    /** 직접 입력(사진 없음) 올리기의 확인이면 true. 사본 올리기와 따로 묻는다. */
+    val manual: Boolean = false,
+    /** 직접 입력 올리기에서 동의한 항목(사진 ID와 확인한 값). */
+    val manualEntries: List<OutboundManualEntry> = emptyList(),
 ) {
-    val count: Int get() = receipts.size
+    val count: Int get() = if (manual) manualEntries.size else receipts.size
 
     /** 지금 경계를 지난 영수증이 동의한 것과 정확히 같을 때만 그 목록을 돌려준다. 다르면 null(아무것도 보내지 않는다). */
     fun approved(outbound: List<OutboundReceipt>): List<OutboundReceipt>? = outbound.takeIf { o -> o.map(SharedReceipt::of) == receipts }
@@ -135,6 +154,8 @@ data class AppUiState(
     val processing: Map<String, ProcessingManifest> = emptyMap(),
     /** 초안별 올리기 상태. 개발용 올리기 화면이 쓴다. */
     val uploads: Map<String, UploadState> = emptyMap(),
+    /** 초안별 직접 입력 올리기 상태(사진 없음). */
+    val manualUploads: Map<String, UploadState> = emptyMap(),
     /** 열려 있는 올리기 최종 확인. 화면이 아니라 상태에 두어 화면 배치가 바뀌어도 닫히지 않는다. */
     val uploadConfirmation: UploadConfirmation? = null,
     /** 저장된 검토 입력(디스크와 같음), OCR 제안(기기 안에서만, OCR 전문 포함), 미리보기, 확인한 사본. 키는 검토 화면 Route. */
@@ -203,10 +224,56 @@ class AppViewModel(
             },
         )
 
+    /** 여행방 목록·장부·검토·송금표. */
+    val rooms =
+        RoomController(
+            scope = viewModelScope,
+            trips = graph.adapters.trips,
+            settlement = graph.adapters.settlement,
+            onSessionExpired = ::sessionEnded,
+            onReviewSaved = { target -> if (backStack.lastOrNull() == Route.Expense(target)) back() },
+        )
+
+    /** 서버가 세션을 받지 않았다. 세션만 지운다(초안·보관한 초대는 그대로). 다시 로그인하면 이어서 쓴다. */
+    private suspend fun sessionEnded() {
+        graph.adapters.auth.endSession()
+        mutableState.update { it.copy(session = null) }
+    }
+
+    /** 참여한 여행방을 연다. 장부를 불러오면 그 방이 올릴 곳이 된다. */
+    fun openTrip(trip: TripSummary) {
+        mutableState.update {
+            if (it.room?.id == trip.id) it else it.copy(room = TripRoom(trip.id, trip.name, emptyList()), uploadConfirmation = null)
+        }
+        showOnly(Route.Home, Route.Room)
+        refreshRoom(trip.id)
+    }
+
+    fun refreshRoom(trip: TripId) {
+        viewModelScope.launch { loadRoom(trip) }
+    }
+
+    private suspend fun loadRoom(trip: TripId) {
+        rooms.loadLedger(trip)
+        val ledger = rooms.state.value.ledgers[trip] ?: return
+        mutableState.update { if (it.room?.id == trip) it.copy(room = ledger.room) else it }
+    }
+
+    fun openExpense(target: ExpenseTarget) {
+        if (!rooms.prepareReview(target)) return
+        showOnly(Route.Home, Route.Room, Route.Expense(target))
+    }
+
+    fun openSettlement(trip: TripId) {
+        rooms.openSettlement(trip)
+        showOnly(Route.Home, Route.Room, Route.Settlement(trip))
+    }
+
     private val loading =
         viewModelScope.launch {
             val pending = io { graph.joinFlow.pendingInvite() }
             val session = graph.joinFlow.restoreSession()
+            if (session != null) rooms.refreshTrips()
             val drafts =
                 draftProcessors.refresh { drafts ->
                     mutableState.update { it.copy(loaded = true, drafts = drafts, pendingInvite = pending, session = session) }
@@ -586,8 +653,84 @@ class AppViewModel(
         mutableState.update { it.copy(uploadConfirmation = null) }
         val room = state.value.room ?: return
         if (room.id != confirmation.tripId) return
-        uploadConfirmedReceipts(confirmation, room)
+        if (confirmation.manual) uploadManualEntries(confirmation, room) else uploadConfirmedReceipts(confirmation, room)
     }
+
+    /** 직접 입력(사진 없음)을 올릴지 묻는 최종 확인을 연다. 확인한 값만 담고, 사진은 기기에 남는다. */
+    fun requestManualUpload(draftId: String) {
+        val processor = processors[draftId] ?: return
+        val now = state.value
+        val room = now.room ?: return
+        if (now.session == null || now.manualUploads[draftId] == UploadState.Uploading) return
+        viewModelScope.launch {
+            val entries = processor.outboundManualEntries().takeIf { it.isNotEmpty() } ?: return@launch
+            mutableState.update {
+                if (it.room?.id != room.id) {
+                    it
+                } else {
+                    it.copy(
+                        uploadConfirmation =
+                            UploadConfirmation(
+                                draftId,
+                                room.id,
+                                room.name,
+                                emptyList(),
+                                manual = true,
+                                manualEntries = entries,
+                            ),
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * 동의한 직접 입력 그대로만 올린다. 지금 경계를 지난 항목이 하나라도 다르면 아무것도 보내지 않는다.
+     * 요청 키는 (여행방, 초안, 사진)이라 다시 시도·다시 열기에도 같은 지출로 수렴한다.
+     */
+    private fun uploadManualEntries(
+        confirmation: UploadConfirmation,
+        room: TripRoom,
+    ) {
+        val draftId = confirmation.draftId
+        val processor = processors[draftId] ?: return
+        if (state.value.manualUploads[draftId] == UploadState.Uploading) return
+        setManualUpload(draftId, UploadState.Uploading)
+        viewModelScope.launch {
+            val entries = processor.outboundManualEntries()
+            if (entries != confirmation.manualEntries) {
+                setManualUpload(draftId, UploadState.ContentChanged)
+                return@launch
+            }
+            var created = 0
+            var replayed = 0
+            for (entry in entries) {
+                val upload =
+                    ManualExpenseUpload(
+                        requestId = ManualExpenseUpload.requestId(room.id, draftId, entry.itemId),
+                        date = entry.fields.date,
+                        amountMinor = entry.fields.amountMinor,
+                        currency = entry.fields.currency,
+                        merchant = entry.fields.merchant,
+                    )
+                try {
+                    val result = graph.adapters.trips.submitManualExpense(upload, room.id)
+                    if (result.replayed) replayed++ else created++
+                } catch (e: ReceiptUploadException) {
+                    if (e.failure == ReceiptUploadFailure.SessionExpired) sessionEnded()
+                    setManualUpload(draftId, UploadState.Failed(e.failure, created + replayed))
+                    return@launch
+                }
+            }
+            setManualUpload(draftId, UploadState.Done(created, replayed))
+            loadRoom(room.id)
+        }
+    }
+
+    private fun setManualUpload(
+        draftId: String,
+        upload: UploadState,
+    ) = mutableState.update { it.copy(manualUploads = it.manualUploads + (draftId to upload)) }
 
     /**
      * 확인한 영수증을 참여한 여행방에 올린다. 사용자가 올릴 곳과 장수를 보고 최종 확인한 뒤에만 부른다.
@@ -618,6 +761,7 @@ class AppViewModel(
                 mutableState.update { it.copy(session = null) }
             }
             setUpload(draftId, result)
+            if (result is UploadState.Done) loadRoom(room.id)
         }
     }
 
@@ -665,6 +809,7 @@ class AppViewModel(
                 is SignInResult.SignedIn -> {
                     mutableState.update { it.copy(session = result.session, login = LoginState.Hidden) }
                     joinPendingInvite()
+                    rooms.loadTrips()
                 }
 
                 // 취소는 오류로 보이지 않고 고르기 상태로 돌아간다. 초안과 보관한 초대는 그대로다.
@@ -688,6 +833,8 @@ class AppViewModel(
                     it.copy(room = result.room, pendingInvite = null, join = JoinState.Idle, uploadConfirmation = null)
                 }
                 showOnly(Route.Home, Route.Room)
+                loadRoom(result.room.id)
+                rooms.loadTrips()
             }
 
             JoinResult.NoPendingInvite -> {

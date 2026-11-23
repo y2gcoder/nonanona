@@ -1,12 +1,15 @@
 package app.nonanona
 
 import app.nonanona.feature.account.SignInFailure
+import app.nonanona.feature.settlement.SettlementFailure
 import app.nonanona.feature.trip.InviteAcceptFailure
+import app.nonanona.feature.trip.ManualExpenseUpload
 import app.nonanona.feature.trip.ReceiptExpenseUpload
 import app.nonanona.feature.trip.ReceiptUploadFailure
 import app.nonanona.feature.trip.TripId
 import app.nonanona.localbackend.LocalAuthGateway
 import app.nonanona.localbackend.LocalBackendConfig
+import app.nonanona.localbackend.LocalSettlementGateway
 import app.nonanona.localbackend.LocalTripGateway
 import app.nonanona.localbackend.Outcome
 import app.nonanona.localbackend.isRejectedJwt
@@ -54,6 +57,36 @@ class LocalBackendMappingTest {
                 Outcome.Http(409, "idempotency_conflict") to ReceiptUploadFailure.Unknown,
             )
         cases.forEach { (outcome, expected) -> assertEquals("$outcome", expected, LocalTripGateway.uploadFailure(outcome)) }
+    }
+
+    @Test
+    fun settlementMapping() {
+        val cases =
+            mapOf(
+                Outcome.Http(404, "trip_not_found") to SettlementFailure.NotFound,
+                Outcome.Http(403, "host_only") to SettlementFailure.HostOnly,
+                Outcome.Http(409, "stale_expense") to SettlementFailure.Stale,
+                Outcome.Http(409, "stale_revision") to SettlementFailure.Stale,
+                Outcome.Http(409, "pending_review") to SettlementFailure.PendingReview,
+                Outcome.Http(409, "trip_finalized") to SettlementFailure.Finalized,
+                Outcome.Http(400, "shares_mismatch") to SettlementFailure.Rejected,
+                Outcome.Http(400, "krw_unverified") to SettlementFailure.Rejected,
+                Outcome.Http(409, "idempotency_conflict") to SettlementFailure.Unknown,
+                Outcome.Http(401, "PGRST303") to SettlementFailure.SessionExpired,
+                Outcome.Http(500, "unbalanced") to SettlementFailure.Unavailable,
+                Outcome.Transport to SettlementFailure.Network,
+                Outcome.Http(400, "shares_mismatch_v2") to SettlementFailure.Unknown,
+            )
+        cases.forEach { (outcome, expected) -> assertEquals("$outcome", expected, LocalSettlementGateway.failure(outcome)) }
+        assertEquals(ReceiptUploadFailure.RoomFinalized, LocalTripGateway.uploadFailure(Outcome.Http(409, "trip_finalized")))
+    }
+
+    /** 직접 입력 요청 키는 (여행방, 초안, 사진)으로 정해지고 iOS와 같은 값이다. */
+    @Test
+    fun manualRequestKeyIsStableAndMatchesIos() {
+        val trip = TripId("00000000-0000-4000-8000-000000000001")
+        assertEquals("ad99df87-7dd2-54c7-aedd-106734663b6d", ManualExpenseUpload.requestId(trip, "d", "i").toString())
+        assertNotEquals(ManualExpenseUpload.requestId(trip, "d", "i"), ManualExpenseUpload.requestId(trip, "d", "j"))
     }
 
     /** 같은 여행방·같은 사본이면 같은 요청 키(두 플랫폼이 같은 값을 만든다), 다른 여행방이면 다른 키. */

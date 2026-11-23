@@ -25,7 +25,10 @@ import app.nonanona.design.TextRoles
 import app.nonanona.design.readableWidth
 import app.nonanona.feature.receiptimport.DraftRow
 import app.nonanona.feature.receiptimport.DraftsEmpty
+import app.nonanona.feature.settlement.tripListItems
 import app.nonanona.feature.trip.PendingInviteCard
+import app.nonanona.feature.trip.RoomLoadFailure
+import app.nonanona.feature.trip.TripSummary
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,6 +40,9 @@ fun HomeScreen(
     onPickPhotos: () -> Unit,
     onOpenDraft: (String) -> Unit,
     onOpenInvite: () -> Unit,
+    trips: List<TripSummary> = emptyList(),
+    tripsFailure: RoomLoadFailure? = null,
+    onOpenTrip: (TripSummary) -> Unit = {},
 ) {
     Scaffold(
         topBar = { TopAppBar(title = { Text(stringResource(R.string.app_name)) }) },
@@ -71,6 +77,7 @@ fun HomeScreen(
             if (state.pendingInvite != null) {
                 item { PendingInviteCard(onOpen = onOpenInvite, modifier = Modifier.padding(Spacing.m)) }
             }
+            if (state.session != null) tripListItems(trips, tripsFailure, onOpenTrip)
             item {
                 Text(
                     stringResource(R.string.drafts_section),

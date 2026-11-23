@@ -47,6 +47,22 @@
       }
     }
 
+    /// 테스트 구현체는 직접 입력도 기기 안에서만 기록한다.
+    func submitManualExpense(_ upload: ManualExpenseUpload, to trip: TripID) async throws -> SubmittedExpense {
+      guard await auth.restoreSession() != nil else { throw ReceiptUploadFailure.sessionExpired }
+      return uploads.withLock { stored in
+        if let id = stored[upload.requestID] { return SubmittedExpense(expenseID: id, replayed: true) }
+        let id = "test-expense-\(stored.count + 1)"
+        stored[upload.requestID] = id
+        return SubmittedExpense(expenseID: id, replayed: false)
+      }
+    }
+
+    /// 테스트 구현체에는 서버 장부가 없다(정산 흐름은 로컬 Supabase 모드에서만 검증한다).
+    func myTrips() async throws -> [TripSummary] { [] }
+
+    func ledger(_ trip: TripID) async throws -> RoomLedger { throw RoomLoadFailure.unavailable }
+
     private func fixtureFailure(_ code: InviteCode) -> InviteAcceptFailure? {
       let first = failedOnce.withLock { $0.insert(code.value).inserted }
       switch code.value {

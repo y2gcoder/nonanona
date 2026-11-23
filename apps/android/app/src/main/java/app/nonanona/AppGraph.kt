@@ -11,6 +11,8 @@ import app.nonanona.feature.receiptimport.ReceiptDraftStore
 import app.nonanona.feature.receiptimport.ReceiptFlattener
 import app.nonanona.feature.receiptimport.ReceiptProcessor
 import app.nonanona.feature.receiptimport.ReceiptRecognizer
+import app.nonanona.feature.settlement.SettlementGateway
+import app.nonanona.feature.settlement.UnavailableSettlementGateway
 import app.nonanona.feature.trip.TripGateway
 import app.nonanona.feature.trip.TripRoom
 import java.io.File
@@ -19,6 +21,8 @@ import java.io.File
 class Adapters(
     val auth: AuthGateway,
     val trips: TripGateway,
+    /** 정산 경계. 테스트 구현체와 release는 아직 연결하지 않는다. */
+    val settlement: SettlementGateway = UnavailableSettlementGateway,
     /** 검증용 처리 속도·실패 주입. release는 항상 꺼짐. */
     val processingHooks: ProcessingHooks = ProcessingHooks(),
     /** 검토 화면이 정해지기 전의 개발용 확인. release는 null이라 화면에 버튼이 없다. */
@@ -33,12 +37,14 @@ class Adapters(
 class DraftUploadContext(
     val destination: TripRoom?,
     val confirmedCount: Int,
-    /** 직접 입력으로 확인한 건수(사본이 없어 올리지 않는다). */
+    /** 직접 입력으로 확인한 건수(사본 없이 따로 묻고 따로 올린다). */
     val manualEntryCount: Int,
     val state: UploadState,
     val signedIn: Boolean,
     val onRequest: () -> Unit,
     val onLogin: () -> Unit,
+    val manualState: UploadState = UploadState.Idle,
+    val onRequestManual: () -> Unit = {},
 )
 
 /** debug 빌드만 제공하는 올리기 화면(문구도 debug 리소스). */

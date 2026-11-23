@@ -81,4 +81,41 @@ struct LocalBackendMappingTests {
     #expect(config("http://192.168.0.10:54321") == nil)
     #expect(config("http://127.0.0.1:54321/rest/v1") == nil)
   }
+
+  @Test(arguments: [
+    (Outcome.http(status: 404, code: "trip_not_found"), SettlementFailure.notFound),
+    (.http(status: 403, code: "host_only"), .hostOnly),
+    (.http(status: 409, code: "stale_expense"), .stale),
+    (.http(status: 409, code: "stale_revision"), .stale),
+    (.http(status: 409, code: "pending_review"), .pendingReview),
+    (.http(status: 409, code: "trip_finalized"), .finalized),
+    (.http(status: 400, code: "shares_mismatch"), .rejected),
+    (.http(status: 400, code: "krw_unverified"), .rejected),
+    (.http(status: 409, code: "idempotency_conflict"), .unknown),
+    (.http(status: 401, code: "PGRST303"), .sessionExpired),
+    (.http(status: 500, code: "unbalanced"), .unavailable),
+    (.transport, .network),
+    (.http(status: 400, code: "shares_mismatch_v2"), .unknown),
+  ])
+  func settlementMapping(outcome: Outcome, expected: SettlementFailure) {
+    #expect(LocalSettlementGateway.failure(outcome) == expected)
+  }
+
+  @Test(arguments: [
+    (Outcome.http(status: 409, code: "trip_finalized"), ReceiptUploadFailure.roomFinalized),
+    (.http(status: 404, code: "trip_not_found"), .destinationUnavailable),
+    (.http(status: 409, code: "idempotency_conflict"), .unknown),
+  ])
+  func uploadMappingIncludesFinalizedRoom(outcome: Outcome, expected: ReceiptUploadFailure) {
+    #expect(LocalTripGateway.uploadFailure(outcome) == expected)
+  }
+
+  @Test func manualRequestKeyIsStablePerTripDraftAndPhoto() {
+    let trip = TripID(value: "00000000-0000-4000-8000-000000000001")
+    let a = ManualExpenseUpload.requestID(trip: trip, draftID: "d", itemID: "i")
+    #expect(a == ManualExpenseUpload.requestID(trip: trip, draftID: "d", itemID: "i"))
+    #expect(a != ManualExpenseUpload.requestID(trip: trip, draftID: "d", itemID: "j"))
+    #expect(a != ReceiptExpenseUpload.requestID(trip: trip, artifactSHA256: "d|i"))
+    #expect(a.uuidString.lowercased() == "ad99df87-7dd2-54c7-aedd-106734663b6d", "Android와 같은 값")
+  }
 }

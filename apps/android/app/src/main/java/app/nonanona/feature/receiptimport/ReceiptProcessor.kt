@@ -244,6 +244,15 @@ class ReceiptProcessor(
             }
         }
 
+    /** 기기 밖으로 보낼 수 있는 직접 입력: 사본 없이 확인한 사진의 허용 필드만. 사진 파일은 읽지도 않는다. */
+    suspend fun outboundManualEntries(): List<OutboundManualEntry> =
+        mutex.withLock {
+            manifest.items.sortedBy { it.position }.mapNotNull { item ->
+                val receipt = item.confirmed?.takeIf { item.state == ItemState.Confirmed && it.isManualEntry } ?: return@mapNotNull null
+                OutboundManualEntry(item.id, receipt.fields)
+            }
+        }
+
     private fun claimNext(): ProcessingItem? {
         val item = manifest.items.firstOrNull { it.state == ItemState.Queued } ?: return null
         val claimed = item.copy(state = ItemState.Processing, attempts = item.attempts + 1, failure = null)

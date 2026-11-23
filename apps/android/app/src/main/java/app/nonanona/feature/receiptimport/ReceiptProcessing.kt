@@ -84,6 +84,12 @@ class OutboundReceipt(
     val artifactSha256: String,
 )
 
+/** 기기 밖으로 보낼 수 있는 직접 입력 한 건: 읽지 못한 사진에 사용자가 확인한 허용 필드뿐이다. 사진·사본은 담지 않는다. */
+data class OutboundManualEntry(
+    val itemId: String,
+    val fields: AllowedReceiptFields,
+)
+
 enum class ItemState { Queued, Processing, Ready, Failed, Confirmed }
 
 data class ProcessingItem(

@@ -8,6 +8,7 @@ import app.nonanona.feature.receiptimport.ItemState
 import app.nonanona.feature.receiptimport.MaskRegion
 import app.nonanona.feature.receiptimport.OcrLine
 import app.nonanona.feature.receiptimport.OcrResult
+import app.nonanona.feature.receiptimport.OutboundManualEntry
 import app.nonanona.feature.receiptimport.PngChunks
 import app.nonanona.feature.receiptimport.ProcessingFailure
 import app.nonanona.feature.receiptimport.ProcessorError
@@ -366,7 +367,8 @@ class ReceiptProcessorTest {
                     .state,
             )
             assertFalse("확인하면 검토 입력을 지운다", store.reviewFile(draft.id, failed).exists())
-            assertTrue("직접 입력(사본 없음)은 내보내지 않는다", processor.outboundReceipts().isEmpty())
+            assertTrue("직접 입력(사본 없음)은 사본 경계로 내보내지 않는다", processor.outboundReceipts().isEmpty())
+            assertEquals("직접 입력은 허용 필드만 따로 내보낸다", listOf(OutboundManualEntry(failed, fields)), processor.outboundManualEntries())
 
             val ready =
                 processor

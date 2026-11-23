@@ -106,14 +106,71 @@
       } catch let failure as LocalSupabaseSession.Failure {
         throw Self.uploadFailure(failure.outcome)
       }
-      struct Submitted: Decodable {
-        let expenseId: String
-        let replayed: Bool
+      guard let submitted = try? LocalJSON.decoder.decode(LocalJSON.Submitted.self, from: data) else {
+        throw ReceiptUploadFailure.unknown
       }
-      let decoder = JSONDecoder()
-      decoder.keyDecodingStrategy = .convertFromSnakeCase
-      guard let submitted = try? decoder.decode(Submitted.self, from: data) else { throw ReceiptUploadFailure.unknown }
       return SubmittedExpense(expenseID: submitted.expenseId, replayed: submitted.replayed)
+    }
+
+    /// 증빙 없는 직접 입력: 사본 없이 허용 필드만 RPC로 보낸다. 같은 요청 키는 같은 지출로 수렴한다.
+    func submitManualExpense(_ upload: ManualExpenseUpload, to trip: TripID) async throws -> SubmittedExpense {
+      let data: Data
+      do {
+        data = try await session.rpc(
+          "submit_manual_expense",
+          body: [
+            "p_trip": trip.value, "p_request_id": upload.requestID.uuidString.lowercased(),
+            "p_expense_date": upload.date, "p_amount_minor": String(upload.amountMinor), "p_currency": upload.currency,
+            "p_merchant": upload.merchant,
+          ])
+      } catch let failure as LocalSupabaseSession.Failure {
+        throw Self.uploadFailure(failure.outcome)
+      }
+      guard let submitted = try? LocalJSON.decoder.decode(LocalJSON.Submitted.self, from: data) else {
+        throw ReceiptUploadFailure.unknown
+      }
+      return SubmittedExpense(expenseID: submitted.expenseId, replayed: submitted.replayed)
+    }
+
+    func myTrips() async throws -> [TripSummary] {
+      let data = try await roomCall { try await session.rpc("list_my_trips", body: [:]) }
+      guard let rows = try? LocalJSON.decoder.decode([LocalJSON.TripRow].self, from: data) else {
+        throw RoomLoadFailure.unknown
+      }
+      return rows.map {
+        TripSummary(
+          id: TripID(value: $0.tripId), name: $0.tripName, isHost: $0.myRole == "host",
+          isFinalized: $0.status == "finalized")
+      }
+    }
+
+    func ledger(_ trip: TripID) async throws -> RoomLedger {
+      let data = try await roomCall { try await session.rpc("get_room_ledger", body: ["p_trip": trip.value]) }
+      guard let raw = try? LocalJSON.decoder.decode(LocalJSON.Ledger.self, from: data), let ledger = raw.ledger else {
+        throw RoomLoadFailure.unknown
+      }
+      return ledger
+    }
+
+    private func roomCall(_ call: () async throws -> Data) async throws -> Data {
+      do {
+        return try await call()
+      } catch let failure as LocalSupabaseSession.Failure {
+        throw Self.roomFailure(failure.outcome)
+      }
+    }
+
+    static func roomFailure(_ outcome: LocalSupabaseSession.Outcome) -> RoomLoadFailure {
+      switch outcome {
+      case .transport: return .network
+      case .http(_, "trip_not_found"): return .notFound
+      case .http(_, "not_authenticated"): return .sessionExpired
+      case .http(_, let code?) where sessionEndedCodes.contains(code): return .sessionExpired
+      case .http(401, _): return .sessionExpired
+      case .http(429, _): return .unavailable
+      case .http(let status, _) where status >= 500: return .unavailable
+      case .http: return .unknown
+      }
     }
 
     /// 서버 결과를 올리기 실패로 옮긴다. 서버가 정한 코드와 정확히 같을 때만 옮기고, 나머지는 `.unknown`이다.
@@ -121,6 +178,7 @@
       switch outcome {
       case .transport: return .network
       case .http(_, "trip_not_found"): return .destinationUnavailable
+      case .http(_, "trip_finalized"): return .roomFinalized
       case .http(_, "not_authenticated"): return .sessionExpired
       case .http(_, let code?) where sessionEndedCodes.contains(code): return .sessionExpired
       case .http(401, _): return .sessionExpired
@@ -161,6 +219,271 @@
       let tripId: String
       let tripName: String
       let members: [Member]
+    }
+  }
+
+  /// 로컬 debug 모드의 정산 구현체. 검토·미리보기·확정·확정본 조회 RPC를 부른다. 계산은 서버가 한다.
+  struct LocalSettlementGateway: SettlementGateway {
+    let session: LocalSupabaseSession
+
+    func review(_ review: ExpenseReview, in trip: TripID) async throws -> ReviewedExpense {
+      var body: [String: Any] = [
+        "p_expense": review.expenseID, "p_expected_version": review.expectedVersion,
+        "p_request_id": review.requestID.uuidString.lowercased(),
+      ]
+      switch review.decision {
+      case .include(let payer, let verifiedKRW, let shares):
+        body["p_decision"] = "include"
+        body["p_payer"] = payer.value
+        body["p_krw_amount"] = verifiedKRW.map { $0 as Any } ?? NSNull()
+        body["p_shares"] = shares.map { ["user_id": $0.member.value, "krw": $0.krw] as [String: Any] }
+      case .hold(let reason):
+        body["p_decision"] = "hold"
+        body["p_hold_reason"] = reason
+      }
+      let data = try await call("review_expense", body)
+      guard let r = try? LocalJSON.decoder.decode(LocalJSON.Reviewed.self, from: data) else {
+        throw SettlementFailure.unknown
+      }
+      return ReviewedExpense(version: r.version, revision: r.revision, replayed: r.replayed)
+    }
+
+    func preview(_ trip: TripID) async throws -> SettlementPreview {
+      let data = try await call("preview_settlement", ["p_trip": trip.value])
+      guard let p = try? LocalJSON.decoder.decode(LocalJSON.Preview.self, from: data) else {
+        throw SettlementFailure.unknown
+      }
+      return SettlementPreview(
+        revision: p.revision, isFinalized: p.status == "finalized", ready: p.ready,
+        pendingCount: p.pendingExpenseIds.count,
+        includedTotalKRW: p.includedTotalKrw, transfers: p.transfers.map(\.value),
+        excluded: p.excluded.compactMap(\.value))
+    }
+
+    func finalize(_ trip: TripID, reviewedRevision: Int, requestID: UUID) async throws -> FinalizeResult {
+      let data = try await call(
+        "finalize_settlement",
+        [
+          "p_trip": trip.value, "p_expected_revision": reviewedRevision,
+          "p_request_id": requestID.uuidString.lowercased(),
+        ])
+      guard let r = try? LocalJSON.decoder.decode(LocalJSON.Finalized.self, from: data) else {
+        throw SettlementFailure.unknown
+      }
+      return FinalizeResult(finalizationID: r.finalizationId, replayed: r.replayed)
+    }
+
+    func finalized(_ trip: TripID) async throws -> FinalSettlement? {
+      let data = try await call("get_finalized_settlement", ["p_trip": trip.value])
+      if String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) == "null" { return nil }
+      guard let f = try? LocalJSON.decoder.decode(LocalJSON.Final.self, from: data), let value = f.value else {
+        throw SettlementFailure.unknown
+      }
+      return value
+    }
+
+    private func call(_ name: String, _ body: [String: Any]) async throws -> Data {
+      let json: Data
+      do {
+        json = try JSONSerialization.data(withJSONObject: body)
+      } catch {
+        throw SettlementFailure.unknown
+      }
+      do {
+        return try await session.rpc(name, json: json)
+      } catch let failure as LocalSupabaseSession.Failure {
+        throw Self.failure(failure.outcome)
+      }
+    }
+
+    /// 서버가 정한 코드와 정확히 같을 때만 기능 실패로 옮긴다. 같은 요청 키의 다른 내용(idempotency_conflict)은 `.unknown`이다.
+    static func failure(_ outcome: LocalSupabaseSession.Outcome) -> SettlementFailure {
+      switch outcome {
+      case .transport: return .network
+      case .http(_, "trip_not_found"): return .notFound
+      case .http(_, "host_only"): return .hostOnly
+      case .http(_, "stale_expense"), .http(_, "stale_revision"): return .stale
+      case .http(_, "pending_review"): return .pendingReview
+      case .http(_, "trip_finalized"): return .finalized
+      case .http(_, let code?) where rejectedCodes.contains(code): return .rejected
+      case .http(_, "not_authenticated"): return .sessionExpired
+      case .http(_, let code?) where LocalTripGateway.sessionEndedCodes.contains(code): return .sessionExpired
+      case .http(401, _): return .sessionExpired
+      case .http(429, _): return .unavailable
+      case .http(let status, _) where status >= 500: return .unavailable
+      case .http: return .unknown
+      }
+    }
+
+    static let rejectedCodes: Set<String> = [
+      "payer_required", "krw_unverified", "shares_invalid", "shares_mismatch", "hold_reason_required",
+      "decision_invalid", "invalid_fields",
+    ]
+  }
+
+  /// 로컬 RPC 응답 모양. 앱 타입으로 옮길 때 값을 하나씩 검사하고, 모르는 값이면 nil(→ `.unknown`)이다.
+  enum LocalJSON {
+    static var decoder: JSONDecoder {
+      let decoder = JSONDecoder()
+      decoder.keyDecodingStrategy = .convertFromSnakeCase
+      return decoder
+    }
+
+    struct Submitted: Decodable {
+      let expenseId: String
+      let replayed: Bool
+    }
+
+    struct TripRow: Decodable {
+      let tripId: String
+      let tripName: String
+      let status: String
+      let myRole: String
+    }
+
+    struct Member: Decodable {
+      let userId: String
+      let displayName: String
+      let role: String
+      var value: LedgerMember {
+        LedgerMember(id: MemberID(value: userId), displayName: displayName, isHost: role == "host")
+      }
+    }
+
+    struct Share: Decodable {
+      let userId: String
+      let krw: Int
+    }
+
+    struct Expense: Decodable {
+      let expenseId: String
+      let version: Int
+      let entry: String
+      let uploadedBy: String
+      let expenseDate: String
+      let amountMinor: Int
+      let currency: String
+      let merchant: String?
+      let status: String
+      let payerId: String?
+      let krwAmount: Int?
+      let krwBasis: String?
+      let holdReason: String?
+      let shares: [Share]
+      let kind: String?
+
+      var value: LedgerExpense? {
+        let state: ExpenseStatus
+        switch status {
+        case "pending": state = .pending
+        case "included": state = .included
+        case "held":
+          guard let holdReason else { return nil }
+          state = .held(reason: holdReason)
+        default: return nil
+        }
+        guard entry == "receipt" || entry == "manual" else { return nil }
+        return LedgerExpense(
+          id: expenseId, version: version, isManual: entry == "manual", uploadedBy: MemberID(value: uploadedBy),
+          date: expenseDate, amountMinor: amountMinor, currency: currency, merchant: merchant, status: state,
+          payer: payerId.map(MemberID.init), krwAmount: krwAmount, krwBasis: krwBasis.flatMap(KRWBasis.init(rawValue:)),
+          shares: shares.map { ShareLine(member: MemberID(value: $0.userId), krw: $0.krw) })
+      }
+    }
+
+    struct Ledger: Decodable {
+      let tripId: String
+      let tripName: String
+      let status: String
+      let revision: Int
+      let myRole: String
+      let me: String
+      let members: [Member]
+      let expenses: [Expense]
+
+      var ledger: RoomLedger? {
+        let mapped = expenses.compactMap(\.value)
+        guard mapped.count == expenses.count else { return nil }
+        return RoomLedger(
+          tripID: TripID(value: tripId), name: tripName, isFinalized: status == "finalized", revision: revision,
+          isHost: myRole == "host", me: MemberID(value: me), members: members.map(\.value), expenses: mapped)
+      }
+    }
+
+    struct Reviewed: Decodable {
+      let version: Int
+      let revision: Int
+      let replayed: Bool
+    }
+
+    struct TransferRow: Decodable {
+      let from: String
+      let to: String
+      let krw: Int
+      var value: Transfer { Transfer(from: MemberID(value: from), to: MemberID(value: to), krw: krw) }
+    }
+
+    struct ExcludedRow: Decodable {
+      let expenseId: String
+      let kind: String
+      let reason: String?
+      var value: ExcludedExpense? {
+        ExcludedExpense.Kind(rawValue: kind).map { ExcludedExpense(expenseID: expenseId, kind: $0, reason: reason) }
+      }
+    }
+
+    struct Preview: Decodable {
+      let revision: Int
+      let status: String
+      let ready: Bool
+      let pendingExpenseIds: [String]
+      let includedTotalKrw: Int
+      let transfers: [TransferRow]
+      let excluded: [ExcludedRow]
+    }
+
+    struct Finalized: Decodable {
+      let finalizationId: String
+      let replayed: Bool
+    }
+
+    struct Final: Decodable {
+      struct Snapshot: Decodable {
+        struct Inputs: Decodable {
+          let members: [Member]
+          let expenses: [Expense]
+        }
+        struct Outputs: Decodable {
+          let includedTotalKrw: Int
+          let transfers: [TransferRow]
+          let excluded: [ExcludedRow]
+        }
+        let ruleVersion: String
+        let inputs: Inputs
+        let outputs: Outputs
+      }
+      let finalizationId: String
+      let version: Int
+      let finalizedAt: String
+      let reviewedRevision: Int
+      let snapshotSha256: String
+      let snapshot: Snapshot
+
+      var value: FinalSettlement? {
+        let excluded = snapshot.outputs.excluded.compactMap(\.value)
+        guard excluded.count == snapshot.outputs.excluded.count else { return nil }
+        return FinalSettlement(
+          id: finalizationId, version: version, finalizedAt: finalizedAt, reviewedRevision: reviewedRevision,
+          ruleVersion: snapshot.ruleVersion, snapshotSHA256: snapshotSha256,
+          members: snapshot.inputs.members.map(\.value),
+          expenses: snapshot.inputs.expenses.map {
+            FinalSettlement.Expense(
+              id: $0.expenseId, merchant: $0.merchant, isManual: $0.entry == "manual", date: $0.expenseDate,
+              amountMinor: $0.amountMinor, currency: $0.currency, krwAmount: $0.krwAmount, kind: $0.kind ?? "")
+          },
+          includedTotalKRW: snapshot.outputs.includedTotalKrw, transfers: snapshot.outputs.transfers.map(\.value),
+          excluded: excluded)
+      }
     }
   }
 #endif

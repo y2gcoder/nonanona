@@ -166,6 +166,9 @@ struct DraftUploadContext {
   let signedIn: Bool
   let onRequest: () -> Void
   let onLogin: () -> Void
+  /// 직접 입력(사진 없음) 올리기 상태와 요청. 사본 올리기와 따로 묻고 따로 보낸다.
+  var manualState: UploadState = .idle
+  var onRequestManual: () -> Void = {}
 }
 
 private struct PhotoRow: View {

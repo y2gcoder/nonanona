@@ -44,6 +44,11 @@ import app.nonanona.feature.receiptimport.ReceiptReviewActions
 import app.nonanona.feature.receiptimport.ReceiptReviewContent
 import app.nonanona.feature.receiptimport.ReceiptReviewScreen
 import app.nonanona.feature.receiptimport.count
+import app.nonanona.feature.settlement.ExpenseReviewScreen
+import app.nonanona.feature.settlement.ExpenseTarget
+import app.nonanona.feature.settlement.FinalizeDialog
+import app.nonanona.feature.settlement.RoomLedgerScreen
+import app.nonanona.feature.settlement.SettlementScreen
 import app.nonanona.feature.trip.InviteScreen
 import app.nonanona.feature.trip.TripRoomScreen
 
@@ -51,6 +56,7 @@ import app.nonanona.feature.trip.TripRoomScreen
 @Composable
 fun NonanonaApp(viewModel: AppViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val rooms by viewModel.rooms.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val resources = LocalResources.current
     val pickPhotos =
@@ -95,6 +101,9 @@ fun NonanonaApp(viewModel: AppViewModel) {
                         onPickPhotos = { pickPhotos.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly)) },
                         onOpenDraft = { viewModel.openDetail(Route.Draft(it)) },
                         onOpenInvite = { viewModel.openDetail(Route.Invite) },
+                        trips = rooms.tripList,
+                        tripsFailure = rooms.listFailure,
+                        onOpenTrip = viewModel::openTrip,
                     )
                 }
                 entry<Route.Draft>(metadata = ListDetailSceneStrategy.detailPane()) { route ->
@@ -125,6 +134,8 @@ fun NonanonaApp(viewModel: AppViewModel) {
                                             signedIn = state.session != null,
                                             onRequest = { viewModel.requestUpload(route.id) },
                                             onLogin = viewModel::showLogin,
+                                            manualState = state.manualUploads[route.id] ?: UploadState.Idle,
+                                            onRequestManual = { viewModel.requestManualUpload(route.id) },
                                         ),
                                     )
                                 }
@@ -184,9 +195,56 @@ fun NonanonaApp(viewModel: AppViewModel) {
                     )
                 }
                 entry<Route.Room>(metadata = ListDetailSceneStrategy.detailPane()) {
-                    state.room?.let { room ->
+                    val room = state.room
+                    val ledger = room?.let { rooms.ledgers[it.id] }
+                    if (room != null && ledger != null) {
+                        RoomLedgerScreen(
+                            ledger = ledger,
+                            localDraftCount = state.drafts.size,
+                            loading = room.id in rooms.loadingLedger,
+                            failure = rooms.ledgerFailure[room.id],
+                            snackbarHostState = snackbarFor(Route.Room),
+                            onReview = { viewModel.openExpense(ExpenseTarget(room.id, it)) },
+                            onSettlement = { viewModel.openSettlement(room.id) },
+                            onRefresh = { viewModel.refreshRoom(room.id) },
+                            onBack = viewModel::back.takeUnless { twoPane },
+                        )
+                    } else if (room != null) {
                         TripRoomScreen(room, state.drafts.size, snackbarFor(Route.Room), onBack = viewModel::back.takeUnless { twoPane })
                     }
+                }
+                // 지출 검토와 송금표는 세 번째 칸이다. 두 칸이면 장부 옆, 한 칸이면 장부 위에 쌓인다.
+                entry<Route.Expense>(metadata = ListDetailSceneStrategy.extraPane()) { route ->
+                    val target = route.target
+                    val ledger = rooms.ledgers[target.tripId]
+                    val expense = rooms.expense(target)
+                    val form = rooms.forms[target]
+                    if (ledger != null && expense != null && form != null) {
+                        ExpenseReviewScreen(
+                            expense = expense,
+                            ledger = ledger,
+                            form = form,
+                            state = rooms.reviewState[target],
+                            refreshed = target in rooms.reviewRefreshed,
+                            snackbarHostState = snackbarFor(route),
+                            edit = { change -> viewModel.rooms.editForm(target, change) },
+                            onInclude = { viewModel.rooms.include(target) },
+                            onHold = { viewModel.rooms.hold(target, it) },
+                            onBack = viewModel::back.takeUnless { twoPane },
+                        )
+                    }
+                }
+                entry<Route.Settlement>(metadata = ListDetailSceneStrategy.extraPane()) { route ->
+                    SettlementScreen(
+                        ledger = rooms.ledgers[route.trip],
+                        preview = rooms.previews[route.trip],
+                        final = rooms.finals[route.trip],
+                        state = rooms.settlementState[route.trip],
+                        refreshed = route.trip in rooms.finalizeRefreshed,
+                        snackbarHostState = snackbarFor(route),
+                        onFinalize = { viewModel.rooms.requestFinalize(route.trip) },
+                        onBack = viewModel::back.takeUnless { twoPane },
+                    )
                 }
             },
     )
@@ -196,6 +254,10 @@ fun NonanonaApp(viewModel: AppViewModel) {
     val debugUploadUi = viewModel.debugUploadUi
     if (confirmation != null && debugUploadUi != null) {
         debugUploadUi.Confirmation(confirmation, viewModel::confirmUpload, viewModel::cancelUploadConfirmation)
+    }
+
+    rooms.finalizeConfirmation?.let { trip ->
+        FinalizeDialog(onConfirm = { viewModel.rooms.finalize(trip) }, onCancel = viewModel.rooms::cancelFinalize)
     }
 
     if (state.login != LoginState.Hidden) {

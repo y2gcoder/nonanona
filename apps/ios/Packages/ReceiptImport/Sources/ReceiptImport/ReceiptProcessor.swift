@@ -196,6 +196,14 @@ public actor ReceiptProcessor {
     }
   }
 
+  /// 기기 밖으로 보낼 수 있는 직접 입력: 사본 없이 확인한 사진의 허용 필드만. 사진 파일은 읽지도 않는다.
+  public func outboundManualEntries() -> [OutboundManualEntry] {
+    manifest.items.sorted { $0.position < $1.position }.compactMap { item in
+      guard item.state == .confirmed, let receipt = item.confirmed, receipt.isManualEntry else { return nil }
+      return OutboundManualEntry(itemID: item.id, fields: receipt.fields)
+    }
+  }
+
   private func claimNext() -> ProcessingItem? {
     guard let index = manifest.items.firstIndex(where: { $0.state == .queued }) else { return nil }
     manifest.items[index].state = .processing

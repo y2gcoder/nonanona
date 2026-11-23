@@ -27,6 +27,10 @@ struct HomeView: View {
         }
       }
 
+      if model.session != nil {
+        TripListSection(trips: model.rooms.tripList, failure: model.rooms.listFailure, onOpen: model.openTrip)
+      }
+
       Section {
         if model.loaded && model.drafts.isEmpty {
           DraftsEmptyView()

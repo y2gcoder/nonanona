@@ -1,17 +1,22 @@
 package app.nonanona.testing
 
 import app.nonanona.feature.account.AuthGateway
+import app.nonanona.feature.settlement.RoomLedger
 import app.nonanona.feature.trip.InviteAcceptException
 import app.nonanona.feature.trip.InviteAcceptFailure
 import app.nonanona.feature.trip.InviteCode
+import app.nonanona.feature.trip.ManualExpenseUpload
 import app.nonanona.feature.trip.ReceiptExpenseUpload
 import app.nonanona.feature.trip.ReceiptUploadException
 import app.nonanona.feature.trip.ReceiptUploadFailure
+import app.nonanona.feature.trip.RoomLoadException
+import app.nonanona.feature.trip.RoomLoadFailure
 import app.nonanona.feature.trip.SubmittedExpense
 import app.nonanona.feature.trip.TripGateway
 import app.nonanona.feature.trip.TripId
 import app.nonanona.feature.trip.TripMember
 import app.nonanona.feature.trip.TripRoom
+import app.nonanona.feature.trip.TripSummary
 import kotlinx.coroutines.delay
 import java.util.UUID
 
@@ -57,6 +62,23 @@ class TestTripGateway(
                 ?: SubmittedExpense("test-expense-${uploads.size + 1}", replayed = false).also { uploads[upload.requestId] = it.expenseId }
         }
     }
+
+    /** 테스트 구현체는 직접 입력도 기기 안에서만 기록한다. */
+    override suspend fun submitManualExpense(
+        upload: ManualExpenseUpload,
+        trip: TripId,
+    ): SubmittedExpense {
+        auth.restoreSession() ?: throw ReceiptUploadException(ReceiptUploadFailure.SessionExpired)
+        return synchronized(uploads) {
+            uploads[upload.requestId]?.let { SubmittedExpense(it, replayed = true) }
+                ?: SubmittedExpense("test-expense-${uploads.size + 1}", replayed = false).also { uploads[upload.requestId] = it.expenseId }
+        }
+    }
+
+    /** 테스트 구현체에는 서버 장부가 없다(정산 흐름은 로컬 Supabase 모드에서만 검증한다). */
+    override suspend fun myTrips(): List<TripSummary> = emptyList()
+
+    override suspend fun ledger(trip: TripId): RoomLedger = throw RoomLoadException(RoomLoadFailure.Unavailable)
 
     private fun fixtureFailure(code: InviteCode): InviteAcceptFailure? =
         when (code.value) {

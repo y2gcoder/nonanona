@@ -53,6 +53,11 @@
       try await authorized("rest/v1/rpc/\(name)", body: try JSONEncoder().encode(body), contentType: "application/json")
     }
 
+    /// 문자열이 아닌 값(배열·숫자·null)을 담은 RPC. 본문은 호출자가 JSON으로 만든다.
+    func rpc(_ name: String, json: Data) async throws -> Data {
+      try await authorized("rest/v1/rpc/\(name)", body: json, contentType: "application/json")
+    }
+
     /// 인증한 요청. 만료가 가까우면 먼저 갱신하고, JWT를 거절하면 한 번 갱신해 다시 보낸다.
     func authorized(_ path: String, body: Data, contentType: String) async throws -> Data {
       guard var session = stored() else { throw Failure(outcome: .http(status: 401, code: nil)) }

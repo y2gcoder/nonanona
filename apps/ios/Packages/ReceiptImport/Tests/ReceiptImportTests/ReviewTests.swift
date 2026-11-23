@@ -134,13 +134,16 @@ struct ReviewProcessorTests {
     #expect(manual.isManualEntry)
     #expect(try store.loadProcessing(draft.id)?.items.first { $0.id == failed }?.state == .confirmed)
     #expect(!FileManager.default.fileExists(atPath: store.reviewURL(draft.id, failed).path), "확인하면 검토 입력을 지운다")
-    #expect(try await processor.outboundReceipts().isEmpty, "직접 입력(사본 없음)은 내보내지 않는다")
+    #expect(try await processor.outboundReceipts().isEmpty, "직접 입력(사본 없음)은 사본 경계로 내보내지 않는다")
+    let entries = await processor.outboundManualEntries()
+    #expect(entries == [OutboundManualEntry(itemID: failed, fields: fields)], "직접 입력은 허용 필드만 따로 내보낸다")
 
     let ready = item(await processor.snapshot(), .ready).id
     let proposal = try await processor.proposal(ready)
     try await processor.confirm(ready, fields: proposal.fields, maskLineIDs: Set(proposal.suggestedMaskLineIDs))
     let outbound = try await processor.outboundReceipts()
     #expect(outbound.map(\.receipt.itemID) == [ready], "가린 사본이 있는 한 장만")
+    #expect(await processor.outboundManualEntries().map(\.itemID) == [failed], "사본을 확인한 사진은 직접 입력이 아니다")
   }
 
   @Test func reviewDraftIsDurableAndOverridesOnlyWhatUserChanged() async throws {

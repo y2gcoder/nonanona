@@ -19,7 +19,7 @@ import org.junit.Test
 class ConsentedUploadTest {
     private class CountingTrips(
         private val failAt: Int? = null,
-    ) : TripGateway {
+    ) : TripGatewayStub() {
         val submitted = mutableListOf<ReceiptExpenseUpload>()
 
         override suspend fun acceptInvite(code: InviteCode): TripRoom = error("not used")

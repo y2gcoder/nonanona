@@ -138,3 +138,12 @@ struct JoinFlowTests {
     #expect(InviteCode(link: URL(string: "nonanona://invite/..%2F..%2Fetc")!) == nil)
   }
 }
+
+/// 테스트 대역은 초대·올리기만 흉내 낸다. 장부·직접 입력은 이 시험들의 대상이 아니다.
+extension TripGateway {
+  func submitManualExpense(_ upload: ManualExpenseUpload, to trip: TripID) async throws -> SubmittedExpense {
+    throw ReceiptUploadFailure.unavailable
+  }
+  func myTrips() async throws -> [TripSummary] { [] }
+  func ledger(_ trip: TripID) async throws -> RoomLedger { throw RoomLoadFailure.unavailable }
+}

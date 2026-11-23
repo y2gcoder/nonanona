@@ -114,7 +114,7 @@ struct AdaptiveStateTests {
     let draft = try drafts.list().first ?? drafts.create(source: .share, photos: photos)
     let auth = SignedInAuth()
     let graph = AppGraph(
-      auth: auth, trips: trips, drafts: drafts,
+      auth: auth, trips: trips, settlement: UnavailableSettlementGateway(), drafts: drafts,
       joinFlow: JoinFlow(
         auth: auth, trips: trips, pendingInvites: PendingInviteStore(file: root.appending(path: "invite.json"))),
       recognizer: recognizer, processingHooks: ProcessingHooks())

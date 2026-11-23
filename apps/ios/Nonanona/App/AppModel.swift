@@ -40,12 +40,22 @@ struct SharedReceipt: Equatable {
 /// 올리기 최종 확인 창이 묻고 있는 것. 창 크기·접기·회전으로 화면이 다시 그려져도 같은 초안·같은 올릴 곳을 묻는다.
 /// 동의한 시점의 여행방과 영수증(사진 ID·사본 해시·값)을 그대로 담아, 보내기 직전에 하나라도 다르면 보내지 않는다.
 struct UploadConfirmation: Equatable {
+  enum Kind: Equatable {
+    /// 가린 사본과 허용 필드.
+    case receipts
+    /// 사진 없는 직접 입력(허용 필드만).
+    case manualEntries
+  }
+
   let draftID: String
   let tripID: TripID
   let tripName: String
   let receipts: [SharedReceipt]
+  var kind: Kind = .receipts
+  /// 직접 입력 올리기에서 동의한 항목(사진 ID와 확인한 값).
+  var manualEntries: [OutboundManualEntry] = []
 
-  var count: Int { receipts.count }
+  var count: Int { kind == .receipts ? receipts.count : manualEntries.count }
 }
 
 /// 검토 화면에 열린 영수증(초안 ID + 사진 ID). 안정 ID라 창 크기·접기·회전이 바뀌어도 같은 사진이 남는다.
@@ -82,6 +92,8 @@ final class AppModel {
   private var processors: [String: ReceiptProcessor] = [:]
   /// 초안별 올리기 상태. 개발용 올리기 화면이 쓴다.
   private(set) var uploads: [String: UploadState] = [:]
+  /// 초안별 직접 입력 올리기 상태(사진 없음).
+  private(set) var manualUploads: [String: UploadState] = [:]
   /// 열려 있는 올리기 최종 확인. 화면이 아니라 모델에 두어 화면 배치가 바뀌어도 닫히지 않는다.
   private(set) var uploadConfirmation: UploadConfirmation?
 
@@ -110,11 +122,36 @@ final class AppModel {
   private(set) var reviewFinished: Set<String> = []
 
   let graph: AppGraph
+  /// 여행방 목록·장부·검토·송금표.
+  let rooms: RoomModel
   var signInProviders: [SignInProvider] { graph.auth.providers }
   var testOnlyNotice: String? { graph.auth.testOnlyNotice }
 
   init(graph: AppGraph) {
     self.graph = graph
+    rooms = RoomModel(trips: graph.trips, settlement: graph.settlement)
+    rooms.onSessionExpired = { [weak self] in await self?.sessionEnded() }
+  }
+
+  /// 서버가 세션을 받지 않았다. 세션만 지운다(초안·보관한 초대는 그대로). 다시 로그인하면 이어서 쓴다.
+  private func sessionEnded() async {
+    await graph.auth.endSession()
+    session = nil
+  }
+
+  /// 참여한 여행방을 연다. 장부를 불러오면 그 방이 올릴 곳이 된다.
+  func openTrip(_ trip: TripSummary) {
+    if room?.id != trip.id {
+      room = TripRoom(id: trip.id, name: trip.name, members: [])
+      uploadConfirmation = nil
+    }
+    selection = .room
+    Task { await refreshRoom(trip.id) }
+  }
+
+  func refreshRoom(_ trip: TripID) async {
+    await rooms.loadLedger(trip)
+    if let ledger = rooms.ledgers[trip], room?.id == trip { room = ledger.room }
   }
 
   func load() async {
@@ -123,6 +160,7 @@ final class AppModel {
     pendingInvite = graph.joinFlow.pendingInvite()
     session = await graph.joinFlow.restoreSession()
     loaded = true
+    if session != nil { Task { await rooms.refreshTrips() } }
     // 로그인 도중 앱이 종료됐다면 다시 열 때 그 초대 화면으로 돌아간다.
     if pendingInvite != nil, selection != .invite { selection = .invite }
   }
@@ -363,7 +401,55 @@ final class AppModel {
   func confirmUpload(_ confirmation: UploadConfirmation) {
     uploadConfirmation = nil
     guard let room, room.id == confirmation.tripID else { return }
-    Task { await uploadConfirmedReceipts(confirmation, to: room) }
+    switch confirmation.kind {
+    case .receipts: Task { await uploadConfirmedReceipts(confirmation, to: room) }
+    case .manualEntries: Task { await uploadManualEntries(confirmation, to: room) }
+    }
+  }
+
+  /// 직접 입력(사진 없음)을 올릴지 묻는 최종 확인을 연다. 확인한 값만 담고, 사진은 기기에 남는다.
+  func requestManualUpload(draftID: String) async {
+    guard let room, session != nil, manualUploads[draftID] != .uploading, let processor = processors[draftID] else {
+      return
+    }
+    let entries = await processor.outboundManualEntries()
+    guard !entries.isEmpty, self.room?.id == room.id else { return }
+    uploadConfirmation = UploadConfirmation(
+      draftID: draftID, tripID: room.id, tripName: room.name, receipts: [], kind: .manualEntries,
+      manualEntries: entries)
+  }
+
+  /// 동의한 직접 입력 그대로만 올린다. 지금 경계를 지난 항목이 하나라도 다르면 아무것도 보내지 않는다.
+  /// 요청 키는 (여행방, 초안, 사진)이라 다시 시도·다시 열기에도 같은 지출로 수렴한다.
+  func uploadManualEntries(_ confirmation: UploadConfirmation, to room: TripRoom) async {
+    let draftID = confirmation.draftID
+    guard let processor = processors[draftID], manualUploads[draftID] != .uploading, room.id == confirmation.tripID
+    else { return }
+    manualUploads[draftID] = .uploading
+    let entries = await processor.outboundManualEntries()
+    guard entries == confirmation.manualEntries else {
+      manualUploads[draftID] = .contentChanged
+      return
+    }
+    var created = 0
+    var replayed = 0
+    for entry in entries {
+      let upload = ManualExpenseUpload(
+        requestID: ManualExpenseUpload.requestID(trip: room.id, draftID: draftID, itemID: entry.itemID),
+        date: entry.fields.date, amountMinor: entry.fields.amountMinor, currency: entry.fields.currency,
+        merchant: entry.fields.merchant)
+      do {
+        let result = try await graph.trips.submitManualExpense(upload, to: room.id)
+        if result.replayed { replayed += 1 } else { created += 1 }
+      } catch {
+        let failure = error as? ReceiptUploadFailure ?? .unknown
+        if failure == .sessionExpired { await sessionEnded() }
+        manualUploads[draftID] = .failed(failure, uploadedBefore: created + replayed)
+        return
+      }
+    }
+    manualUploads[draftID] = .done(created: created, replayed: replayed)
+    await refreshRoom(room.id)
   }
 
   /// 올릴 수 있는 영수증: 확인했고 가린 사본이 있는 것. 직접 입력(사본 없음)은 이번 단계에서 올리지 않는다.
@@ -417,6 +503,7 @@ final class AppModel {
       }
     }
     uploads[draftID] = .done(created: created, replayed: replayed)
+    await refreshRoom(room.id)
   }
 
   /// 실패한 사진 한 장만 다시 읽는다.
@@ -484,6 +571,7 @@ final class AppModel {
       self.session = session
       login = .hidden
       await joinPendingInvite()
+      await rooms.refreshTrips()
     // 취소는 오류로 보이지 않고 고르기 상태로 돌아간다. 초안과 보관한 초대는 그대로다.
     case .failed(.cancelled):
       login = .choosing
@@ -508,6 +596,10 @@ final class AppModel {
       join = .idle
       uploadConfirmation = nil
       selection = .room
+      Task {
+        await refreshRoom(room.id)
+        await rooms.refreshTrips()
+      }
     case .noPendingInvite:
       join = .idle
     case .failed(let failure):

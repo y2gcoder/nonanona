@@ -29,6 +29,12 @@ public struct OutboundReceipt: Equatable, Sendable {
   public let artifactSHA256: String
 }
 
+/// 기기 밖으로 보낼 수 있는 직접 입력 한 건: 읽지 못한 사진에 사용자가 확인한 허용 필드뿐이다. 사진·사본은 담지 않는다.
+public struct OutboundManualEntry: Equatable, Sendable {
+  public let itemID: String
+  public let fields: AllowedReceiptFields
+}
+
 public struct ProcessingItem: Codable, Equatable, Identifiable, Sendable {
   public enum State: String, Codable, Sendable {
     case queued

@@ -41,6 +41,9 @@ android {
             buildConfigField("String", "LOCAL_PUBLISHABLE_KEY", localValue("publishableKey"))
             buildConfigField("String", "LOCAL_TEST_EMAIL", localValue("testEmail"))
             buildConfigField("String", "LOCAL_TEST_PASSWORD", localValue("testPassword"))
+            // 가상 방장 계정. files/debug-processing.properties의 localAccount=host로 고른다(기본은 가상 회원).
+            buildConfigField("String", "LOCAL_HOST_EMAIL", localValue("hostEmail"))
+            buildConfigField("String", "LOCAL_HOST_PASSWORD", localValue("hostPassword"))
         }
         release {
             // 서명 설정은 출시 준비에서 정한다. 로컬 release 빌드는 서명하지 않는다.

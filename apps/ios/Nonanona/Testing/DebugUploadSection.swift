@@ -14,14 +14,25 @@
 
     func body(content: Content) -> some View {
       content.alert(
-        confirmation.map { "‘\($0.tripName)’에 영수증 \($0.count)장을 올릴까요?" } ?? "",
+        confirmation.map {
+          $0.kind == .receipts
+            ? "‘\($0.tripName)’에 영수증 \($0.count)장을 올릴까요?" : "‘\($0.tripName)’에 직접 입력 \($0.count)건을 올릴까요?"
+        } ?? "",
         isPresented: Binding(get: { confirmation != nil }, set: { if !$0 { onCancel() } }),
         presenting: confirmation
       ) { confirmation in
         Button("올리기") { onConfirm(confirmation) }.accessibilityIdentifier("upload-final")
         Button("취소", role: .cancel, action: onCancel)
-      } message: { _ in
-        Text("가림을 확인한 사본과 날짜·금액·통화·가게만 올라가요.")
+      } message: { confirmation in
+        if confirmation.kind == .receipts {
+          Text("가림을 확인한 사본과 날짜·금액·통화·가게만 올라가요.")
+        } else {
+          Text(
+            "사진 없이 날짜·금액·통화·가게만 올라가요.\n"
+              + confirmation.manualEntries.map {
+                "\($0.fields.merchant ?? "가게 없음") · \($0.fields.date) · \(Won.original($0.fields.amountMinor, $0.fields.currency))"
+              }.joined(separator: "\n"))
+        }
       }
     }
   }
@@ -36,7 +47,7 @@
           Text("올릴 곳: \(destination.name)").textRole(.body).accessibilityIdentifier("upload-destination")
           Text("확인한 영수증 \(context.confirmedCount)장").textRole(.supporting)
           if manualEntryCount > 0 {
-            Text("직접 입력 \(manualEntryCount)건은 사진이 없어 이번에는 올리지 않아요(기기에만 있어요).")
+            Text("직접 입력 \(manualEntryCount)건은 사진 없이 따로 올려요(사진은 기기에만 있어요).")
               .textRole(.supporting).accessibilityIdentifier("upload-manual-excluded")
           }
           statusView
@@ -46,6 +57,12 @@
           Button("여행방에 올리기(개발용)", action: context.onRequest)
             .disabled(context.confirmedCount == 0 || context.state == .uploading || !context.signedIn)
             .accessibilityIdentifier("upload-start")
+          if manualEntryCount > 0 {
+            status(context.manualState, id: "manual-upload-status", unit: "건")
+            Button("직접 입력 올리기(개발용)", action: context.onRequestManual)
+              .disabled(context.manualState == .uploading || !context.signedIn)
+              .accessibilityIdentifier("manual-upload-start")
+          }
         } else {
           Text("참여한 여행방이 없어요. 초대 링크로 참여한 뒤 올릴 수 있어요.").textRole(.supporting)
         }
@@ -55,18 +72,22 @@
     }
 
     @ViewBuilder private var statusView: some View {
-      switch context.state {
+      status(context.state, id: "upload-status", unit: "장")
+    }
+
+    @ViewBuilder private func status(_ state: UploadState, id: String, unit: String) -> some View {
+      switch state {
       case .idle: EmptyView()
       case .uploading:
-        Text("올리는 중…").textRole(.supporting).accessibilityIdentifier("upload-status")
+        Text("올리는 중…").textRole(.supporting).accessibilityIdentifier(id)
       case .done(let created, let replayed):
-        Text("올림 \(created + replayed)장(이미 올린 \(replayed)장 포함)")
-          .textRole(.supporting).accessibilityIdentifier("upload-status")
+        Text("올림 \(created + replayed)\(unit)(이미 올린 \(replayed)\(unit) 포함)")
+          .textRole(.supporting).accessibilityIdentifier(id)
       case .contentChanged:
         Text("최종 확인 뒤 올릴 영수증이 바뀌어 아무것도 올리지 않았어요. 다시 확인해 주세요.")
-          .textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("upload-status")
+          .textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier(id)
       case .failed(let failure, _):
-        Text(message(failure)).textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("upload-status")
+        Text(message(failure)).textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier(id)
       }
     }
 
@@ -74,6 +95,7 @@
       switch failure {
       case .sessionExpired: "로그인이 만료됐어요. 다시 로그인한 뒤 다시 올려 주세요."
       case .destinationUnavailable: "이 여행방에 올릴 수 없어요. 여행방 구성원인지 확인해 주세요."
+      case .roomFinalized: "정산이 확정된 여행방이라 더 올릴 수 없어요."
       case .network: "인터넷에 연결할 수 없어요. 연결을 확인하고 다시 시도해 주세요."
       case .unavailable: "지금은 올릴 수 없어요. 잠시 후 다시 시도해 주세요."
       case .unknown: "올리지 못했어요. 다시 시도해 주세요."

@@ -61,7 +61,7 @@ class JoinFlowTest {
     /** 다음 수락 시도의 결과를 차례로 정하는 가짜 여행방 경계. 비면 수락한다. */
     private inner class FakeTrips(
         vararg outcomes: Any,
-    ) : TripGateway {
+    ) : TripGatewayStub() {
         private val queue = ArrayDeque(outcomes.toList())
         val attempts = mutableListOf<InviteCode>()
 

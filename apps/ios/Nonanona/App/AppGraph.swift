@@ -8,6 +8,7 @@ struct AppGraph: Sendable {
 
   let auth: any AuthGateway
   let trips: any TripGateway
+  let settlement: any SettlementGateway
   let drafts: ReceiptDraftStore
   let joinFlow: JoinFlow
   let recognizer: any ReceiptRecognizer
@@ -19,6 +20,7 @@ struct AppGraph: Sendable {
       // debug 빌드는 기본이 테스트 구현체다. Config/Local.xcconfig로 로컬 모드를 켜면 로컬 Supabase에 붙는다.
       let auth: any AuthGateway
       let trips: any TripGateway
+      let settlement: any SettlementGateway
       if let local = LocalBackendConfig.fromBundle() {
         let session = LocalSupabaseSession(config: local, file: support.appending(path: "local-auth/session.json"))
         auth = LocalAuthGateway(session: session)
@@ -26,14 +28,17 @@ struct AppGraph: Sendable {
           session: session,
           failOnceAfterStorage: ProcessInfo.processInfo.environment["NONANONA_UPLOAD_FAIL_AFTER_STORAGE_ONCE"] == "1"
             ? LocalTripGateway.FailOnce() : nil)
+        settlement = LocalSettlementGateway(session: session)
       } else {
         let test = TestAuthGateway(sessionFile: support.appending(path: "test-auth/session.json"))
         auth = test
         trips = TestTripGateway(auth: test)
+        settlement = UnavailableSettlementGateway()
       }
     #else
       let auth = UnavailableAuthGateway()
       let trips: any TripGateway = UnavailableTripGateway()
+      let settlement: any SettlementGateway = UnavailableSettlementGateway()
     #endif
     // App Group은 공유 확장과 초안을 주고받는 데 필요하다. 없으면(서명 설정 누락) 앱 폴더로 대신한다.
     #if DEBUG
@@ -51,7 +56,8 @@ struct AppGraph: Sendable {
       let hooks = ProcessingHooks()
     #endif
     return AppGraph(
-      auth: auth, trips: trips, drafts: drafts, joinFlow: JoinFlow(auth: auth, trips: trips, pendingInvites: pending),
+      auth: auth, trips: trips, settlement: settlement, drafts: drafts,
+      joinFlow: JoinFlow(auth: auth, trips: trips, pendingInvites: pending),
       recognizer: VisionReceiptRecognizer(), processingHooks: hooks)
   }
 

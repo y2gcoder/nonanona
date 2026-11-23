@@ -28,6 +28,17 @@ struct RootView: View {
             // 화면이 예전 값에 머물고 입력 칸이 그 값(빈 글자)을 다시 써 버린다(시뮬레이터에서 재현).
             ReviewDestination(model: model, target: target).id(target)
           }
+          // 장부 위에 지출 검토, 송금표가 쌓인다(모델의 안정 ID로만 가리켜 배치가 바뀌어도 같은 화면이 남는다).
+          .navigationDestination(
+            item: Binding(get: { model.rooms.reviewing }, set: { model.rooms.reviewing = $0 })
+          ) { target in
+            ExpenseReviewDestination(rooms: model.rooms, target: target).id(target)
+          }
+          .navigationDestination(
+            item: Binding(get: { model.rooms.settlementShown }, set: { model.rooms.settlementShown = $0 })
+          ) { trip in
+            SettlementDestination(rooms: model.rooms, trip: trip).id(trip)
+          }
       }
     }
     .navigationSplitViewStyle(.balanced)
@@ -36,6 +47,17 @@ struct RootView: View {
       .background(DebugHingeLog())
     #endif
     .modifier(uploadConfirmation)
+    .alert(
+      "정산을 확정할까요?",
+      isPresented: Binding(
+        get: { model.rooms.finalizeConfirmation != nil }, set: { if !$0 { model.rooms.finalizeConfirmation = nil } }),
+      presenting: model.rooms.finalizeConfirmation
+    ) { trip in
+      Button("확정") { Task { await model.rooms.finalize(trip) } }.accessibilityIdentifier("finalize-confirm")
+      Button("취소", role: .cancel) { model.rooms.finalizeConfirmation = nil }
+    } message: { _ in
+      Text("지금 미리보기의 송금표로 고정돼요. 확정한 뒤에는 지출을 더하거나 고칠 수 없어요.")
+    }
     .sheet(
       isPresented: Binding(
         get: { model.login != .hidden },
@@ -79,7 +101,9 @@ struct RootView: View {
             state: model.uploads[draft.id] ?? .idle,
             signedIn: model.session != nil,
             onRequest: { Task { await model.requestUpload(draftID: draft.id) } },
-            onLogin: model.showLogin))
+            onLogin: model.showLogin,
+            manualState: model.manualUploads[draft.id] ?? .idle,
+            onRequestManual: { Task { await model.requestManualUpload(draftID: draft.id) } }))
       } else {
         DetailPlaceholder()
       }
@@ -89,7 +113,14 @@ struct RootView: View {
         onLogin: model.showLogin,
         onJoin: { Task { await model.joinPendingInvite() } })
     case .room:
-      if let room = model.room {
+      if let room = model.room, let ledger = model.rooms.ledgers[room.id] {
+        RoomLedgerView(
+          ledger: ledger, localDraftCount: model.drafts.count,
+          loading: model.rooms.loadingLedger.contains(room.id), failure: model.rooms.ledgerFailure[room.id],
+          onReview: { model.rooms.openReview(ExpenseTarget(tripID: room.id, expenseID: $0)) },
+          onSettlement: { model.rooms.openSettlement(room.id) },
+          onRefresh: { await model.refreshRoom(room.id) })
+      } else if let room = model.room {
         TripRoomView(room: room, localDraftCount: model.drafts.count)
       } else {
         DetailPlaceholder()
@@ -132,6 +163,36 @@ private struct ReviewDestination: View {
           retrySave: { model.retrySave(target) },
           confirmAndNext: { Task { await model.confirmAndNext(target) } }))
     }
+  }
+}
+
+/// 지출 검토 목적지. 모델을 body에서 읽어 입력·저장 상태가 바뀌면 다시 그린다.
+private struct ExpenseReviewDestination: View {
+  @Bindable var rooms: RoomModel
+  let target: ExpenseTarget
+
+  var body: some View {
+    if let ledger = rooms.ledgers[target.tripID], let expense = rooms.expense(target), let form = rooms.forms[target] {
+      ExpenseReviewView(
+        expense: expense, ledger: ledger, form: form, state: rooms.reviewState[target],
+        refreshed: rooms.reviewRefreshed.contains(target),
+        edit: { rooms.editForm(target, $0) },
+        onInclude: { Task { await rooms.include(target) } },
+        onHold: { reason in Task { await rooms.hold(target, reason: reason) } })
+    }
+  }
+}
+
+private struct SettlementDestination: View {
+  @Bindable var rooms: RoomModel
+  let trip: TripID
+
+  var body: some View {
+    SettlementView(
+      ledger: rooms.ledgers[trip], preview: rooms.previews[trip], final: rooms.finals[trip],
+      state: rooms.settlementState[trip], refreshed: rooms.finalizeRefreshed.contains(trip),
+      onFinalize: { rooms.requestFinalize(trip) },
+      onRefresh: { await rooms.loadSettlement(trip) })
   }
 }
 

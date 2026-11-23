@@ -21,6 +21,7 @@ import androidx.compose.ui.window.DialogProperties
 import app.nonanona.design.Spacing
 import app.nonanona.design.TextRoles
 import app.nonanona.design.foldAwareOverlayPlacement
+import app.nonanona.feature.settlement.originalAmount
 import app.nonanona.feature.trip.ReceiptUploadFailure
 
 /**
@@ -53,7 +54,7 @@ object DebugUploadSection : DebugUploadUi {
                     modifier = Modifier.testTag("upload_manual_excluded"),
                 )
             }
-            status(context.state)?.let { (text, isError) ->
+            status(context.state, manual = false)?.let { (text, isError) ->
                 Text(
                     text,
                     style = TextRoles.supporting,
@@ -72,6 +73,23 @@ object DebugUploadSection : DebugUploadUi {
                 modifier = Modifier.testTag("upload_start"),
             ) {
                 Text(stringResource(R.string.debug_upload_start))
+            }
+            if (context.manualEntryCount > 0) {
+                status(context.manualState, manual = true)?.let { (text, isError) ->
+                    Text(
+                        text,
+                        style = TextRoles.supporting,
+                        color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.testTag("manual_upload_status"),
+                    )
+                }
+                OutlinedButton(
+                    onClick = context.onRequestManual,
+                    enabled = context.manualState != UploadState.Uploading && context.signedIn,
+                    modifier = Modifier.testTag("manual_upload_start"),
+                ) {
+                    Text(stringResource(R.string.debug_manual_upload_start))
+                }
             }
         }
     }
@@ -92,8 +110,32 @@ object DebugUploadSection : DebugUploadUi {
                 (placement?.let { Modifier.absoluteOffset(x = it.offsetX).widthIn(max = it.maxWidth - Spacing.l * 2) } ?: Modifier)
                     .semantics { testTagsAsResourceId = true },
             properties = DialogProperties(usePlatformDefaultWidth = placement == null),
-            title = { Text(stringResource(R.string.debug_upload_confirm_title, confirmation.tripName, confirmation.count)) },
-            text = { Text(stringResource(R.string.debug_upload_confirm_body)) },
+            title = {
+                Text(
+                    stringResource(
+                        if (confirmation.manual) R.string.debug_manual_confirm_title else R.string.debug_upload_confirm_title,
+                        confirmation.tripName,
+                        confirmation.count,
+                    ),
+                )
+            },
+            text = {
+                if (confirmation.manual) {
+                    Text(
+                        (
+                            listOf(stringResource(R.string.debug_manual_confirm_body)) +
+                                confirmation.manualEntries.map {
+                                    "${it.fields.merchant ?: "-"} · ${it.fields.date} · ${originalAmount(
+                                        it.fields.amountMinor,
+                                        it.fields.currency,
+                                    )}"
+                                }
+                        ).joinToString("\n"),
+                    )
+                } else {
+                    Text(stringResource(R.string.debug_upload_confirm_body))
+                }
+            },
             confirmButton = {
                 TextButton(onClick = { onConfirm(confirmation) }, modifier = Modifier.testTag("upload_final")) {
                     Text(stringResource(R.string.debug_upload_final))
@@ -104,7 +146,10 @@ object DebugUploadSection : DebugUploadUi {
     }
 
     @Composable
-    private fun status(state: UploadState): Pair<String, Boolean>? =
+    private fun status(
+        state: UploadState,
+        manual: Boolean,
+    ): Pair<String, Boolean>? =
         when (state) {
             UploadState.Idle -> {
                 null
@@ -115,7 +160,11 @@ object DebugUploadSection : DebugUploadUi {
             }
 
             is UploadState.Done -> {
-                stringResource(R.string.debug_upload_done, state.created + state.replayed, state.replayed) to false
+                stringResource(
+                    if (manual) R.string.debug_manual_done else R.string.debug_upload_done,
+                    state.created + state.replayed,
+                    state.replayed,
+                ) to false
             }
 
             UploadState.ContentChanged -> {
@@ -127,6 +176,7 @@ object DebugUploadSection : DebugUploadUi {
                     when (state.failure) {
                         ReceiptUploadFailure.SessionExpired -> R.string.debug_upload_session_expired
                         ReceiptUploadFailure.DestinationUnavailable -> R.string.debug_upload_destination_unavailable
+                        ReceiptUploadFailure.RoomFinalized -> R.string.debug_upload_room_finalized
                         ReceiptUploadFailure.Network -> R.string.failure_network
                         ReceiptUploadFailure.Unavailable -> R.string.debug_upload_unavailable
                         ReceiptUploadFailure.Unknown -> R.string.debug_upload_unknown

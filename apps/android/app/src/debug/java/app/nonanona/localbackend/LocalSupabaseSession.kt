@@ -107,6 +107,12 @@ class LocalSupabaseSession(
         body: JSONObject,
     ): JSONObject = JSONObject(String(authorized("/rest/v1/rpc/$name", body.toString().toByteArray(), "application/json")))
 
+    /** 응답이 객체가 아닐 수 있는 RPC(배열·null). 본문 글자를 그대로 돌려준다. */
+    suspend fun rpcRaw(
+        name: String,
+        body: JSONObject,
+    ): String = String(authorized("/rest/v1/rpc/$name", body.toString().toByteArray(), "application/json"))
+
     /** 인증한 요청. 만료가 가까우면 먼저 갱신하고, JWT를 거절하면 한 번 갱신해 다시 보낸다. */
     suspend fun authorized(
         path: String,

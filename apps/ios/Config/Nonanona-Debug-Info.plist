@@ -24,5 +24,9 @@
 	<string>$(NONANONA_LOCAL_TEST_EMAIL)</string>
 	<key>NonanonaLocalTestPassword</key>
 	<string>$(NONANONA_LOCAL_TEST_PASSWORD)</string>
+	<key>NonanonaLocalHostEmail</key>
+	<string>$(NONANONA_LOCAL_HOST_EMAIL)</string>
+	<key>NonanonaLocalHostPassword</key>
+	<string>$(NONANONA_LOCAL_HOST_PASSWORD)</string>
 </dict>
 </plist>

@@ -122,14 +122,14 @@ final class SettlementUITests: XCTestCase {
     pickPayer("다라")
     replaceText(app.textFields["review-krw"], "13377")
     dismissKeyboard()
-    XCTAssertTrue(app.staticTexts["review-share-problem"].label.contains("1원이 남아요"))
-    XCTAssertFalse(app.buttons["review-include"].isEnabled)
+    XCTAssertTrue(scrollTo(app.staticTexts["review-share-problem"]).label.contains("1원이 남아요"))
+    XCTAssertFalse(scrollTo(app.buttons["review-include"]).isEnabled)
     snapshot("ios-settlement-review-not-divisible")
-    app.segmentedControls["review-share-mode"].buttons["직접 나누기"].tap()
+    scrollTo(app.segmentedControls["review-share-mode"]).buttons["직접 나누기"].tap()
     replaceText(app.textFields["review-exact-1"], "6688")
     dismissKeyboard()
-    XCTAssertEqual(app.staticTexts["review-share-problem"].label, "6,689원이 남았어요. 합계가 원화와 같아야 해요.")
-    XCTAssertFalse(app.buttons["review-include"].isEnabled)
+    XCTAssertEqual(scrollTo(app.staticTexts["review-share-problem"]).label, "6,689원이 남았어요. 합계가 원화와 같아야 해요.")
+    XCTAssertFalse(scrollTo(app.buttons["review-include"]).isEnabled)
     replaceText(app.textFields["review-exact-2"], "6689")
     dismissKeyboard()
     snapshot("ios-settlement-review-exact")
@@ -143,13 +143,70 @@ final class SettlementUITests: XCTestCase {
 
     // 직접 입력(KRW 38,000): 원화 그대로, 둘이 반씩.
     openExpense(matching: "38,000 KRW")
-    XCTAssertTrue(app.staticTexts["review-krw-fixed"].exists)
+    XCTAssertTrue(scrollTo(app.staticTexts["review-krw-fixed"]).exists)
     pickPayer("다라")
-    XCTAssertTrue(app.staticTexts["한 사람 19,000원 · 합계 38,000원"].exists)
+    XCTAssertTrue(scrollTo(app.staticTexts["한 사람 19,000원 · 합계 38,000원"]).exists)
     scrollTo(app.buttons["review-include"]).tap()
     XCTAssertTrue(app.descendants(matching: .any)["room-screen"].waitForExistence(timeout: 15))
     XCTAssertFalse(app.descendants(matching: .any)["room-pending"].exists)
     snapshot("ios-settlement-host-ledger-reviewed")
+  }
+
+  /// 공유한 가림 사본 보기: 연 사본의 확인 해시가 서버에 저장된 사본과 같다 → 뒤로 갔다 다시 열면 지워져 있다
+  /// → 직접 입력은 증빙 없음. 사본은 화면에 들어가는 이 화면(넓은 창이면 목록 옆 상세 열)에서 연다.
+  func testH1b_ViewMaskedReceipt() throws {
+    app.activate()
+    openExpense(matching: "1,408 JPY")
+    scrollTo(app.buttons["review-receipt-show"]).tap()
+    let verified = app.staticTexts["review-receipt-verified"]
+    XCTAssertTrue(verified.waitForExistence(timeout: 20))
+    XCTAssertEqual(verified.label, "올린 사본과 같아요 · 확인 \(env["ARTIFACT_SHA_PREFIX"] ?? "?")")
+    XCTAssertTrue(app.images["review-receipt-image"].exists)
+    XCTAssertEqual(app.images["review-receipt-image"].label, "가린 영수증 사본")
+    snapshot("ios-settlement-receipt-shown")
+    app.navigationBars.buttons.element(boundBy: 0).tap()
+    openExpense(matching: "1,408 JPY")
+    XCTAssertTrue(app.buttons["review-receipt-show"].waitForExistence(timeout: 5), "다시 열면 다시 눌러야 받는다")
+    XCTAssertFalse(app.images["review-receipt-image"].exists)
+    app.navigationBars.buttons.element(boundBy: 0).tap()
+    openExpense(matching: "38,000 KRW")
+    XCTAssertTrue(scrollTo(app.staticTexts["review-receipt-none"]).exists)
+    XCTAssertFalse(app.buttons["review-receipt-show"].exists)
+    app.navigationBars.buttons.element(boundBy: 0).tap()
+    openExpense(matching: "1,408 JPY")
+  }
+
+  /// 서버에 닿지 않을 때: 다시 시도할 수 있는 실패가 보이고, 검토(결제자 고르기)는 그대로 된다. 스크립트가 API를 멈춘 상태.
+  func testH1c_ReceiptNetworkFailureDoesNotBlockReview() throws {
+    app.activate()
+    scrollTo(app.buttons["review-receipt-show"]).tap()
+    let failure = app.staticTexts["review-receipt-failure"]
+    XCTAssertTrue(failure.waitForExistence(timeout: 30))
+    XCTAssertEqual(failure.label, "인터넷에 연결할 수 없어요. 연결을 확인하고 다시 시도해 주세요.")
+    XCTAssertTrue(app.buttons["review-receipt-retry"].exists)
+    XCTAssertTrue(scrollTo(app.buttons["review-payer"]).isEnabled, "사본을 못 받아도 검토할 수 있다")
+    snapshot("ios-settlement-receipt-network-failure")
+  }
+
+  /// 서버가 돌아온 뒤 다시 시도 → 같은 사본. 큰 글자(스크립트가 바꿈)에서도 사본·확인 문구에 닿고, 가로(넓은 창)에서도 보인다.
+  func testH1d_RetryThenLargeTextAndLandscape() throws {
+    app.activate()
+    scrollTo(app.buttons["review-receipt-retry"]).tap()
+    // 큰 글자에서는 목록이 길어져 확인 문구가 화면 밖일 수 있다. 받기가 끝난 뒤 그 자리로 넘긴다.
+    waitFor(timeout: 20) {
+      !self.app.buttons["review-receipt-retry"].exists && !self.app.staticTexts["review-receipt-loading"].exists
+    }
+    let verified = scrollTo(app.staticTexts["review-receipt-verified"])
+    XCTAssertEqual(verified.label, "올린 사본과 같아요 · 확인 \(env["ARTIFACT_SHA_PREFIX"] ?? "?")")
+    XCTAssertTrue(scrollTo(app.images["review-receipt-image"]).exists)
+    snapshot("ios-settlement-receipt-large-text")
+    XCUIDevice.shared.orientation = .landscapeLeft
+    XCTAssertTrue(scrollTo(app.staticTexts["review-receipt-verified"]).exists, "가로에서도 같은 사본")
+    snapshot("ios-settlement-receipt-landscape")
+    XCUIDevice.shared.orientation = .portrait
+    XCTAssertTrue(app.staticTexts["review-receipt-verified"].waitForExistence(timeout: 10))
+    app.navigationBars.buttons.element(boundBy: 0).tap()
+    XCTAssertTrue(app.descendants(matching: .any)["room-screen"].waitForExistence(timeout: 10))
   }
 
   /// 미리보기: 서버가 계산한 송금(가나 → 다라 25,689원), 보류 제외. 스크립트가 미리보기를 연 뒤 회원 지출을 하나 더 넣는다.
@@ -292,7 +349,9 @@ final class SettlementUITests: XCTestCase {
 
   @discardableResult
   private func scrollTo(_ element: XCUIElement) -> XCUIElement {
-    let list = app.collectionViews.firstMatch
+    // 넓은 창(목록 옆 상세)에서는 목록이 둘이다. 검토 화면이 있으면 그 목록을 넘긴다.
+    let review = app.collectionViews["expense-review-screen"]
+    let list = review.exists ? review : app.collectionViews.firstMatch
     for direction in Array(repeating: true, count: 8) + Array(repeating: false, count: 16) {
       if element.exists && element.isHittable { return element }
       if direction { list.swipeUp(velocity: .slow) } else { list.swipeDown(velocity: .slow) }

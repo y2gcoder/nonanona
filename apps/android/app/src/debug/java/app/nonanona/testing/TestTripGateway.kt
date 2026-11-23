@@ -80,6 +80,13 @@ class TestTripGateway(
 
     override suspend fun ledger(trip: TripId): RoomLedger = throw RoomLoadException(RoomLoadFailure.Unavailable)
 
+    override suspend fun maskedReceipt(
+        artifact: app.nonanona.feature.settlement.ReceiptArtifactRef,
+        trip: TripId,
+    ): app.nonanona.feature.settlement.MaskedReceiptImage =
+        throw app.nonanona.feature.settlement
+            .ReceiptViewException(app.nonanona.feature.settlement.ReceiptViewFailure.Unavailable)
+
     private fun fixtureFailure(code: InviteCode): InviteAcceptFailure? =
         when (code.value) {
             "SYNTHEXPIRED01" -> InviteAcceptFailure.InviteExpired

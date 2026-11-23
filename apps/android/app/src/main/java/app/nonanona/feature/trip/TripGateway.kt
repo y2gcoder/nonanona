@@ -196,6 +196,15 @@ interface TripGateway {
 
     /** 여행방 장부(구성원·지출·검토 값·revision). 실패하면 [RoomLoadException]. */
     suspend fun ledger(trip: TripId): app.nonanona.feature.settlement.RoomLedger
+
+    /**
+     * 그 여행방에 공유한 가림 사본을 인증해 받는다(메모리로만, 저장하지 않는다). 경로가 그 여행방 것이 아니거나 받은 바이트가
+     * 장부의 해시·PNG와 다르면 Mismatch. 실패하면 [app.nonanona.feature.settlement.ReceiptViewException].
+     */
+    suspend fun maskedReceipt(
+        artifact: app.nonanona.feature.settlement.ReceiptArtifactRef,
+        trip: TripId,
+    ): app.nonanona.feature.settlement.MaskedReceiptImage
 }
 
 /** release 빌드의 기본 구현체. 서버를 연결하기 전까지 어떤 초대도 수락하지 않는다. */
@@ -216,4 +225,11 @@ object UnavailableTripGateway : TripGateway {
 
     override suspend fun ledger(trip: TripId): app.nonanona.feature.settlement.RoomLedger =
         throw RoomLoadException(RoomLoadFailure.Unavailable)
+
+    override suspend fun maskedReceipt(
+        artifact: app.nonanona.feature.settlement.ReceiptArtifactRef,
+        trip: TripId,
+    ): app.nonanona.feature.settlement.MaskedReceiptImage =
+        throw app.nonanona.feature.settlement
+            .ReceiptViewException(app.nonanona.feature.settlement.ReceiptViewFailure.Unavailable)
 }

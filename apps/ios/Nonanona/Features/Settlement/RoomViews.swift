@@ -199,6 +199,9 @@ struct ExpenseReviewView: View {
   let edit: ((inout ShareForm) -> Void) -> Void
   let onInclude: () -> Void
   let onHold: (String) -> Void
+  var receipt: ReceiptViewState? = nil
+  var onShowReceipt: () -> Void = {}
+  var onHideReceipt: () -> Void = {}
 
   @State private var askingHoldReason = false
   static let holdReasons = ["원화 청구액 확인 대기", "결제 여부 불명확", "같은 지출일 수 있음"]
@@ -218,6 +221,9 @@ struct ExpenseReviewView: View {
             .textRole(.supporting).foregroundStyle(.secondary)
         }
       }
+
+      ReceiptAttachmentSection(
+        hasArtifact: expense.artifact != nil, state: receipt, onShow: onShowReceipt, onHide: onHideReceipt)
 
       Section {
         Picker("결제자", selection: binding(\.payer)) {
@@ -358,6 +364,69 @@ struct ExpenseReviewView: View {
 
   private func binding<T>(_ path: WritableKeyPath<ShareForm, T>) -> Binding<T> {
     Binding(get: { form[keyPath: path] }, set: { value in edit { $0[keyPath: path] = value } })
+  }
+}
+
+/// 검토 화면의 증빙: 공유한 가림 사본을 눌러서 열고, 직접 입력은 증빙 없음. 실패해도 검토는 그대로 할 수 있다.
+struct ReceiptAttachmentSection: View {
+  let hasArtifact: Bool
+  let state: ReceiptViewState?
+  let onShow: () -> Void
+  let onHide: () -> Void
+
+  var body: some View {
+    Section {
+      if !hasArtifact {
+        Text("증빙 없음 · 직접 입력이라 사진이 없어요.").textRole(.body).accessibilityIdentifier("review-receipt-none")
+      } else {
+        switch state {
+        case nil:
+          Button("가린 사본 보기", action: onShow).accessibilityIdentifier("review-receipt-show")
+        case .loading:
+          HStack(spacing: Spacing.s) {
+            ProgressView()
+            Text("사본을 불러오는 중…").textRole(.supporting)
+          }
+          .accessibilityIdentifier("review-receipt-loading")
+        case .shown(let image):
+          if let uiImage = UIImage(data: image.png) {
+            Image(uiImage: uiImage)
+              .resizable()
+              .scaledToFit()
+              .frame(maxWidth: .infinity)
+              .accessibilityLabel("가린 영수증 사본")
+              .accessibilityIdentifier("review-receipt-image")
+          }
+          Text("올린 사본과 같아요 · 확인 \(image.sha256.prefix(8))")
+            .textRole(.caption).foregroundStyle(.secondary).accessibilityIdentifier("review-receipt-verified")
+          Button("사본 닫기", action: onHide).accessibilityIdentifier("review-receipt-hide")
+        case .failed(let failure):
+          Text(failure.message).textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier(
+            "review-receipt-failure")
+          Button("다시 시도", action: onShow).accessibilityIdentifier("review-receipt-retry")
+        }
+      }
+    } header: {
+      Text("증빙").textRole(.sectionTitle).foregroundStyle(.primary).textCase(nil)
+    } footer: {
+      if hasArtifact {
+        Text("올린 사람이 가림을 확인한 사본만 보여요. 원본 사진과 읽은 글자는 올린 사람 기기에만 있어요.").textRole(.supporting)
+      }
+    }
+  }
+}
+
+extension ReceiptViewFailure {
+  var message: String {
+    switch self {
+    case .sessionExpired: "로그인이 만료됐어요. 다시 로그인한 뒤 다시 시도해 주세요."
+    case .denied: "이 사본을 볼 권한이 없어요."
+    case .missing: "사본을 찾을 수 없거나 볼 수 없어요."
+    case .mismatch: "받은 사본이 올린 사본과 달라 보여 주지 않았어요."
+    case .network: "인터넷에 연결할 수 없어요. 연결을 확인하고 다시 시도해 주세요."
+    case .unavailable: "지금은 사본을 불러올 수 없어요. 잠시 후 다시 시도해 주세요."
+    case .unknown: "사본을 불러오지 못했어요. 다시 시도해 주세요."
+    }
   }
 }
 

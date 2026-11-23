@@ -1,5 +1,7 @@
 package app.nonanona.feature.settlement
 
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -9,12 +11,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -35,17 +39,21 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
 import app.nonanona.R
 import app.nonanona.design.NavigateBackButton
 import app.nonanona.design.Spacing
@@ -305,6 +313,9 @@ fun ExpenseReviewScreen(
     onInclude: () -> Unit,
     onHold: (String) -> Unit,
     onBack: (() -> Unit)?,
+    receipt: ReceiptViewState? = null,
+    onShowReceipt: () -> Unit = {},
+    onHideReceipt: () -> Unit = {},
 ) {
     var askingReason by rememberSaveable { mutableStateOf(false) }
     val saving = state == ReviewSaveState.Saving
@@ -341,6 +352,14 @@ fun ExpenseReviewScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+            item {
+                ReceiptAttachment(
+                    hasArtifact = expense.artifact != null,
+                    state = receipt,
+                    onShow = onShowReceipt,
+                    onHide = onHideReceipt,
+                )
             }
             item {
                 Section(stringResource(R.string.review_payer), stringResource(R.string.review_payer_hint)) {
@@ -506,6 +525,90 @@ fun ExpenseReviewScreen(
         )
     }
 }
+
+/** 검토 화면의 증빙: 공유한 가림 사본을 눌러서 열고, 직접 입력은 증빙 없음. 실패해도 검토는 그대로 할 수 있다. */
+@Composable
+private fun ReceiptAttachment(
+    hasArtifact: Boolean,
+    state: ReceiptViewState?,
+    onShow: () -> Unit,
+    onHide: () -> Unit,
+) {
+    Section(stringResource(R.string.receipt_section), if (hasArtifact) stringResource(R.string.receipt_policy_hint) else null) {
+        if (!hasArtifact) {
+            Text(stringResource(R.string.receipt_none), style = TextRoles.body, modifier = Modifier.testTag("review_receipt_none"))
+            return@Section
+        }
+        when (state) {
+            null -> {
+                OutlinedButton(onClick = onShow, modifier = Modifier.testTag("review_receipt_show")) {
+                    Text(stringResource(R.string.receipt_show))
+                }
+            }
+
+            ReceiptViewState.Loading -> {
+                Row(horizontalArrangement = Arrangement.spacedBy(Spacing.s), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text(
+                        stringResource(R.string.receipt_loading),
+                        style = TextRoles.supporting,
+                        modifier = Modifier.testTag("review_receipt_loading"),
+                    )
+                }
+            }
+
+            is ReceiptViewState.Shown -> {
+                val bitmap =
+                    remember(
+                        state.image.sha256,
+                    ) { BitmapFactory.decodeByteArray(state.image.png, 0, state.image.png.size)?.asImageBitmap() }
+                val description = stringResource(R.string.receipt_image_description)
+                if (bitmap != null) {
+                    Image(
+                        bitmap = bitmap,
+                        contentDescription = description,
+                        contentScale = ContentScale.FillWidth,
+                        modifier = Modifier.fillMaxWidth().testTag("review_receipt_image"),
+                    )
+                }
+                Text(
+                    stringResource(R.string.receipt_verified, state.image.sha256.take(8)),
+                    style = TextRoles.caption,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("review_receipt_verified"),
+                )
+                TextButton(
+                    onClick = onHide,
+                    modifier = Modifier.testTag("review_receipt_hide"),
+                ) { Text(stringResource(R.string.receipt_hide)) }
+            }
+
+            is ReceiptViewState.Failed -> {
+                Text(
+                    stringResource(state.failure.messageRes()),
+                    style = TextRoles.supporting,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.testTag("review_receipt_failure"),
+                )
+                OutlinedButton(
+                    onClick = onShow,
+                    modifier = Modifier.testTag("review_receipt_retry"),
+                ) { Text(stringResource(R.string.action_retry)) }
+            }
+        }
+    }
+}
+
+fun ReceiptViewFailure.messageRes(): Int =
+    when (this) {
+        ReceiptViewFailure.SessionExpired -> R.string.settle_failure_session
+        ReceiptViewFailure.Denied -> R.string.receipt_failure_denied
+        ReceiptViewFailure.Missing -> R.string.receipt_failure_missing
+        ReceiptViewFailure.Mismatch -> R.string.receipt_failure_mismatch
+        ReceiptViewFailure.Network -> R.string.failure_network
+        ReceiptViewFailure.Unavailable -> R.string.receipt_failure_unavailable
+        ReceiptViewFailure.Unknown -> R.string.receipt_failure_unknown
+    }
 
 @Composable
 private fun Section(

@@ -146,4 +146,7 @@ extension TripGateway {
   }
   func myTrips() async throws -> [TripSummary] { [] }
   func ledger(_ trip: TripID) async throws -> RoomLedger { throw RoomLoadFailure.unavailable }
+  func maskedReceipt(_ artifact: ReceiptArtifactRef, in trip: TripID) async throws -> MaskedReceiptImage {
+    throw ReceiptViewFailure.unavailable
+  }
 }

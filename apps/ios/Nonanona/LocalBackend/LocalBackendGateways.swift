@@ -1,4 +1,5 @@
 #if DEBUG
+  import CryptoKit
   import Foundation
   import os
 
@@ -150,6 +151,53 @@
         throw RoomLoadFailure.unknown
       }
       return ledger
+    }
+
+    /// 비공개 버킷 receipts의 인증 다운로드(`/storage/v1/object/authenticated/…`). 공개·서명 URL은 쓰지 않는다.
+    /// 보내기 전에 경로가 이 여행방의 사본 경로인지, 받은 뒤 PNG이고 장부의 해시와 같은지 확인한다.
+    func maskedReceipt(_ artifact: ReceiptArtifactRef, in trip: TripID) async throws -> MaskedReceiptImage {
+      guard Self.isArtifactPath(artifact.path, in: trip),
+        artifact.sha256.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil
+      else { throw ReceiptViewFailure.mismatch }
+      let data: Data
+      do {
+        data = try await session.authorizedGet("storage/v1/object/authenticated/receipts/\(artifact.path)")
+      } catch let failure as LocalSupabaseSession.Failure {
+        throw Self.receiptViewFailure(failure.outcome)
+      }
+      return try Self.verified(data, artifact)
+    }
+
+    /// `<여행방>/<올린 사람>/<요청 키>.png`, 첫 칸은 이 여행방.
+    static func isArtifactPath(_ path: String, in trip: TripID) -> Bool {
+      let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+      let uuid = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+      return parts.count == 3 && parts[0] == trip.value.lowercased()
+        && String(parts[0]).range(of: uuid, options: .regularExpression) != nil
+        && String(parts[1]).range(of: uuid, options: .regularExpression) != nil
+        && parts[2].hasSuffix(".png")
+        && String(parts[2].dropLast(4)).range(of: uuid, options: .regularExpression) != nil
+    }
+
+    static func verified(_ data: Data, _ artifact: ReceiptArtifactRef) throws -> MaskedReceiptImage {
+      let signature = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A])
+      let sha = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+      guard data.prefix(8) == signature, sha == artifact.sha256 else { throw ReceiptViewFailure.mismatch }
+      return MaskedReceiptImage(png: data, sha256: sha)
+    }
+
+    /// Storage는 없는 객체와 읽을 수 없는 객체를 같은 NoSuchKey로 알린다.
+    static func receiptViewFailure(_ outcome: LocalSupabaseSession.Outcome) -> ReceiptViewFailure {
+      switch outcome {
+      case .transport: return .network
+      case .http(_, "NoSuchKey"), .http(404, _): return .missing
+      case .http(_, "AccessDenied"), .http(403, _): return .denied
+      case .http(_, "InvalidJWT"), .http(401, _): return .sessionExpired
+      case .http(_, let code?) where sessionEndedCodes.contains(code): return .sessionExpired
+      case .http(429, _): return .unavailable
+      case .http(let status, _) where status >= 500: return .unavailable
+      case .http: return .unknown
+      }
     }
 
     private func roomCall(_ call: () async throws -> Data) async throws -> Data {
@@ -372,6 +420,8 @@
       let holdReason: String?
       let shares: [Share]
       let kind: String?
+      let artifactPath: String?
+      let artifactSha256: String?
 
       var value: LedgerExpense? {
         let state: ExpenseStatus
@@ -388,7 +438,8 @@
           id: expenseId, version: version, isManual: entry == "manual", uploadedBy: MemberID(value: uploadedBy),
           date: expenseDate, amountMinor: amountMinor, currency: currency, merchant: merchant, status: state,
           payer: payerId.map(MemberID.init), krwAmount: krwAmount, krwBasis: krwBasis.flatMap(KRWBasis.init(rawValue:)),
-          shares: shares.map { ShareLine(member: MemberID(value: $0.userId), krw: $0.krw) })
+          shares: shares.map { ShareLine(member: MemberID(value: $0.userId), krw: $0.krw) },
+          artifact: artifactPath.flatMap { path in artifactSha256.map { ReceiptArtifactRef(path: path, sha256: $0) } })
       }
     }
 

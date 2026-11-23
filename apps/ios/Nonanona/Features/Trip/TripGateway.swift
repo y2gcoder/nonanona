@@ -146,6 +146,9 @@ protocol TripGateway: Sendable {
   func myTrips() async throws -> [TripSummary]
   /// 여행방 장부(구성원·지출·검토 값·revision). 실패하면 `RoomLoadFailure`.
   func ledger(_ trip: TripID) async throws -> RoomLedger
+  /// 그 여행방에 공유한 가림 사본을 인증해 받는다(메모리로만, 저장하지 않는다). 경로가 그 여행방 것이 아니거나 받은 바이트가
+  /// 장부의 해시·PNG와 다르면 `.mismatch`. 실패하면 `ReceiptViewFailure`.
+  func maskedReceipt(_ artifact: ReceiptArtifactRef, in trip: TripID) async throws -> MaskedReceiptImage
 }
 
 /// release 빌드의 기본 구현체. 서버를 연결하기 전까지 어떤 초대도 수락하지 않는다.
@@ -165,4 +168,8 @@ struct UnavailableTripGateway: TripGateway {
   func myTrips() async throws -> [TripSummary] { throw RoomLoadFailure.unavailable }
 
   func ledger(_ trip: TripID) async throws -> RoomLedger { throw RoomLoadFailure.unavailable }
+
+  func maskedReceipt(_ artifact: ReceiptArtifactRef, in trip: TripID) async throws -> MaskedReceiptImage {
+    throw ReceiptViewFailure.unavailable
+  }
 }

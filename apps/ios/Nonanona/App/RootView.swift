@@ -178,7 +178,10 @@ private struct ExpenseReviewDestination: View {
         refreshed: rooms.reviewRefreshed.contains(target),
         edit: { rooms.editForm(target, $0) },
         onInclude: { Task { await rooms.include(target) } },
-        onHold: { reason in Task { await rooms.hold(target, reason: reason) } })
+        onHold: { reason in Task { await rooms.hold(target, reason: reason) } },
+        receipt: rooms.receiptViews[target],
+        onShowReceipt: { Task { await rooms.showReceipt(target) } },
+        onHideReceipt: { rooms.hideReceipt(target) })
     }
   }
 }

@@ -232,6 +232,9 @@ fun NonanonaApp(viewModel: AppViewModel) {
                             onInclude = { viewModel.rooms.include(target) },
                             onHold = { viewModel.rooms.hold(target, it) },
                             onBack = viewModel::back.takeUnless { twoPane },
+                            receipt = rooms.receiptViews[target],
+                            onShowReceipt = { viewModel.rooms.showReceipt(target) },
+                            onHideReceipt = { viewModel.rooms.hideReceipt(target) },
                         )
                     }
                 }

@@ -14,7 +14,11 @@ import app.nonanona.feature.settlement.FinalizeResult
 import app.nonanona.feature.settlement.KrwBasis
 import app.nonanona.feature.settlement.LedgerExpense
 import app.nonanona.feature.settlement.LedgerMember
+import app.nonanona.feature.settlement.MaskedReceiptImage
 import app.nonanona.feature.settlement.MemberId
+import app.nonanona.feature.settlement.ReceiptArtifactRef
+import app.nonanona.feature.settlement.ReceiptViewException
+import app.nonanona.feature.settlement.ReceiptViewFailure
 import app.nonanona.feature.settlement.ReviewedExpense
 import app.nonanona.feature.settlement.RoomLedger
 import app.nonanona.feature.settlement.SettlementException
@@ -203,6 +207,26 @@ class LocalTripGateway(
         }
     }
 
+    /**
+     * 비공개 버킷 receipts의 인증 다운로드(/storage/v1/object/authenticated/…). 공개·서명 URL은 쓰지 않는다.
+     * 보내기 전에 경로가 이 여행방의 사본 경로인지, 받은 뒤 PNG이고 장부의 해시와 같은지 확인한다.
+     */
+    override suspend fun maskedReceipt(
+        artifact: ReceiptArtifactRef,
+        trip: TripId,
+    ): MaskedReceiptImage {
+        if (!isArtifactPath(artifact.path, trip) || !artifact.sha256.matches(Regex("[0-9a-f]{64}"))) {
+            throw ReceiptViewException(ReceiptViewFailure.Mismatch)
+        }
+        val bytes =
+            try {
+                session.authorizedGet("/storage/v1/object/authenticated/receipts/${artifact.path}")
+            } catch (e: LocalBackendException) {
+                throw ReceiptViewException(receiptViewFailure(e.outcome))
+            }
+        return verified(bytes, artifact)
+    }
+
     private suspend fun roomCall(block: suspend () -> String): String =
         try {
             block()
@@ -276,6 +300,51 @@ class LocalTripGateway(
                 else -> {
                     ReceiptUploadFailure.Unknown
                 }
+            }
+        }
+
+        private val uuid = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+        /** <여행방>/<올린 사람>/<요청 키>.png, 첫 칸은 이 여행방. */
+        fun isArtifactPath(
+            path: String,
+            trip: TripId,
+        ): Boolean {
+            val parts = path.split("/")
+            return parts.size == 3 &&
+                parts[0] == trip.value.lowercase() &&
+                uuid.matches(parts[0]) &&
+                uuid.matches(parts[1]) &&
+                parts[2].endsWith(".png") &&
+                uuid.matches(parts[2].removeSuffix(".png"))
+        }
+
+        fun verified(
+            bytes: ByteArray,
+            artifact: ReceiptArtifactRef,
+        ): MaskedReceiptImage {
+            val signature = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+            val sha =
+                java.security.MessageDigest
+                    .getInstance("SHA-256")
+                    .digest(bytes)
+                    .joinToString("") { "%02x".format(it) }
+            if (bytes.size < 8 || !bytes.copyOfRange(0, 8).contentEquals(signature) || sha != artifact.sha256) {
+                throw ReceiptViewException(ReceiptViewFailure.Mismatch)
+            }
+            return MaskedReceiptImage(bytes, sha)
+        }
+
+        /** Storage는 없는 객체와 읽을 수 없는 객체를 같은 NoSuchKey로 알린다. */
+        fun receiptViewFailure(outcome: Outcome): ReceiptViewFailure {
+            if (outcome is Outcome.Transport) return ReceiptViewFailure.Network
+            val http = outcome as Outcome.Http
+            return when {
+                http.code == "NoSuchKey" || http.status == 404 -> ReceiptViewFailure.Missing
+                http.code == "AccessDenied" || http.status == 403 -> ReceiptViewFailure.Denied
+                http.code == "InvalidJWT" || http.code in sessionEndedCodes || http.status == 401 -> ReceiptViewFailure.SessionExpired
+                http.status == 429 || http.status >= 500 -> ReceiptViewFailure.Unavailable
+                else -> ReceiptViewFailure.Unknown
             }
         }
 
@@ -474,6 +543,9 @@ internal object LocalJson {
 
     private fun JSONObject.longOrNull(name: String): Long? = if (isNull(name)) null else getLong(name)
 
+    /** 없는 키와 null을 같게 본다(장부에만 있는 필드). */
+    private fun JSONObject.optStringOrNull(name: String): String? = if (!has(name) || isNull(name)) null else getString(name)
+
     fun members(array: JSONArray): List<LedgerMember> =
         (0 until array.length()).map { i ->
             array.getJSONObject(i).let {
@@ -512,6 +584,10 @@ internal object LocalJson {
             shares =
                 (0 until shares.length()).map { i ->
                     shares.getJSONObject(i).let { ShareLine(MemberId(it.getString("user_id")), it.getLong("krw")) }
+                },
+            artifact =
+                json.optStringOrNull("artifact_path")?.let { path ->
+                    json.optStringOrNull("artifact_sha256")?.let { ReceiptArtifactRef(path, it) }
                 },
         )
     }

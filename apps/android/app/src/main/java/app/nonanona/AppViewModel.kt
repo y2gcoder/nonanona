@@ -50,6 +50,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -268,6 +271,16 @@ class AppViewModel(
         rooms.openSettlement(trip)
         showOnly(Route.Home, Route.Room, Route.Settlement(trip))
     }
+
+    /** 세션이 끝나거나 바뀌고, 올릴 곳(연 여행방)이 바뀌면 연 가림 사본을 모두 지운다. */
+    private val receiptGuard =
+        viewModelScope.launch {
+            state
+                .map { it.session?.accountId to it.room?.id }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { rooms.clearReceipts() }
+        }
 
     private val loading =
         viewModelScope.launch {
@@ -796,6 +809,7 @@ class AppViewModel(
 
     fun back() {
         if (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
+        keepReceiptOnlyForTop()
     }
 
     fun showLogin() = mutableState.update { it.copy(login = LoginState.Choosing) }
@@ -876,7 +890,11 @@ class AppViewModel(
         if (backStack.toList() == routes.toList()) return
         backStack.clear()
         backStack.addAll(routes)
+        keepReceiptOnlyForTop()
     }
+
+    /** 검토 화면을 떠나면(다른 지출 포함) 그 화면에서 연 가림 사본을 지운다. */
+    private fun keepReceiptOnlyForTop() = rooms.clearReceipts(keep = (backStack.lastOrNull() as? Route.Expense)?.target)
 
     private suspend fun <T> io(block: suspend () -> T): T = withContext(Dispatchers.IO) { block() }
 

@@ -45,6 +45,43 @@ sealed interface ExpenseStatus {
     ) : ExpenseStatus
 }
 
+/** 여행방에 공유한 가림 사본 한 장의 위치와 해시(장부가 알려 준다). 원본 사진·OCR 글자는 가리키지 않는다. */
+data class ReceiptArtifactRef(
+    val path: String,
+    val sha256: String,
+)
+
+/** 받은 가림 사본. 장부의 해시와 같은 바이트만 만든다(구현체가 검사한다). */
+class MaskedReceiptImage(
+    val png: ByteArray,
+    val sha256: String,
+) {
+    override fun equals(other: Any?) = other is MaskedReceiptImage && other.sha256 == sha256 && other.png.contentEquals(png)
+
+    override fun hashCode() = sha256.hashCode()
+}
+
+/** 가림 사본 받기 실패. 모두 다시 시도할 수 있고, 지출 검토는 막지 않는다. */
+enum class ReceiptViewFailure {
+    SessionExpired,
+
+    /** 저장소가 읽기를 거절했다. */
+    Denied,
+
+    /** 사본이 없거나 이 계정으로 볼 수 없다. 저장소는 둘을 구분해 알리지 않는다. */
+    Missing,
+
+    /** 받은 바이트가 장부의 사본(해시·PNG·이 여행방 경로)과 다르다. 보여 주지 않는다. */
+    Mismatch,
+    Network,
+    Unavailable,
+    Unknown,
+}
+
+class ReceiptViewException(
+    val failure: ReceiptViewFailure,
+) : Exception("receipt view failed: $failure")
+
 /** 여행방에 올라간 지출 한 건. 올린 사람, 결제자, 부담 몫을 따로 둔다. */
 data class LedgerExpense(
     val id: String,
@@ -60,6 +97,8 @@ data class LedgerExpense(
     val krwAmount: Long?,
     val krwBasis: KrwBasis?,
     val shares: List<ShareLine>,
+    /** 공유한 가림 사본(사본으로 올린 지출만). 직접 입력은 null. */
+    val artifact: ReceiptArtifactRef? = null,
 )
 
 /** 여행방 장부. revision은 방의 입력이 바뀔 때마다 서버가 올리고, 확정은 방장이 본 revision으로만 한다. */

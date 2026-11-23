@@ -34,11 +34,11 @@ def check(name, ok, **info):
     print(("PASS " if ok else "FAIL ") + name + (f" {info}" if info else ""), flush=True)
 
 
-def tiny_png():
-    """가상 1×1 PNG(실제 영수증 아님)."""
+def tiny_png(shade=255):
+    """가상 1×1 PNG(실제 영수증 아님). shade로 지출마다 다른 바이트를 만든다."""
     def chunk(kind, data):
         return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
-    raw = b"\x00\xff\xff\xff"
+    raw = b"\x00" + bytes([shade, shade, shade])
     return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)) + \
         chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
 
@@ -238,12 +238,14 @@ def main():
 
     # ------------------------------------------------------------ 제출: 사본 지출과 직접 입력, 재시도
     expense_ids = {}
-    png = tiny_png()
+    uploaded = {}
     for ex in EXAMPLES["settlement"]["expenses"]:
         submitter = member if ex["key"] in ("r01", "ticket", "souvenir") else host
         req = str(uuid.uuid4())
         if ex["entry"] == "receipt":
-            sha = __import__("hashlib").sha256(png + ex["key"].encode()).hexdigest()
+            png = tiny_png(len(expense_ids) + 1)
+            sha = __import__("hashlib").sha256(png).hexdigest()
+            uploaded[ex["key"]] = png
             st, _ = submitter.upload(f"{trip}/{submitter.uid}/{req}.png", png)
             check(f"{ex['key']}: upload masked copy", st == 200, status=st)
             params = dict(p_trip=trip, p_request_id=req, p_expense_date=ex["date"], p_amount_minor=ex["amount_minor"],
@@ -281,6 +283,25 @@ def main():
     st, host_ledger, _ = host.rpc("get_room_ledger", p_trip=trip)
     check("host and member see the same expenses", host_ledger["expenses"] == ledger["expenses"]
           and host_ledger["revision"] == ledger["revision"] == 5)
+
+    # ------------------------------------------------------------ 공유한 가림 사본 보기(인증 다운로드만)
+    for key, png in uploaded.items():
+        e = next(x for x in host_ledger["expenses"] if x["expense_id"] == expense_ids[key])
+        sha = __import__("hashlib").sha256(png).hexdigest()
+        check(f"{key}: ledger carries the artifact path in this trip and its hash",
+              e["has_artifact"] and e["artifact_sha256"] == sha and e["artifact_path"].startswith(trip + "/")
+              and e["artifact_path"].endswith(".png"))
+        st, raw = lb.http(env, "GET", "/storage/v1/object/authenticated/receipts/" + e["artifact_path"], token=host.token)
+        check(f"{key}: host downloads exactly the uploaded masked copy", st == 200 and raw == png, status=st)
+        st, raw = lb.http(env, "GET", "/storage/v1/object/authenticated/receipts/" + e["artifact_path"], token=outsider.token)
+        check(f"{key}: outsider cannot download it", st >= 400 and raw != png, status=st, code=lb.code_of(raw))
+        st, raw = lb.http(env, "GET", "/storage/v1/object/authenticated/receipts/" + e["artifact_path"])
+        check(f"{key}: anonymous cannot download it", st >= 400 and raw != png, status=st)
+        st, raw = lb.http(env, "GET", "/storage/v1/object/public/receipts/" + e["artifact_path"])
+        check(f"{key}: no public URL", st >= 400 and raw != png, status=st)
+    manual = next(x for x in host_ledger["expenses"] if x["expense_id"] == expense_ids["ticket"])
+    check("manual expense has no artifact reference", not manual["has_artifact"] and manual["artifact_path"] is None
+          and manual["artifact_sha256"] is None)
 
     # ------------------------------------------------------------ 검토: 권한·검사·재시도·동시성
     r01 = by_id[expense_ids["r01"]]

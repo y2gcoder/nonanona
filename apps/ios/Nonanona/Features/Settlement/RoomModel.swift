@@ -12,6 +12,13 @@ enum ReviewSaveState: Equatable {
   case failed(SettlementFailure)
 }
 
+/// 검토 화면에서 연 가림 사본. 메모리에만 두고 화면을 떠나거나 세션·여행방이 바뀌면 지운다.
+enum ReceiptViewState: Equatable {
+  case loading
+  case shown(MaskedReceiptImage)
+  case failed(ReceiptViewFailure)
+}
+
 enum SettlementScreenState: Equatable {
   case loading
   case finalizing
@@ -34,7 +41,14 @@ final class RoomModel {
   private(set) var loadingLedger: Set<TripID> = []
 
   /// 검토 화면에 열린 지출. 화면이 아니라 모델에 두어 배치가 바뀌어도 닫히지 않는다.
-  var reviewing: ExpenseTarget?
+  var reviewing: ExpenseTarget? {
+    // 검토 화면을 떠나면(다른 지출 포함) 그 화면에서 연 사본을 지운다.
+    didSet { if reviewing != oldValue { clearReceipts(except: reviewing) } }
+  }
+  /// 검토 화면에서 연 가림 사본(지출별). 저장하지 않는다.
+  private(set) var receiptViews: [ExpenseTarget: ReceiptViewState] = [:]
+  /// 받는 중인 사본 요청. 지우면 늦게 온 응답을 버린다.
+  private var receiptLoads: [ExpenseTarget: UUID] = [:]
   private(set) var forms: [ExpenseTarget: ShareForm] = [:]
   private(set) var reviewState: [ExpenseTarget: ReviewSaveState] = [:]
   /// 보낸 검토(응답을 못 받았을 수 있다). 같은 내용으로 다시 보내면 같은 요청 키를 쓴다.
@@ -214,6 +228,43 @@ final class RoomModel {
         break
       }
     }
+  }
+
+  // MARK: - 가림 사본 보기
+
+  /// 지금 검토 중인 지출의 가림 사본을 받는다. 장부의 이 여행방 지출이고 사본이 있을 때만. 검토·저장과 따로 돈다.
+  func showReceipt(_ target: ExpenseTarget) async {
+    guard reviewing == target, let artifact = expense(target)?.artifact else { return }
+    if case .loading = receiptViews[target] { return }
+    let token = UUID()
+    receiptLoads[target] = token
+    receiptViews[target] = .loading
+    let result: Result<MaskedReceiptImage, ReceiptViewFailure>
+    do {
+      result = .success(try await trips.maskedReceipt(artifact, in: target.tripID))
+    } catch {
+      result = .failure(error as? ReceiptViewFailure ?? .unknown)
+    }
+    // 그사이 화면을 떠났거나 세션·여행방이 바뀌어 지웠으면 버린다.
+    guard receiptLoads[target] == token else { return }
+    receiptLoads[target] = nil
+    switch result {
+    case .success(let image): receiptViews[target] = .shown(image)
+    case .failure(let failure):
+      receiptViews[target] = .failed(failure)
+      if failure == .sessionExpired { await onSessionExpired() }
+    }
+  }
+
+  func hideReceipt(_ target: ExpenseTarget) {
+    receiptViews[target] = nil
+    receiptLoads[target] = nil
+  }
+
+  /// 연 사본을 모두 지운다(세션 종료, 다른 여행방, 화면 떠남). 받는 중인 요청의 응답도 버린다.
+  func clearReceipts(except keep: ExpenseTarget? = nil) {
+    receiptViews = receiptViews.filter { $0.key == keep }
+    receiptLoads = receiptLoads.filter { $0.key == keep }
   }
 
   // MARK: - 미리보기와 확정

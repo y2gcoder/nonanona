@@ -81,9 +81,14 @@ final class AppModel {
   }
   private(set) var loaded = false
   private(set) var drafts: [ReceiptDraft] = []
-  private(set) var session: AccountSession?
+  private(set) var session: AccountSession? {
+    didSet { if session == nil { rooms.clearReceipts() } }
+  }
   private(set) var pendingInvite: PendingInvite?
-  private(set) var room: TripRoom?
+  private(set) var room: TripRoom? {
+    // 올릴 곳(연 여행방)이 바뀌면 그 방에서 연 가림 사본을 지운다.
+    didSet { if room?.id != oldValue?.id { rooms.clearReceipts() } }
+  }
   var login: LoginState = .hidden
   private(set) var join: JoinState = .idle
   var importFailed = false

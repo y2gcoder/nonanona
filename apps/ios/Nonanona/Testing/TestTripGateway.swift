@@ -63,6 +63,10 @@
 
     func ledger(_ trip: TripID) async throws -> RoomLedger { throw RoomLoadFailure.unavailable }
 
+    func maskedReceipt(_ artifact: ReceiptArtifactRef, in trip: TripID) async throws -> MaskedReceiptImage {
+      throw ReceiptViewFailure.unavailable
+    }
+
     private func fixtureFailure(_ code: InviteCode) -> InviteAcceptFailure? {
       let first = failedOnce.withLock { $0.insert(code.value).inserted }
       switch code.value {

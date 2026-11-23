@@ -355,6 +355,71 @@ def a_member_sees_without_host_actions():
     u.back()
 
 
+def stored_artifact():
+    """r01 지출의 장부 해시와, 서버 Storage에 실제로 저장된 객체(관리 키로 받음)의 해시. 둘이 같아야 한다."""
+    row = lb.rows(f"""select e.artifact_path as path, e.artifact_sha256 as sha from public.expenses e
+        join public.trips t on t.id = e.trip_id where t.name = '{TRIP}' and e.amount_minor = 1408""", "settlement-e2e-artifact")[0]
+    env = lb.status()
+    st, raw = lb.http(env, "GET", "/storage/v1/object/receipts/" + row["path"], key=env["SECRET_KEY"], token=env["SECRET_KEY"])
+    assert st == 200, st
+    stored = hashlib.sha256(raw).hexdigest()
+    assert stored == row["sha"], "stored object differs from the ledger hash"
+    (OUT / "receipt-artifact.json").write_text(json.dumps({"ledger_sha256": row["sha"], "stored_object_sha256": stored,
+                                                          "bytes": len(raw)}) + "\n")
+    log(f"stored masked copy sha256 {stored[:8]}… ({len(raw)} bytes) equals the ledger hash")
+    return stored
+
+
+def a_receipt_view(prefix):
+    """방장 검토 화면에서 가림 사본 보기(Android): 확인 해시 = 저장된 사본, 다시 열면 지워짐, 직접 입력은 증빙 없음,
+    서버에 닿지 않으면 다시 시도할 수 있는 실패(검토는 그대로), 다시 시도, 큰 글자·가로."""
+    a_open_expense("1,408 JPY")
+    u.tap(reach("expense_review_screen", id="review_receipt_show"))
+    node = until(lambda: u.find(id="review_receipt_verified"), 20, "receipt shown")
+    assert node.text == f"올린 사본과 같아요 · 확인 {prefix}", node.text
+    image = u.find(id="review_receipt_image")
+    assert image and image.desc == "가린 영수증 사본", image
+    a_shot("android-settlement-receipt-shown")
+    u.back()
+    a_open_expense("1,408 JPY")
+    assert reach("expense_review_screen", id="review_receipt_show"), "다시 열면 다시 눌러야 받는다"
+    assert not u.find(id="review_receipt_image")
+    u.back()
+    a_open_expense("38,000 KRW")
+    assert reach("expense_review_screen", id="review_receipt_none").text == "증빙 없음 · 직접 입력이라 사진이 없어요."
+    assert not u.find(id="review_receipt_show")
+    u.back()
+    a_open_expense("1,408 JPY")
+    backend("api-stop")
+    try:
+        u.tap(reach("expense_review_screen", id="review_receipt_show"))
+        node = until(lambda: u.find(id="review_receipt_failure"), 30, "receipt network failure")
+        assert node.text == "인터넷에 연결할 수 없어요. 연결을 확인하고 다시 시도해 주세요.", node.text
+        assert u.find(id="review_receipt_retry")
+        assert reach("expense_review_screen", id="review_payer_1").enabled, "사본을 못 받아도 검토할 수 있다"
+        a_shot("android-settlement-receipt-network-failure")
+    finally:
+        backend("api-start")
+    u.tap(reach("expense_review_screen", id="review_receipt_retry"))
+    node = until(lambda: u.find(id="review_receipt_verified"), 20, "receipt shown after retry")
+    assert node.text.endswith(prefix)
+    u.sh("settings put system font_scale 2.0")
+    time.sleep(2)
+    assert reach("expense_review_screen", id="review_receipt_verified").text.endswith(prefix), "큰 글자에서도 같은 사본"
+    a_shot("android-settlement-receipt-large-text")
+    u.sh("settings put system font_scale 1.0")
+    u.sh("settings put system accelerometer_rotation 0")
+    u.sh("settings put system user_rotation 1")
+    time.sleep(3)
+    assert reach("expense_review_screen", id="review_receipt_verified").text.endswith(prefix), "가로에서도 같은 사본"
+    a_shot("android-settlement-receipt-landscape")
+    u.sh("settings put system user_rotation 0")
+    time.sleep(3)
+    u.back()
+    u.wait(id="room_screen", timeout=10)
+    assert not u.find(id="review_receipt_image")
+
+
 def a_pick_member(prefix, name):
     for i in (1, 2):
         if name in u.texts_within(f"{prefix}_{i}"):
@@ -520,7 +585,25 @@ def main():
         assert (t["status"], t["krw_amount"], t["krw_basis"], t["shares"]) == ("included", 38000, "krw_original",
                                                                                [{"가나": 19000}, {"다라": 19000}]), t
         assert r["status"] == "open" and r["finalizations"] == 0
-    server("after-host-review", reviewed)
+    before_view = server("after-host-review", reviewed)
+
+    prefix = stored_artifact()[:8]
+    if HOST_PLATFORM == "ios":
+        ios_test("testH1b_ViewMaskedReceipt", ARTIFACT_SHA_PREFIX=prefix)
+        backend("api-stop")
+        try:
+            ios_test("testH1c_ReceiptNetworkFailureDoesNotBlockReview")
+        finally:
+            backend("api-start")
+        run(["xcrun", "simctl", "ui", UDID, "content_size", "accessibility-extra-extra-extra-large"])
+        try:
+            ios_test("testH1d_RetryThenLargeTextAndLandscape", ARTIFACT_SHA_PREFIX=prefix)
+        finally:
+            run(["xcrun", "simctl", "ui", UDID, "content_size", "large"])
+    else:
+        a_receipt_view(prefix)
+    after_view = server("after-receipt-view", reviewed)
+    assert after_view["revision"] == before_view["revision"], "사본 보기는 아무것도 쓰지 않는다"
 
     if HOST_PLATFORM == "ios":
         ios_test("testH2_OpenPreview")

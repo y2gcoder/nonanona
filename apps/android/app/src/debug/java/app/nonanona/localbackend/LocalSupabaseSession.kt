@@ -130,6 +130,22 @@ class LocalSupabaseSession(
             }
         }
 
+    /**
+     * 인증한 GET(비공개 Storage 객체 받기). 만료가 가까우면 먼저 갱신하고, JWT를 거절하면 한 번 갱신해 다시 받는다.
+     * 메모리로만 받는다(HTTP 캐시를 쓰지 않는다).
+     */
+    suspend fun authorizedGet(path: String): ByteArray =
+        lock.withLock {
+            var session = read() ?: throw LocalBackendException(Outcome.Http(401, null))
+            if (session.expiresAtMillis - clock() < 5_000) session = refresh(session)
+            try {
+                send(path, null, null, session.accessToken, method = "GET")
+            } catch (e: LocalBackendException) {
+                if (!isRejectedJwt(e.outcome)) throw e
+                send(path, null, null, refresh(session).accessToken, method = "GET")
+            }
+        }
+
     /** Auth가 지금 세션을 받아들이는지 확인한다(Storage는 잘못된 토큰과 권한 없음을 같은 코드로 알리므로 구분용). */
     suspend fun isSessionValid(): Boolean {
         val token = stored()?.accessToken ?: return false
@@ -175,23 +191,27 @@ class LocalSupabaseSession(
 
     private suspend fun send(
         path: String,
-        body: ByteArray,
-        contentType: String,
+        body: ByteArray?,
+        contentType: String?,
         bearer: String?,
+        method: String = "POST",
     ): ByteArray {
         val result =
             try {
                 runInterruptible(Dispatchers.IO) {
                     val connection = URI(config.baseUrl + path).toURL().openConnection() as HttpURLConnection
                     try {
-                        connection.requestMethod = "POST"
+                        connection.requestMethod = method
                         connection.connectTimeout = TIMEOUT_MILLIS
                         connection.readTimeout = TIMEOUT_MILLIS
-                        connection.doOutput = true
-                        connection.setRequestProperty("Content-Type", contentType)
+                        connection.useCaches = false
+                        contentType?.let { connection.setRequestProperty("Content-Type", it) }
                         connection.setRequestProperty("apikey", config.publishableKey)
                         bearer?.let { connection.setRequestProperty("Authorization", "Bearer $it") }
-                        connection.outputStream.use { it.write(body) }
+                        if (body != null) {
+                            connection.doOutput = true
+                            connection.outputStream.use { it.write(body) }
+                        }
                         val status = connection.responseCode
                         val stream = if (status in 200..299) connection.inputStream else connection.errorStream
                         status to (stream?.use { it.readBytes() } ?: ByteArray(0))

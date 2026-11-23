@@ -70,6 +70,19 @@
       }
     }
 
+    /// 인증한 GET(비공개 Storage 객체 받기). 만료가 가까우면 먼저 갱신하고, JWT를 거절하면 한 번 갱신해 다시 받는다.
+    /// 메모리로만 받는다(임시 세션이라 디스크 캐시가 없다).
+    func authorizedGet(_ path: String) async throws -> Data {
+      guard var session = stored() else { throw Failure(outcome: .http(status: 401, code: nil)) }
+      if session.expiresAt.timeIntervalSinceNow < 5 { session = try await refresh(session) }
+      do {
+        return try await send(path: path, method: "GET", body: nil, contentType: nil, bearer: session.accessToken)
+      } catch let failure as Failure where Self.isRejectedJWT(failure.outcome) {
+        session = try await refresh(session)
+        return try await send(path: path, method: "GET", body: nil, contentType: nil, bearer: session.accessToken)
+      }
+    }
+
     /// Auth가 지금 세션을 받아들이는지 확인한다(Storage는 잘못된 토큰과 권한 없음을 같은 코드로 알리므로 구분용).
     func isSessionValid() async -> Bool {
       guard let session = stored() else { return false }
@@ -107,9 +120,16 @@
     }
 
     private func send(path: String, body: Data, contentType: String, bearer: String?) async throws -> Data {
+      try await send(path: path, method: "POST", body: body, contentType: contentType, bearer: bearer)
+    }
+
+    private func send(path: String, method: String, body: Data?, contentType: String?, bearer: String?) async throws
+      -> Data
+    {
       var request = URLRequest(url: URL(string: path, relativeTo: config.baseURL)!)
-      request.httpMethod = "POST"
-      request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+      request.httpMethod = method
+      request.cachePolicy = .reloadIgnoringLocalCacheData
+      if let contentType { request.setValue(contentType, forHTTPHeaderField: "Content-Type") }
       request.setValue(config.publishableKey, forHTTPHeaderField: "apikey")
       if let bearer { request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization") }
       request.httpBody = body

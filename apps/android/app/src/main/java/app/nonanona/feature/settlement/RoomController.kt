@@ -27,6 +27,19 @@ sealed interface ReviewSaveState {
     ) : ReviewSaveState
 }
 
+/** 검토 화면에서 연 가림 사본. 메모리에만 두고 화면을 떠나거나 세션·여행방이 바뀌면 지운다. */
+sealed interface ReceiptViewState {
+    data object Loading : ReceiptViewState
+
+    data class Shown(
+        val image: MaskedReceiptImage,
+    ) : ReceiptViewState
+
+    data class Failed(
+        val failure: ReceiptViewFailure,
+    ) : ReceiptViewState
+}
+
 sealed interface SettlementScreenState {
     data object Loading : SettlementScreenState
 
@@ -54,6 +67,8 @@ data class RoomUiState(
     val finalizeRefreshed: Set<TripId> = emptySet(),
     /** 열린 확정 확인 창. 배치가 바뀌어도 남도록 상태에 둔다. */
     val finalizeConfirmation: TripId? = null,
+    /** 검토 화면에서 연 가림 사본(지출별). 저장하지 않는다. */
+    val receiptViews: Map<ExpenseTarget, ReceiptViewState> = emptyMap(),
 ) {
     fun expense(target: ExpenseTarget): LedgerExpense? = ledgers[target.tripId]?.expenses?.firstOrNull { it.id == target.expenseId }
 }
@@ -282,6 +297,44 @@ class RoomController(
                 }
             }
         }
+    }
+
+    // ------------------------------------------------------------ 가림 사본 보기
+
+    /** 받는 중인 사본 요청. 지우면 늦게 온 응답을 버린다. */
+    private val receiptLoads = mutableMapOf<ExpenseTarget, UUID>()
+
+    /** 검토 중인 지출의 가림 사본을 받는다. 장부의 이 여행방 지출이고 사본이 있을 때만. 검토·저장과 따로 돈다. */
+    fun showReceipt(target: ExpenseTarget) {
+        val artifact = state.value.expense(target)?.artifact ?: return
+        if (state.value.receiptViews[target] == ReceiptViewState.Loading) return
+        val token = UUID.randomUUID()
+        receiptLoads[target] = token
+        mutable.update { it.copy(receiptViews = it.receiptViews + (target to ReceiptViewState.Loading)) }
+        scope.launch {
+            val result =
+                try {
+                    ReceiptViewState.Shown(trips.maskedReceipt(artifact, target.tripId))
+                } catch (e: ReceiptViewException) {
+                    ReceiptViewState.Failed(e.failure)
+                }
+            // 그사이 화면을 떠났거나 세션·여행방이 바뀌어 지웠으면 버린다.
+            if (receiptLoads[target] != token) return@launch
+            receiptLoads.remove(target)
+            mutable.update { it.copy(receiptViews = it.receiptViews + (target to result)) }
+            if ((result as? ReceiptViewState.Failed)?.failure == ReceiptViewFailure.SessionExpired) onSessionExpired()
+        }
+    }
+
+    fun hideReceipt(target: ExpenseTarget) {
+        receiptLoads.remove(target)
+        mutable.update { it.copy(receiptViews = it.receiptViews - target) }
+    }
+
+    /** 연 사본을 지운다(화면 떠남, 세션 종료, 다른 여행방). keep 지출만 남긴다. 받는 중인 요청의 응답도 버린다. */
+    fun clearReceipts(keep: ExpenseTarget? = null) {
+        receiptLoads.keys.retainAll { it == keep }
+        mutable.update { it.copy(receiptViews = it.receiptViews.filterKeys { k -> k == keep }) }
     }
 
     // ------------------------------------------------------------ 미리보기와 확정

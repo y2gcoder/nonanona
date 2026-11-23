@@ -2,6 +2,19 @@
 <!-- 여행방 장부·방장 검토·송금표 문구(iOS RoomViews.swift와 같은 문장). -->
 <resources>
     <string name="home_login">로그인</string>
+    <string name="receipt_section">증빙</string>
+    <string name="receipt_none">증빙 없음 · 직접 입력이라 사진이 없어요.</string>
+    <string name="receipt_show">가린 사본 보기</string>
+    <string name="receipt_hide">사본 닫기</string>
+    <string name="receipt_loading">사본을 불러오는 중…</string>
+    <string name="receipt_image_description">가린 영수증 사본</string>
+    <string name="receipt_verified">올린 사본과 같아요 · 확인 %1$s</string>
+    <string name="receipt_policy_hint">올린 사람이 가림을 확인한 사본만 보여요. 원본 사진과 읽은 글자는 올린 사람 기기에만 있어요.</string>
+    <string name="receipt_failure_denied">이 사본을 볼 권한이 없어요.</string>
+    <string name="receipt_failure_missing">사본을 찾을 수 없거나 볼 수 없어요.</string>
+    <string name="receipt_failure_mismatch">받은 사본이 올린 사본과 달라 보여 주지 않았어요.</string>
+    <string name="receipt_failure_unavailable">지금은 사본을 불러올 수 없어요. 잠시 후 다시 시도해 주세요.</string>
+    <string name="receipt_failure_unknown">사본을 불러오지 못했어요. 다시 시도해 주세요.</string>
     <string name="status_invite_room_finalized">정산 확정된 여행방</string>
     <string name="invite_failure_room_finalized">정산이 이미 확정된 여행방이라 새로 참여할 수 없어요. 방장에게 확인해 주세요.</string>
     <string name="trips_section">여행방</string>

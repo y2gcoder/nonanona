@@ -170,10 +170,18 @@ fun ReceiptReviewScreen(
         bottomBar = { if (reviewable) ConfirmBar(content, actions) },
         snackbarHost = { snackbarHostState?.let { SnackbarHost(it) } },
     ) { padding ->
+        // 아래 확인 막대(자판이 올라오면 그 위로 올라간다)만큼 목록의 보이는 영역 자체를 줄인다. 안쪽 여백(contentPadding)으로
+        // 두면 영역 크기가 그대로라, 자판이 올라올 때 포커스된 입력 칸이 막대 뒤에 가려진 채 남는다(접은 바깥 화면에서 재현).
+        // 영역이 줄면 스크롤 컨테이너가 포커스된 칸을 보이는 곳으로 옮긴다.
         LazyColumn(
-            contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = padding.calculateBottomPadding() + Spacing.l),
+            contentPadding = PaddingValues(top = padding.calculateTopPadding(), bottom = Spacing.l),
             verticalArrangement = Arrangement.spacedBy(Spacing.s),
-            modifier = Modifier.fillMaxSize().readableWidth().testTag("review_screen"),
+            modifier =
+                Modifier
+                    .fillMaxSize()
+                    .padding(bottom = padding.calculateBottomPadding())
+                    .readableWidth()
+                    .testTag("review_screen"),
         ) {
             item { Header(item, content) }
             item { ImageArea(content, actions) }

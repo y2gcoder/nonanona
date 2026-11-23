@@ -128,7 +128,7 @@ mise run local:down
 | E2E 기기 | iPhone 18 Pro Max(가로 regular), iPhone Duo 바깥 화면(466×678pt, iPhone Duo 런타임 iOS 27.2 24B91016s), iPhone 18 Pro(iOS 27.2) 시뮬레이터. 세 기기 모두 A1–A4 통과. 새 iPhone Duo 시뮬레이터에서 `ios:e2e-posture`(A1, P2, P3) 통과 | Pixel 9 Pro Fold 프로필 에뮬레이터(API 36, 안쪽 2076×2152px·바깥 1080×2424px, hinge x=1038px) |
 | 읽는 중 배치 바꾸기 | 세로 → 가로 → 세로: 같은 초안(사진 2장)·처리 상태. Pro Max 가로에서만 목록과 초안이 나란히. iPhone Duo 시뮬레이터 자세(아래 "iPhone Duo 자세"): folded(466×678, 한 화면, 읽음 0/2) → book(951×669, 목록 0–455.7·초안 495.7–) → flat(951×669, 목록 0–320·초안 320–) → folded: 같은 초안·읽음 0/2, 모두 읽은 뒤 확인 | 펼침(두 칸, 읽음 0/2) → 접기(바깥 화면 한 칸, 같은 초안 0/2) → 펴기(두 칸) → 반쯤 접기(목록 0–1038, 상세 1097–2076) |
 | 중복 OCR | 디스크의 사진별 시도 `[1,1]`, `[1]`(회전, Duo 자세 변경 모두) | 같음 |
-| 접힘 피하기 | Duo book: 시스템이 division(455.5–495.5)을 알리고 분할 보기 열과 최종 확인 알림(97.7–371.7)을 그 밖에 둔다. 처리 요약·사진 상태도 밖. Duo flat: 열·알림이 가운데에 걸친다(아래) | 반쯤 접은 채 로그인 시트 (0–1038), 최종 확인 제목·버튼 (577–920)이 hinge 한쪽 |
+| 접힘 피하기 | Duo book(`partiallyOpen`): 시스템이 활성 division(455.5–495.5)을 알리고 분할 보기 열과 최종 확인 알림(97.7–371.7)을 그 밖에 둔다. 처리 요약·사진 상태도 밖. Duo flat(`fullyOpen`): division이 비활성이라 열·알림이 가운데에 걸치는 것이 정상(아래) | 반쯤 접은 채 로그인 시트 (0–1038), 최종 확인 제목·버튼 (577–920)이 hinge 한쪽 |
 | 최종 확인 유지 | 열린 채 가로 → 세로: 같은 문장, 누를 수 있음 → 올림 1장(이미 올린 0장 포함). Duo 열린 채 folded → book → flat → folded: 같은 문장, 누를 수 있음 → 올림 1장(이미 올린 0장 포함) | 열린 채 접기 → 펴기: 같은 문장 → 올림 1장(이미 올린 0장 포함) |
 | 큰 글자 + 가로 | `accessibility-extra-large`: 초안 마지막 행, 로그인 시트 버튼까지 스크롤로 닿고 다시 로그인 | `font_scale 2.0`: 같음 |
 | 낮고 좁은 창 | 단위 테스트의 320×951 compact | `wm size 1300x1000`(533×410dp): 한 칸, 마지막 행까지 스크롤 |
@@ -146,17 +146,19 @@ mise run android:e2e-adaptive -- [증거 폴더]                    # 접히는 
 
 `ios:e2e-posture`는 Xcode Device Hub 아래쪽 자세 버튼을 Orca Computer Use(`orca computer click --restore-window`)로 누른다. 자세는 `simctl`·XCTest로 바꿀 수 없다. 테스트가 신호 파일로 자세 변경을 부탁하고 스크립트가 누른 뒤 다음 단계로 간다. 사전 조건: 새 Duo 시뮬레이터를 Device Hub 창(1100×800pt, 버튼 좌표가 이 크기에 맞음)에 접은 채 띄우고, `orca computer permissions`에서 손쉬운 사용·화면 기록 허용. 누를 때마다 Device Hub를 앞으로 가져오므로 그동안 다른 창을 쓰면 클릭이 `window_not_focused`로 거절된다(스크립트가 다섯 번까지 다시 누르고, 그래도 안 되면 테스트가 실패한다). 백그라운드 클릭(창을 앞으로 가져오지 않음)으로는 Device Hub의 시뮬레이터 목록 선택이 바뀌지 않아 앞으로 가져와 누른다.
 
-자세 버튼은 접근성 이름이 없어 Device Hub가 그리는 기기 모양으로 부른다: **folded**(첫 번째, 바깥 화면 466×678pt), **book**(두 번째 책 아이콘, 안쪽 화면이 접힘에서 꺾인 그림), **flat**(세 번째, 평평한 그림). 두 안쪽 자세 모두 창은 951×669pt(가로 regular)다. Apple이 말하는 "반쯤 접기"가 어느 버튼인지는 확인하지 못했다. 앱 DEBUG 빌드가 `ReservedRegion` division을 로그로 남긴다(`Theme.swift`, 스크립트가 `ios-layout-reserved.log`로 모음).
+자세 버튼은 접근성 이름이 없어 Device Hub가 그리는 기기 모양으로 부르고, 실제 자세는 앱이 받은 시스템 hinge 상태로 확인했다(DEBUG 빌드의 `UIHingeInteraction` 로그, `Testing/DebugPostureLog.swift`. Apple 문서대로 hinge 값은 배치에 쓰지 않는다): **folded**(첫 번째 버튼) = `closed` 0°, 바깥 화면 466×678pt. **book**(두 번째, 접힘에서 꺾인 그림) = `partiallyOpen` 133.8°. **flat**(세 번째, 평평한 그림) = `fullyOpen` 180°. 두 안쪽 자세 모두 창은 951×669pt(가로 regular)다. 같은 DEBUG 빌드가 화면마다 division 예약 영역을 비활성 것까지(`includeInactive`) 남기고, 스크립트가 자세마다 누른 뒤의 마지막 값(안정된 값)을 `ios-posture-settled.txt`로 모은다.
 
-| 자세 | 시스템이 알린 division | 배치(창 좌표 pt) |
+| 자세 | 안정된 division(누르고 약 1–4초 뒤, 다음 누름까지 그대로) | 배치(창 좌표 pt) |
 | --- | --- | --- |
 | folded | 없음 | 한 화면. 처리 요약 x 20–80, 최종 확인 올리기 버튼 195–335 |
-| book | 세로 455.5–495.5(폭 40), 활성 | 목록 0–455.7, 초안 495.7–. 처리 요약 515.7–575.7, 사진 상태 587.7–638.3. 최종 확인 알림은 왼쪽 칸(제목 97.7–357.7, 올리기 231.7–371.7). 모두 division 밖(테스트가 확인) |
-| flat | 초안 열(320–867)이 division이 있는 값과 빈 값을 같은 시각에 함께 남김 | 열이 기본 폭으로 돌아감: 목록 0–320, 초안 320–867. 내용이 division 쪽으로 옮겨지지 않음: 사진 상태 412–463, 최종 확인 알림이 가운데(제목 303.7–563.7, 올리기 437.7–577.7)로 455.5–495.5와 겹침(기록만, 테스트는 실패로 보지 않음) |
+| book | 세로 455.5–495.5(폭 40) **활성**. 목록 열이 알림, 초안 열(495.7–)은 겹치지 않아 알리지 않음 | 목록 0–455.7, 초안 495.7–. 처리 요약 515.7–575.7, 사진 상태 587.7–638.3. 최종 확인 알림은 왼쪽 칸(제목 97.7–357.7, 올리기 231.7–371.7). 모두 division 밖(테스트가 확인) |
+| flat | 같은 자리 455.5–495.5 **비활성**(`active=false`). 전환 중 잠깐 활성으로 알린 뒤 비활성이 된다 | 열이 기본 폭: 목록 0–320, 초안 320–867. 사진 상태 412–463, 가운데 최종 확인 알림(제목 303.7–563.7, 올리기 437.7–577.7)이 그 자리에 걸침(기록만) |
 
-flat에서 시스템이 가운데를 피하지 않는 것이 평평한 화면이라 의도된 동작인지, 앱 여백이 division을 놓친 것인지는 정하지 못했다. 실기기에서 확인할 일로 남긴다. 증거는 실행마다 증거 폴더에 남는다: 테스트 로그(창·요소 좌표), Device Hub 창과 두 화면의 `simctl io --display` 사진(`device-hub/`), division 로그. XCTest 화면 기록(`XCUIScreen.main`, `app.screenshot()`)은 바깥 화면만 찍어 안쪽 자세에서는 검은 화면이므로 안쪽 화면 사진은 스크립트가 찍는다.
+**flat의 겹침은 정상 동작이다.** Apple 문서: "A division is active only when the device is partially open or closed. When iPhone Duo is fully open, the division is inactive"([ReservedRegion](https://developer.apple.com/documentation/swiftui/reservedregion)), "the fold of iPhone Duo is active when the device is partially open, and inactive when it's fully open"([isActive](https://developer.apple.com/documentation/swiftui/reservedregion/isactive)), HIG "When the device is partially open, the folding region divides the inner display"([Designing for iPhone Duo](https://developer.apple.com/design/human-interface-guidelines/designing-for-iphone-duo), 확인일 2026-11-23). flat은 시스템이 `fullyOpen`으로 알린 자세이고, division은 남은 값이 아니라 안정된 비활성 값이며, 시스템 분할 보기·알림도 피하지 않는다. 그래서 앱 여백(`ContentMargins`, 활성 division만 피함)과 E2E(book에서만 division 밖을 단정, flat은 기록)를 바꾸지 않았다.
 
-**증거 공백**: 위 자세 결과는 시뮬레이터다. 실제 iPhone Duo 하드웨어의 접힘 각도·hinge 센서, 자세 사이 중간 각도는 확인하지 않았다. 2026-11-22에는 Orca Computer Use가 Device Hub에 `permission_denied`를 받아 막혔고, 2026-11-23에 권한이 맞춰진 뒤 위처럼 확인했다(권한 설정은 이 작업에서 바꾸지 않았다). Duo 자세 E2E는 큰 글자·로그인 시트를 다루지 않는다(큰 글자 + 가로는 `ios:e2e-adaptive`). 실기기, 태블릿, Android 실제 두 앱 분할 화면, 데스크톱 창은 확인하지 않았다. 입력 칸은 아직 없어 키보드가 가리는 경우는 해당이 없다.
+증거는 실행마다 증거 폴더에 남는다: 테스트 로그(창·요소 좌표), `ios-layout-reserved.log`(hinge·division 원본), `ios-posture-settled.txt`, Device Hub 창과 두 화면의 `simctl io --display` 사진(`device-hub/`). XCTest 화면 기록(`XCUIScreen.main`, `app.screenshot()`)은 바깥 화면만 찍어 안쪽 자세에서는 검은 화면이므로 안쪽 화면 사진은 스크립트가 찍는다. 스크립트는 누를 때만 Device Hub를 앞으로 가져오고 1초 뒤 원래 앞에 있던 앱을 되돌린다.
+
+**증거 공백**: 위 자세 결과는 시뮬레이터다(Device Hub 버튼 세 개의 고정 각도 0°·133.8°·180°). 실제 iPhone Duo 하드웨어의 hinge 센서, 그 사이 각도, 노트북처럼 가로로 접은 자세(가로 division)는 확인하지 않았다. 2026-11-22에는 Orca Computer Use가 Device Hub에 `permission_denied`를 받아 막혔고, 2026-11-23에 권한이 맞춰진 뒤 위처럼 확인했다(권한 설정은 이 작업에서 바꾸지 않았다). Duo 자세 E2E는 큰 글자·로그인 시트를 다루지 않는다(큰 글자 + 가로는 `ios:e2e-adaptive`). 실기기, 태블릿, Android 실제 두 앱 분할 화면, 데스크톱 창은 확인하지 않았다. 입력 칸은 아직 없어 키보드가 가리는 경우는 해당이 없다.
 
 ## 로컬 Supabase 모드 (debug 전용)
 

@@ -1,9 +1,5 @@
 import SwiftUI
 
-#if DEBUG
-  import os
-#endif
-
 // 공통 디자인 기준(docs/design/mobile-foundations.md)의 역할을 SwiftUI 시스템 스타일에 연결한다.
 // 색은 임시 중립 팔레트(시스템 라벨·배경색)다. 브랜드 색을 정하면 이 파일만 바꾼다.
 
@@ -51,10 +47,14 @@ struct ContentMargins: Equatable {
 
 extension View {
   /// 목록·스크롤 화면에 읽기 좋은 폭과 접힘 피하기를 건다. 좁은 창에서는 아무것도 바꾸지 않는다.
-  func adaptiveContentMargins() -> some View { modifier(AdaptiveContentMargins()) }
+  /// `file`·`line`은 DEBUG 로그에서 어느 화면인지 가리는 데만 쓴다.
+  func adaptiveContentMargins(file: StaticString = #fileID, line: UInt = #line) -> some View {
+    modifier(AdaptiveContentMargins(site: "\(file):\(line)"))
+  }
 }
 
 private struct AdaptiveContentMargins: ViewModifier {
+  let site: String
   @State private var margins = ContentMargins()
 
   func body(content: Content) -> some View {
@@ -71,27 +71,23 @@ private struct AdaptiveContentMargins: ViewModifier {
         margins = $0
       }
       #if DEBUG
-        // 시스템이 알려 준 division 예약 영역을 남긴다(iPhone Duo 자세 E2E가 읽는다, 창 좌표).
+        // 시스템이 알려 준 division 예약 영역을 비활성 것까지 남긴다(iPhone Duo 자세 E2E가 읽는다, 창 좌표).
         .onGeometryChange(for: String.self) { proxy in
           var regions = "unavailable"
           if #available(iOS 27.1, *) {
             let global = proxy.frame(in: .global)
             regions =
-              proxy.reservedRegions(kind: .division).map {
+              proxy.reservedRegions(kind: .division, options: .includeInactive).map {
                 "\($0.frame.offsetBy(dx: global.minX, dy: global.minY)) active=\($0.isActive)"
               }.description
           }
-          return "view=\(proxy.frame(in: .global)) divisions=\(regions)"
+          return "site=\(site) view=\(proxy.frame(in: .global)) divisions=\(regions)"
         } action: {
-          layoutLog.debug("reserved \($0, privacy: .public)")
+          debugLayoutLog.debug("reserved \($0, privacy: .public)")
         }
       #endif
   }
 }
-
-#if DEBUG
-  private let layoutLog = Logger(subsystem: "app.nonanona", category: "layout")
-#endif
 
 /// 글자 역할. 시스템 텍스트 스타일을 써서 Dynamic Type을 따른다.
 /// Android 대응: sectionTitle=titleMedium, body=bodyLarge, supporting=bodyMedium, caption=bodySmall, status=labelMedium.

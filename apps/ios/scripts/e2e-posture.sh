@@ -3,7 +3,8 @@
 #   → 읽는 중 book → flat → folded(같은 초안·처리 상태, 안쪽 화면은 목록·초안 나란히, book에서 요약·상태가 division 밖)
 #   → 사진별 시도 횟수 1 → 최종 확인 창을 연 채 book → flat → folded(같은 문장, book에서 division 밖) → 한 번만 올림.
 # 자세 이름은 Device Hub가 그리는 기기 모양이다(버튼에 접근성 이름이 없음): folded(바깥 화면), book(두 번째 버튼,
-#   안쪽 화면이 접힘에서 꺾임), flat(세 번째 버튼, 평평함). 앱 DEBUG 로그로 division 예약 영역을 함께 남긴다.
+#   안쪽 화면이 접힘에서 꺾임), flat(세 번째 버튼, 평평함). 앱 DEBUG 로그가 hinge 상태(closed·partiallyOpen·fullyOpen)와
+#   division 예약 영역(비활성 포함)을 남기고, 끝에 자세마다 안정된 값을 ios-posture-settled.txt로 모은다.
 # 자세는 simctl·XCTest로 바꿀 수 없어 Device Hub 아래쪽 자세 버튼을 Orca Computer Use(`orca computer`)로 누른다.
 # 사전 조건: Device Hub 창(1100×800pt)에 이 시뮬레이터가 열려 있고 접은 자세, `orca computer permissions`에서
 #   손쉬운 사용·화면 기록 허용. 누를 때 Device Hub를 앞으로 가져온다(--restore-window).
@@ -58,15 +59,24 @@ capture() {  # Device Hub 창과 시뮬레이터 각 화면
   done
 }
 
+front_app() {  # 지금 앞에 있는 앱의 bundle ID
+  lsappinfo info -only bundleid "$(lsappinfo front)" 2> /dev/null | sed -nE 's/.*bundleID="([^"]+)".*/\1/p' | head -1
+}
+
+# 누를 때만 Device Hub를 앞으로 가져오고, 누른 뒤 원래 앞에 있던 앱을 바로 되돌린다.
 # 다른 앱이 앞으로 오면 클릭이 window_not_focused로 거절된다. 몇 번 다시 누른다.
 click_posture() {
-  local name="$1" step="$2"
+  local name="$1" step="$2" previous
+  previous="$(front_app || true)"
   for attempt in 1 2 3 4 5; do
     log "posture $name: click Device Hub ($(posture_x "$step"), 774), attempt $attempt"
     orca computer click --app "$HUB" --x "$(posture_x "$step")" --y 774 --restore-window --no-screenshot --json \
       > "$WORK/click-$name.json" 2>&1 || true
-    python3 -I -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("ok") else 1)' "$WORK/click-$name.json" &&
+    if python3 -I -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1])).get("ok") else 1)' "$WORK/click-$name.json"; then
+      sleep 1
+      [ -n "$previous" ] && [ "$previous" != "$HUB" ] && open -b "$previous" > /dev/null 2>&1 || true
       return 0
+    fi
     sleep 2
   done
   return 1
@@ -149,6 +159,29 @@ attempts after-posture-changes-while-reading
 run_test testP3_UploadConfirmationSurvivesPostureChange
 capture P3-uploaded
 attempts final
+sleep 2
+kill $LOGGER 2> /dev/null || true
+
+# 자세마다(누른 때부터 다음 누름까지) 마지막 hinge 상태와 화면별 마지막 division 값 = 안정된 값.
+python3 -I - "$LOG" "$OUT/ios-layout-reserved.log" <<'PY' | tee "$OUT/ios-posture-settled.txt" | tee -a "$LOG"
+import re, sys
+clicks = [(m[1], m[2]) for m in re.finditer(r"\[(\d\d:\d\d:\d\d)\] posture (P\d-[a-z-]+): click .*attempt", open(sys.argv[1]).read())]
+clicks = list(dict((n, t) for t, n in clicks).items())  # 다시 누른 경우 마지막 시도
+events = []
+for line in open(sys.argv[2], errors="replace"):
+    m = re.match(r"\S+ (\d\d:\d\d:\d\d)\.(\d+) .*?\] (hinge .*|reserved site=(\S+) view=(\S+ \S+ \S+ \S+) divisions=(.*))$", line.strip())
+    if m: events.append((m[1] + "." + m[2], m))
+for i, (name, start) in enumerate(clicks):
+    end = clicks[i + 1][1] if i + 1 < len(clicks) else "99:99:99"
+    window = [(t, m) for t, m in events if start <= t[:8] < end]
+    hinge = [(t, m[3]) for t, m in window if m[3].startswith("hinge")]
+    sites = {}
+    for t, m in window:
+        if m[4]: sites[m[4]] = (t, m[5], m[6])
+    print(f"{name} (clicked {start}): {hinge[-1][1] + ' at ' + hinge[-1][0] if hinge else 'hinge unchanged'}")
+    for site, (t, view, divs) in sorted(sites.items()):
+        print(f"  last {t} {site} view={view} divisions={divs}")
+PY
 
 python3 -I - "$WORK/attachments" "$OUT/screens" <<'PY'
 import json, pathlib, subprocess, sys

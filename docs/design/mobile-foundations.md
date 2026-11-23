@@ -98,7 +98,7 @@ debug 빌드의 테스트 로그인은 시트에 **테스트 로그인 · 실제
 
 - 목록·상세: iOS `NavigationSplitView`(`.balanced`, 목록 숨기기 버튼 없음), Android Navigation 3 `ListDetailSceneStrategy`(material3-adaptive). 상세는 넓은 창에서 뒤로 가기 화살표 없이 목록 옆에 있고, 고른 초안은 목록에서 고른 상태(iOS 선택 강조, Android 행 바탕색)로 보인다. 스낵바는 맨 위 화면 하나만 띄운다.
 - 읽기 폭: 글 위주 목록·화면·시트는 넓은 창에서 **640**(pt·dp, M3 바텀 시트 최대 폭과 같음)보다 넓어지지 않고 가운데에 둔다. 좁은 창에서는 아무것도 바꾸지 않는다.
-- 접힘·가림: 안전 영역은 시스템 컨테이너가 지킨다. iOS는 목록·시트의 스크롤 여백(`adaptiveContentMargins`)이 `ReservedRegion`(division) 세로 접힘을 피해 넓은 쪽에 내용을 둔다(iOS 27.1 이상, 시스템 분할 보기 안에서는 보통 0). Android는 시트·대화상자를 hinge 넓은 쪽에 옮긴다. 두 앱이 같은 규칙(`ContentMargins.fitting`)을 쓴다.
+- 접힘·가림: 안전 영역은 시스템 컨테이너가 지킨다. iOS는 목록·시트의 스크롤 여백(`adaptiveContentMargins`)이 `ReservedRegion`(division) 세로 접힘을 피해 넓은 쪽에 내용을 둔다(iOS 27.1 이상, 시스템 분할 보기 안에서는 보통 0). 활성 division만 피한다. iPhone Duo를 완전히 펼치면 접힘 division은 비활성이라 피하지 않는다(Apple `ReservedRegion` 문서). Android는 시트·대화상자를 hinge 넓은 쪽에 옮긴다. 두 앱이 같은 규칙(`ContentMargins.fitting`)을 쓴다.
 - 막대: iPhone Duo 바깥 화면에서는 시스템이 상태 막대·도구 막대·뒤로 버튼을 옆(세로)에 둔다. 글자만 있는 하단 동작 "사진 고르기"는 시스템 규칙대로 가로 막대에 남는다(아이콘으로 바꾸는 것은 디자인 결정으로 남긴다).
 - 창(시트·확인): 로그인 시트와 올릴 곳·장수 최종 확인은 화면 맨 위에서 한 번만 띄운다. iOS 최종 확인은 가운데 알림이다(Android AlertDialog와 같음). 예전의 행 안 확인 시트는 넓은 창에서 팝오버가 되어, 열린 채 회전하면 다시 뜨지 못하고 멈췄다.
 
@@ -118,14 +118,14 @@ debug 빌드의 테스트 로그인은 시트에 **테스트 로그인 · 실제
 
 영수증 목록(사진)과 상세(값 고치기·가림 편집)는 위 목록·상세의 **상세 쪽**에 붙인다. 상세 안을 다시 둘로 나누면 iOS는 `ReservedRegion`, Android는 `WindowAdaptiveInfo.windowPosture`의 hinge를 보고 가림 편집 영역이 접힘에 걸치지 않게 한다. 고른 영수증도 안정 ID로 모델에 둔다.
 
-### 확인한 기기와 구성 (2026-11-21, 가상 자료)
+### 확인한 기기와 구성 (2026-11-21, iPhone Duo 자세는 2026-11-23, 가상 자료)
 
-| 구성 | iOS (`mise run ios:e2e-adaptive`) | Android (`mise run android:e2e-adaptive`) |
+| 구성 | iOS (`mise run ios:e2e-adaptive`, Duo 자세는 `mise run ios:e2e-posture`) | Android (`mise run android:e2e-adaptive`) |
 | --- | --- | --- |
 | 좁은 창(바깥 화면) | iPhone Duo 시뮬레이터 바깥 화면(466×678pt, 세로·가로) | Pixel 9 Pro Fold 프로필 에뮬레이터를 실제로 접어(`emu fold`) 바깥 화면(1080×2424px) |
-| 넓은 창 | iPhone 18 Pro Max 가로(가로 regular, 목록 옆 초안) | 펼친 안쪽 화면(2076×2152px, 약 852dp) |
-| 접기·펴기 이벤트 | **확인하지 못함**(아래 공백) | 읽는 중 펼침 → 접기 → 펴기 → 반쯤 접기(`emu posture 2`) |
-| 반쯤 접기 | **확인하지 못함** | 두 칸이 hinge(x=1038px) 양쪽(목록 0–1038, 상세 1097–2076), 로그인 시트·최종 확인이 hinge 한쪽 |
+| 넓은 창 | iPhone 18 Pro Max 가로(가로 regular, 목록 옆 초안), iPhone Duo 시뮬레이터 안쪽 화면(951×669pt, 가로 regular, 목록 옆 초안) | 펼친 안쪽 화면(2076×2152px, 약 852dp) |
+| 접기·펴기 이벤트 | iPhone Duo 시뮬레이터에서 Device Hub 자세 버튼으로 읽는 중 folded → book → flat → folded(같은 초안·읽음 0/2, 사진별 시도 1번), 최종 확인을 연 채 같은 순서(같은 문장, 한 번만 올림) | 읽는 중 펼침 → 접기 → 펴기 → 반쯤 접기(`emu posture 2`) |
+| 반쯤 접기 | book(두 번째 버튼, 시스템 hinge `partiallyOpen` 133.8°): 시스템이 활성 세로 division 455.5–495.5를 알리고 분할 보기 열(목록 0–455.7, 초안 495.7–)과 최종 확인 알림(97.7–371.7)을 그 밖에 둔다. flat(세 번째 버튼, `fullyOpen` 180°): division이 비활성이라 열(목록 0–320)·가운데 알림이 그 자리에 걸치는 것이 정상(Apple 문서) | 두 칸이 hinge(x=1038px) 양쪽(목록 0–1038, 상세 1097–2076), 로그인 시트·최종 확인이 hinge 한쪽 |
 | 낮은 창·회전 | Duo 바깥 화면·Pro Max·18 Pro 세로↔가로(읽는 중, 최종 확인을 연 채) | 안쪽 화면 가로 |
 | 큰 글자 | `accessibility-extra-large` + 가로 | `font_scale 2.0` + 가로 |
 | 분할·크기 바꾸기 | 단위 테스트: 실제 창에 띄운 분할 보기를 669×951 regular → 466×678 compact → 951×669 regular → 320×951 compact로 바꿈 | `wm size 1300x1000`(533×410dp, compact 폭·높이) |
@@ -135,10 +135,12 @@ debug 빌드의 테스트 로그인은 시트에 **테스트 로그인 · 실제
 | --- | --- | --- |
 | 넓은 창 | ![](screens/ios-adaptive-wide-landscape.png) | ![](screens/android-adaptive-unfolded.png) |
 | 좁은 창(바깥 화면). iOS는 최종 확인, 세로 뒤로 버튼 | ![](screens/ios-adaptive-duo-outer.png) | ![](screens/android-adaptive-folded.png) |
-| 반쯤 접기 + 최종 확인 | (확인하지 못함) | ![](screens/android-adaptive-half-opened-confirmation.png) |
+| 반쯤 접기 + 최종 확인 | (사진은 `ios:e2e-posture` 증거 폴더에 남김, 커밋하지 않음) | ![](screens/android-adaptive-half-opened-confirmation.png) |
 | 큰 글자 + 가로 | ![](screens/ios-adaptive-large-text-landscape-login.png) | ![](screens/android-adaptive-landscape-large-text.png) |
 
-**증거 공백**: iPhone Duo의 접기·펴기·반쯤 접기는 Xcode Device Hub의 GUI(자세·hinge 막대)로만 바뀐다. `simctl`·XCTest에는 자세를 바꾸는 명령이 없고(화면 전원 끄기는 기기를 펴지 않는다), 이 세션의 GUI 자동화는 macOS 손쉬운 사용 권한이 없어 쓰지 못했다. 그래서 iOS에서는 실제 접기 이벤트와 접힘 예약 영역(`ReservedRegion` division)이 보이는 모습을 보지 못했고, 같은 신호(크기 종류·크기 변경, 장면 다시 활성화, division 영역 계산)를 단위 테스트로 주어 대신했다. 실기기, 태블릿, 데스크톱 창(ChromeOS·Mac의 iPhone 앱), Android 실제 분할 화면(두 앱 동시 실행)도 확인하지 않았다.
+**iPhone Duo 자세**: 자세는 Xcode Device Hub의 버튼으로만 바뀐다(`simctl`·XCTest에는 자세 명령이 없다). `ios:e2e-posture`가 Orca Computer Use로 그 버튼을 누른다. 2026-11-22에는 GUI 자동화가 손쉬운 사용 권한 문제로 Device Hub에 닿지 못했고, 2026-11-23에 권한이 맞춰진 뒤 시뮬레이터에서 확인했다. 자세 이름, 좌표, division 로그는 [apps/README](../../apps/README.md#iphone-duo-자세-2026-11-23-시뮬레이터)에 있다.
+
+**증거 공백**: iPhone Duo 결과는 시뮬레이터다. 실제 하드웨어의 접힘 각도·hinge, 실기기, 태블릿, 데스크톱 창(ChromeOS·Mac의 iPhone 앱), Android 실제 분할 화면(두 앱 동시 실행)은 확인하지 않았다.
 
 ## 확인한 것 (2026-11-21, 가상 자료)
 
@@ -164,4 +166,4 @@ debug 빌드의 테스트 로그인은 시트에 **테스트 로그인 · 실제
 - Material 3: [Color roles](https://m3.material.io/styles/color/roles), [Typography](https://m3.material.io/styles/typography/applying-type), [Bottom sheets](https://m3.material.io/components/bottom-sheets/guidelines)
 - Android: [Photo picker](https://developer.android.com/training/data-storage/shared/photopicker), [Receive data from other apps](https://developer.android.com/training/sharing/receive), [Font scaling](https://developer.android.com/guide/topics/resources/runtime-changes)
 - Google: [Sign in with Google branding guidelines](https://developers.google.com/identity/branding-guidelines)
-- 창 크기와 접기(확인일 2026-11-21): Apple [Designing for iPhone Duo](https://developer.apple.com/design/human-interface-guidelines/designing-for-iphone-duo), [Preparing your app for iPhone Duo](https://developer.apple.com/documentation/technologyoverviews/preparing-your-app-for-iphone-duo), Android [Use window size classes](https://developer.android.com/develop/ui/compose/layouts/adaptive/use-window-size-classes). API는 Xcode 27.2 SDK의 SwiftUI 인터페이스와 material3-adaptive 1.3.0 소스에서 확인했다.
+- 창 크기와 접기(확인일 2026-11-21, 접힘 division·hinge는 2026-11-23): Apple [Designing for iPhone Duo](https://developer.apple.com/design/human-interface-guidelines/designing-for-iphone-duo), [Preparing your app for iPhone Duo](https://developer.apple.com/documentation/technologyoverviews/preparing-your-app-for-iphone-duo), [ReservedRegion](https://developer.apple.com/documentation/swiftui/reservedregion)(division은 반쯤 열렸을 때만 활성), [UIHinge](https://developer.apple.com/documentation/uikit/uihinge)(배치에 쓰지 않음), Android [Use window size classes](https://developer.android.com/develop/ui/compose/layouts/adaptive/use-window-size-classes). API는 Xcode 27.2 SDK의 SwiftUI 인터페이스와 material3-adaptive 1.3.0 소스에서 확인했다.

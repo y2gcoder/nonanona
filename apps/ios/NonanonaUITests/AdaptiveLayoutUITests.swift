@@ -111,8 +111,9 @@ final class AdaptiveLayoutUITests: XCTestCase {
   //
   // 자세는 `simctl`·XCTest로 바꿀 수 없어 Device Hub의 자세 버튼을 눌러야 한다(`scripts/e2e-posture.sh`).
   // 테스트가 `<POSTURE_DIR>/want-<단계>`를 쓰면 스크립트가 버튼을 누르고 `done-<단계>`를 쓴다.
-  // 버튼에 접근성 이름이 없어 Device Hub가 그리는 기기 모양으로 부른다: folded(접음, 바깥 화면),
-  // book(두 번째 버튼, 안쪽 화면이 접힘에서 꺾임), flat(세 번째 버튼, 안쪽 화면이 평평함).
+  // 버튼에 접근성 이름이 없어 Device Hub가 그리는 기기 모양으로 부른다. 앱이 받은 hinge 상태(DEBUG 로그)로 보면
+  // folded(첫 번째 버튼) = closed, book(두 번째) = partiallyOpen, flat(세 번째) = fullyOpen이다.
+  // Apple 문서대로 접힘 division은 partiallyOpen에서만 활성이므로 division 밖을 book에서만 단정한다.
   // XCTest 화면 기록은 바깥 화면만 찍어(안쪽 화면을 쓰면 검은 화면) book·flat 화면은 스크립트가 simctl로 찍는다.
 
   /// 읽는 중에 folded → book → flat → folded를 지나도 같은 초안(사진 2장)과 처리 상태가 보인다.

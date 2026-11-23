@@ -24,6 +24,9 @@ struct RootView: View {
     }
     .navigationSplitViewStyle(.balanced)
     .tint(.primary)
+    #if DEBUG
+      .background(DebugHingeLog())
+    #endif
     .modifier(uploadConfirmation)
     .sheet(
       isPresented: Binding(

@@ -16,11 +16,11 @@
 
 Device Hub 자세 버튼으로 실제 자세를 바꿔 봤다(`ios:e2e-posture`, 자세 이름과 좌표는 [apps/README](../../apps/README.md#iphone-duo-자세-2026-11-23-시뮬레이터)). 결정은 바꾸지 않는다.
 
-- 안쪽 화면이 접힘에서 꺾인 자세(book)에서는 시스템이 세로 division(951pt 창의 455.5–495.5)을 알리고, 분할 보기 열과 가운데 알림을 그 밖에 둔다. 앱이 직접 피하지 않아도 내용·버튼이 접힘 위에 오지 않았다. "시스템 컨테이너에 맡긴다"가 이 자세에서 맞았다.
-- 평평한 자세(flat)에서는 열이 기본 폭(목록 320)으로 돌아가고 가운데 알림과 초안 내용이 같은 자리에 걸친다. 의도된 시스템 동작인지 앱 여백(`ContentMargins`)이 division을 놓친 것인지는 정하지 못했다. 실기기 확인 전에는 이 결정의 근거로 쓰지 않는다.
+- 안쪽 화면이 접힘에서 꺾인 자세(book, 시스템 hinge `partiallyOpen` 133.8°)에서는 시스템이 활성 세로 division(951pt 창의 455.5–495.5)을 알리고, 분할 보기 열과 가운데 알림을 그 밖에 둔다. 앱이 직접 피하지 않아도 내용·버튼이 접힘 위에 오지 않았다. "시스템 컨테이너에 맡긴다"가 이 자세에서 맞았다.
+- 평평한 자세(flat, hinge `fullyOpen` 180°)에서는 같은 자리의 division이 안정된 뒤 비활성(`isActive == false`)이고, 열이 기본 폭(목록 320)으로 돌아가며 가운데 알림과 초안 내용이 그 자리에 걸친다. Apple 문서는 접힘 division이 반쯤 열렸을 때만 활성이고 완전히 열리면 비활성이라고 한다([ReservedRegion](https://developer.apple.com/documentation/swiftui/reservedregion), 확인일 2026-11-23). 그래서 정상 동작으로 보고, 앱 여백은 지금처럼 활성 division만 피한다(비활성 영역까지 미리 비우지 않는다).
 - 자세가 바뀌어도 고른 초안, 처리 상태(중복 OCR 없음), 열린 최종 확인이 남고 한 번만 올라갔다.
 
 ## 나중 디자인에 주는 제약
 
-- 영수증 목록·상세(가림 편집)를 붙일 때도 위 컨테이너 안에서 상세 쪽에 둔다. 상세 안에서 두 영역(사진·편집)을 더 나누면 iOS는 예약 영역(`ReservedRegion` division)을, Android는 `WindowAdaptiveInfo.windowPosture`의 hinge를 보고 접힘을 피한다. iOS `ArrangementView`는 Xcode 27.2 SDK에 없어 쓰지 않았다(문서에는 있음, UIKit `UIArrangementViewController`만 있음).
+- 영수증 목록·상세(가림 편집)를 붙일 때도 위 컨테이너 안에서 상세 쪽에 둔다. 상세 안에서 두 영역(사진·편집)을 더 나누면 iOS는 예약 영역(`ReservedRegion` division)을, Android는 `WindowAdaptiveInfo.windowPosture`의 hinge를 보고 접힘을 피한다. 두 영역을 접힘 양쪽에 두는 일은 iOS `ArrangementView`(SwiftUI, iOS 27.1+)를 먼저 검토한다. 정정(2026-11-23): 예전에 "Xcode 27.2 SDK에 없다"고 적었으나 SwiftUICore 인터페이스에 공개돼 있고 iOS 27.2 시뮬레이터 대상으로 타입 검사를 통과한다. 지금 화면에는 두 영역 나누기가 없어 쓰지 않는다.
 - 넓은 창에서 목록 숨기기가 필요해지면 그 화면이 예약 영역을 직접 피하는지 먼저 확인하고 이 결정을 다시 쓴다.

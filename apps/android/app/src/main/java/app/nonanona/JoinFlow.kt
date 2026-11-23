@@ -82,9 +82,18 @@ class JoinFlow(
                 InviteAcceptFailure.Unknown
             }
         when (failure) {
-            InviteAcceptFailure.SessionExpired -> auth.endSession()
-            InviteAcceptFailure.InviteExpired, InviteAcceptFailure.InviteInvalid -> pendingInvites.clear()
-            InviteAcceptFailure.Network, InviteAcceptFailure.Unavailable, InviteAcceptFailure.Unknown -> Unit
+            InviteAcceptFailure.SessionExpired -> {
+                auth.endSession()
+            }
+
+            InviteAcceptFailure.InviteExpired, InviteAcceptFailure.InviteInvalid, InviteAcceptFailure.RoomFinalized -> {
+                pendingInvites
+                    .clear()
+            }
+
+            InviteAcceptFailure.Network, InviteAcceptFailure.Unavailable, InviteAcceptFailure.Unknown -> {
+                Unit
+            }
         }
         return JoinResult.Failed(failure)
     }

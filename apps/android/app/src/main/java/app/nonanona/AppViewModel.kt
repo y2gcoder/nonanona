@@ -850,7 +850,7 @@ class AppViewModel(
                         }
 
                         // 초대를 지웠다. 홈의 초대 카드도 사라진다.
-                        InviteAcceptFailure.InviteExpired, InviteAcceptFailure.InviteInvalid -> {
+                        InviteAcceptFailure.InviteExpired, InviteAcceptFailure.InviteInvalid, InviteAcceptFailure.RoomFinalized -> {
                             it.copy(pendingInvite = null, join = JoinState.Failed(result.failure))
                         }
 

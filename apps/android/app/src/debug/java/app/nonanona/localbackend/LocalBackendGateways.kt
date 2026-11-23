@@ -303,6 +303,10 @@ class LocalTripGateway(
                     InviteAcceptFailure.InviteInvalid
                 }
 
+                http.code == "trip_finalized" -> {
+                    InviteAcceptFailure.RoomFinalized
+                }
+
                 http.code == "not_authenticated" || http.code in sessionEndedCodes || http.status == 401 -> {
                     InviteAcceptFailure.SessionExpired
                 }

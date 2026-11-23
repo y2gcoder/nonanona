@@ -15,7 +15,7 @@
 -- * 재시도: 지출 제출은 (여행방, request_id) 고유 키와 요청 지문, 검토는 settlement_requests, 확정은 finalizations의
 --   (여행방, request_id). 같은 요청은 같은 결과(replayed), 같은 키의 다른 내용은 idempotency_conflict.
 --
--- 실패 코드(PostgREST 응답 message): not_authenticated(401), trip_not_found(404, 비구성원·없는 방·없는 지출을 구분하지 않음),
+-- 실패 코드(PostgREST 응답 message, accept_invite의 trip_finalized 포함): not_authenticated(401), trip_not_found(404, 비구성원·없는 방·없는 지출을 구분하지 않음),
 -- host_only(403), trip_finalized(409), stale_expense(409), stale_revision(409), pending_review(409), idempotency_conflict(409),
 -- invalid_fields(400), payer_required(400), krw_unverified(400), shares_invalid(400), shares_mismatch(400),
 -- hold_reason_required(400), decision_invalid(400), artifact_missing(409).
@@ -287,7 +287,9 @@ begin
   return jsonb_build_object('expense_id', v_id, 'replayed', false, 'revision', v_rev);
 end $$;
 
--- 가입도 방의 입력(구성원)을 바꾸므로 revision을 올린다. 반환 모양과 실패 코드는 그대로다.
+-- 가입도 방의 입력(구성원)을 바꾸므로 revision을 올린다. 확정된 방에는 새로 참여할 수 없다(trip_finalized, 409):
+-- 여행방 잠금 뒤, 어떤 쓰기보다 먼저 거절해 초대·구성원·revision이 그대로다. 이미 그 초대로 참여한 같은 계정의 재시도는
+-- 확정 뒤에도 기존 결과로 수렴한다.
 create or replace function private.accept_invite(p_token text, p_display_name text) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare v_uid uuid := private.require_uid(); v_inv public.trip_invites; v_trip public.trips; v_replayed boolean;
@@ -298,6 +300,7 @@ begin
   select * into v_inv from public.trip_invites where id = v_inv.id for update;
   perform private.check_invite(v_inv, v_uid);
   v_replayed := exists (select 1 from public.trip_members where trip_id = v_trip.id and user_id = v_uid);
+  if not v_replayed and v_trip.status <> 'open' then perform private.fail('trip_finalized', 'PT409'); end if;
   if not v_replayed then
     insert into public.trip_members (trip_id, user_id, role, display_name)
       values (v_trip.id, v_uid, 'member', p_display_name);

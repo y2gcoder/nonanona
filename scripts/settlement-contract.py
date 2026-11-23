@@ -12,7 +12,10 @@ import importlib.util
 import json
 import secrets
 import struct
+import subprocess
 import sys
+import threading
+import time
 import uuid
 import zlib
 from pathlib import Path
@@ -71,6 +74,122 @@ def new_trip(host_uid, member_uid):
               union all select t.id, '{member_uid}'::uuid, 'member', '가나', now() from t returning trip_id)
         select (select id from t) as id""", "contract-trip")
     return r[0]["id"]
+
+
+DB_CONTAINER = "supabase_db_nonanona-local"
+
+
+def psql(sql):
+    """로컬 DB 소유자 권한 SQL(검사용). 결과 글자만 돌려준다."""
+    r = subprocess.run(["docker", "exec", "-i", DB_CONTAINER, "psql", "-U", "postgres", "-tAq", "-v", "ON_ERROR_STOP=1", "-c", sql],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr[-300:]
+    return r.stdout.strip()
+
+
+def invite(trip, host_uid):
+    code = "SYNTHJOIN" + secrets.token_hex(6).upper()
+    psql(f"insert into public.trip_invites (trip_id, token_hash, created_by, expires_at) "
+         f"values ('{trip}', private.token_hash('{code}'), '{host_uid}', now() + interval '1 hour')")
+    return code
+
+
+def trip_state(trip, uid):
+    """revision·상태·확정본 해시·이 계정의 구성원 여부·이 방 초대들의 사용 상태."""
+    row = psql(f"""select t.revision || '|' || t.status || '|' ||
+        coalesce((select string_agg(f.snapshot_sha256, ',' order by f.version) from public.finalizations f where f.trip_id = t.id), '-') || '|' ||
+        (select count(*) from public.trip_members m where m.trip_id = t.id and m.user_id = '{uid}') || '|' ||
+        (select count(*) from public.trip_members m where m.trip_id = t.id) || '|' ||
+        (select count(*) from public.trip_invites i where i.trip_id = t.id and i.used_by is not null)
+        from public.trips t where t.id = '{trip}'""")
+    rev, status, snaps, me, members, used = row.split("|")
+    return {"revision": int(rev), "status": status, "snapshots": snaps, "joined": int(me), "members": int(members), "used_invites": int(used)}
+
+
+def new_joiner(env, name):
+    email = f"joiner.{secrets.token_hex(4)}@example.com"
+    password = secrets.token_urlsafe(24)
+    lb.admin_create_user(env, email, name, password)
+    return Client(env, email, password)
+
+
+def join_after_finalize(env, host, member):
+    """확정된 방에는 새로 참여할 수 없다: 잠금 뒤, 쓰기 전에 거절하고(초대·구성원·revision·확정본 그대로)
+    이미 그 초대로 참여한 계정의 재시도만 기존 결과로 수렴한다. 순서를 잠금으로 정해 두 순서를 모두 본다."""
+    # 1) 순차: 확정 전에 참여한 사람의 재시도는 수렴, 확정 뒤 새 초대 수락은 거절.
+    trip = new_trip(host.uid, member.uid)
+    early = new_joiner(env, "라마")
+    early_code = invite(trip, host.uid)
+    st, body, _ = early.rpc("accept_invite", p_token=early_code, p_display_name="라마")
+    check("join before finalize succeeds", st == 200 and body["replayed"] is False, status=st)
+    rev = trip_state(trip, early.uid)["revision"]
+    st, body, _ = host.rpc("finalize_settlement", p_trip=trip, p_expected_revision=rev, p_request_id=str(uuid.uuid4()))
+    check("finalize the join test trip", st == 200, status=st)
+    late = new_joiner(env, "바사")
+    late_code = invite(trip, host.uid)
+    before = trip_state(trip, late.uid)
+    st, code, _ = late.rpc("accept_invite", p_token=late_code, p_display_name="바사")
+    after = trip_state(trip, late.uid)
+    check("first-time join of a finalized trip -> trip_finalized", st == 409 and code == "trip_finalized", status=st, code=code)
+    check("rejected join changes nothing (revision, snapshot, members, invites)", before == after and after["joined"] == 0,
+          before=before, after=after)
+    st, code, _ = late.rpc("accept_invite", p_token=late_code, p_display_name="바사")
+    check("retrying the rejected join is rejected the same way", st == 409 and code == "trip_finalized" and trip_state(trip, late.uid) == after)
+    replay_before = trip_state(trip, early.uid)
+    st, body, _ = early.rpc("accept_invite", p_token=early_code, p_display_name="라마")
+    check("exact replay by the member who joined before finalize still converges without changes",
+          st == 200 and body["replayed"] is True and replay_before["joined"] == 1 and trip_state(trip, early.uid) == replay_before,
+          status=st)
+
+    # 2) 잠금으로 순서를 정한다: 여행방 행을 잠근 채 두 요청을 차례로 대기열에 넣고 풀어 준다.
+    def gated(first, second):
+        holder = subprocess.Popen(["docker", "exec", "-i", DB_CONTAINER, "psql", "-U", "postgres", "-tAq", "-c",
+                                   f"begin; select 1 from public.trips where id = '{gtrip}' for update; select pg_sleep(4); commit;"],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(0.8)
+        out = {}
+        threads = []
+        for name, fn in (first, second):
+            waiting = int(psql("select count(*) from pg_locks where not granted"))
+            t = threading.Thread(target=lambda n=name, f=fn: out.__setitem__(n, f()))
+            t.start()
+            threads.append(t)
+            deadline = time.time() + 3
+            while int(psql("select count(*) from pg_locks where not granted")) <= waiting and time.time() < deadline:
+                time.sleep(0.05)
+        for t in threads:
+            t.join()
+        holder.wait()
+        return out
+
+    # 2a) 확정이 먼저 대기열에 들어가면: 확정 성공, 참여는 trip_finalized, 확정본에 참여자 없음.
+    gtrip = new_trip(host.uid, member.uid)
+    joiner = new_joiner(env, "아자")
+    code = invite(gtrip, host.uid)
+    rev = trip_state(gtrip, joiner.uid)["revision"]
+    out = gated(("finalize", lambda: host.rpc("finalize_settlement", p_trip=gtrip, p_expected_revision=rev, p_request_id=str(uuid.uuid4()))),
+                ("join", lambda: joiner.rpc("accept_invite", p_token=code, p_display_name="아자")))
+    state = trip_state(gtrip, joiner.uid)
+    members_in_snapshot = psql(f"select jsonb_array_length(snapshot -> 'inputs' -> 'members') from public.finalizations where trip_id = '{gtrip}'")
+    check("gated finalize-then-join: finalize commits, join -> trip_finalized",
+          out["finalize"][0] == 200 and out["join"][0] == 409 and out["join"][1] == "trip_finalized", codes=[out["finalize"][1:2], out["join"][1]])
+    check("gated finalize-then-join: no member, invite unused, revision only from finalize, snapshot without joiner",
+          state["joined"] == 0 and state["used_invites"] == 0 and state["revision"] == rev + 1 and state["status"] == "finalized"
+          and members_in_snapshot == "2", state=state)
+
+    # 2b) 참여가 먼저 대기열에 들어가면: 참여 성공, 미리 본 revision의 확정은 stale_revision, 방은 열린 채.
+    gtrip = new_trip(host.uid, member.uid)
+    joiner = new_joiner(env, "차카")
+    code = invite(gtrip, host.uid)
+    rev = trip_state(gtrip, joiner.uid)["revision"]
+    out = gated(("join", lambda: joiner.rpc("accept_invite", p_token=code, p_display_name="차카")),
+                ("finalize", lambda: host.rpc("finalize_settlement", p_trip=gtrip, p_expected_revision=rev, p_request_id=str(uuid.uuid4()))))
+    state = trip_state(gtrip, joiner.uid)
+    check("gated join-then-finalize: join commits, finalize -> stale_revision",
+          out["join"][0] == 200 and out["finalize"][0] == 409 and out["finalize"][1] == "stale_revision", codes=[out["join"][0], out["finalize"][1]])
+    check("gated join-then-finalize: joined, invite used, room still open without a snapshot",
+          state["joined"] == 1 and state["used_invites"] == 1 and state["status"] == "open" and state["snapshots"] == "-"
+          and state["revision"] == rev + 1, state=state)
 
 
 def main():
@@ -352,6 +471,8 @@ def main():
                            p_expense_date="2026-11-03", p_amount_minor=1408, p_currency="JPY", p_merchant="x",
                            p_artifact_sha256="0" * 64)
     check("existing receipt submit refuses a finalized trip", st == 409 and code == "trip_finalized", status=st, code=code)
+
+    join_after_finalize(env, host, member)
 
     failed = [c for c in checks if not c["ok"]]
     summary = {"passed": len(checks) - len(failed), "total": len(checks), "checks": checks}

@@ -607,7 +607,7 @@ final class AppModel {
       // 세션만 지웠다. 초대 화면에서 다시 로그인하면 같은 초대로 이어서 참여한다.
       case .sessionExpired: session = nil
       // 초대를 지웠다. 홈의 초대 카드도 사라진다.
-      case .inviteExpired, .inviteInvalid: pendingInvite = nil
+      case .inviteExpired, .inviteInvalid, .roomFinalized: pendingInvite = nil
       case .network, .unavailable, .unknown: break
       }
       join = .failed(failure)

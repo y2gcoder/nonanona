@@ -29,6 +29,8 @@ struct InviteView: View {
           StatusLabel("초대 만료됨", role: .error)
         } else if failure == .inviteInvalid {
           StatusLabel("쓸 수 없는 초대", role: .error)
+        } else if failure == .roomFinalized {
+          StatusLabel("정산 확정된 여행방", role: .error)
         } else {
           StatusLabel("초대 대기 중", role: .attention)
         }
@@ -72,7 +74,7 @@ struct InviteView: View {
 
   private var primaryAction: (label: String, run: () -> Void)? {
     switch (signedIn, failure) {
-    case (_, .inviteExpired), (_, .inviteInvalid): nil
+    case (_, .inviteExpired), (_, .inviteInvalid), (_, .roomFinalized): nil
     case (false, .sessionExpired): ("다시 로그인하기", onLogin)
     case (false, _): ("로그인하고 참여하기", onLogin)
     case (true, .some): ("다시 시도", onJoin)
@@ -87,6 +89,7 @@ extension InviteAcceptFailure {
     case .sessionExpired: "로그인이 만료됐어요. 다시 로그인하면 이어서 참여해요."
     case .inviteExpired: "초대 링크가 만료됐어요. 방장에게 새 링크를 요청해 주세요."
     case .inviteInvalid: "이 초대 링크는 쓸 수 없어요. 방장에게 새 링크를 요청해 주세요."
+    case .roomFinalized: "정산이 이미 확정된 여행방이라 새로 참여할 수 없어요. 방장에게 확인해 주세요."
     case .network: "인터넷에 연결할 수 없어요. 연결을 확인하고 다시 시도해 주세요."
     case .unavailable: "지금은 여행방에 참여할 수 없어요. 잠시 후 다시 시도해 주세요."
     case .unknown: "참여하지 못했어요. 다시 시도해 주세요."

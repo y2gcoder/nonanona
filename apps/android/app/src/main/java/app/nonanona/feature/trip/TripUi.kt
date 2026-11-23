@@ -107,6 +107,10 @@ fun InviteScreen(
                     StatusLabel(stringResource(R.string.status_invite_invalid), StatusRole.Error, Modifier.testTag("invite_status"))
                 }
 
+                InviteAcceptFailure.RoomFinalized -> {
+                    StatusLabel(stringResource(R.string.status_invite_room_finalized), StatusRole.Error, Modifier.testTag("invite_status"))
+                }
+
                 else -> {
                     StatusLabel(stringResource(R.string.status_invite_pending), StatusRole.Attention, Modifier.testTag("invite_status"))
                 }
@@ -136,8 +140,9 @@ fun InviteScreen(
                 JoinState.Idle -> {}
             }
             val failure = (join as? JoinState.Failed)?.failure
-            // 만료되거나 쓸 수 없는 초대는 다시 시도해도 소용없으므로 버튼을 두지 않는다.
-            if (failure != InviteAcceptFailure.InviteExpired && failure != InviteAcceptFailure.InviteInvalid) {
+            // 만료되거나 쓸 수 없는 초대, 확정된 방은 다시 시도해도 소용없으므로 버튼을 두지 않는다.
+            val dead = setOf(InviteAcceptFailure.InviteExpired, InviteAcceptFailure.InviteInvalid, InviteAcceptFailure.RoomFinalized)
+            if (failure !in dead) {
                 val (label, action) =
                     when {
                         !signedIn && failure == InviteAcceptFailure.SessionExpired -> R.string.invite_action_relogin to onLogin
@@ -162,6 +167,7 @@ private fun InviteAcceptFailure.messageRes(): Int =
         InviteAcceptFailure.SessionExpired -> R.string.invite_failure_session_expired
         InviteAcceptFailure.InviteExpired -> R.string.invite_failure_expired
         InviteAcceptFailure.InviteInvalid -> R.string.invite_failure_invalid
+        InviteAcceptFailure.RoomFinalized -> R.string.invite_failure_room_finalized
         InviteAcceptFailure.Network -> R.string.failure_network
         InviteAcceptFailure.Unavailable -> R.string.invite_failure_unavailable
         InviteAcceptFailure.Unknown -> R.string.invite_failed

@@ -17,7 +17,7 @@ struct LocalBackendMappingTests {
     (.http(status: 503, code: nil), .unavailable),
     (.http(status: 429, code: nil), .unavailable),
     (.transport, .network),
-    (.http(status: 409, code: "trip_finalized"), .unknown),
+    (.http(status: 409, code: "trip_finalized"), .roomFinalized),
     (.http(status: 400, code: "invite_expired_soon"), .unknown),
     (.http(status: 410, code: nil), .unknown),
   ])

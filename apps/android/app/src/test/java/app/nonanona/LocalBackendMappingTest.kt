@@ -37,7 +37,7 @@ class LocalBackendMappingTest {
                 Outcome.Http(503, null) to InviteAcceptFailure.Unavailable,
                 Outcome.Http(429, null) to InviteAcceptFailure.Unavailable,
                 Outcome.Transport to InviteAcceptFailure.Network,
-                Outcome.Http(409, "trip_finalized") to InviteAcceptFailure.Unknown,
+                Outcome.Http(409, "trip_finalized") to InviteAcceptFailure.RoomFinalized,
                 Outcome.Http(400, "invite_expired_soon") to InviteAcceptFailure.Unknown,
                 Outcome.Http(410, null) to InviteAcceptFailure.Unknown,
             )

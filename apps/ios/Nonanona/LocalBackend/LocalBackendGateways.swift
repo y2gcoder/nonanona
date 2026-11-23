@@ -194,6 +194,7 @@
       case .transport: return .network
       case .http(_, "invite_expired"): return .inviteExpired
       case .http(_, "invite_invalid"), .http(_, "invite_revoked"), .http(_, "invite_used"): return .inviteInvalid
+      case .http(_, "trip_finalized"): return .roomFinalized
       case .http(_, "not_authenticated"): return .sessionExpired
       case .http(_, let code?) where sessionEndedCodes.contains(code): return .sessionExpired
       case .http(401, _): return .sessionExpired

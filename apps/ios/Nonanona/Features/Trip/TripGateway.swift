@@ -42,6 +42,8 @@ enum InviteAcceptFailure: Error, Equatable, Sendable {
   case inviteExpired
   /// 초대를 쓸 수 없다(이미 다른 사람이 썼거나, 방장이 취소했거나, 없는 링크). 다시 시도하지 않고 새 링크를 요청한다.
   case inviteInvalid
+  /// 정산이 이미 확정된 여행방이라 새로 참여할 수 없다. 다시 시도하지 않는다.
+  case roomFinalized
   /// 연결 문제. 보관한 초대로 다시 시도한다.
   case network
   /// 여행방 기능을 지금 쓸 수 없다(연결 전 빌드, 서버 점검).

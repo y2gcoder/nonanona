@@ -62,7 +62,7 @@ struct JoinFlow: Sendable {
     }
     switch failure {
     case .sessionExpired: await auth.endSession()
-    case .inviteExpired, .inviteInvalid: pendingInvites.clear()
+    case .inviteExpired, .inviteInvalid, .roomFinalized: pendingInvites.clear()
     case .network, .unavailable, .unknown: break
     }
     return .failed(failure)

@@ -135,7 +135,11 @@ class JoinFlowTest {
     @Test
     fun deadInviteIsClearedAndNotRetried() =
         runBlocking {
-            for (failure in listOf(InviteAcceptFailure.InviteExpired, InviteAcceptFailure.InviteInvalid)) {
+            for (failure in listOf(
+                InviteAcceptFailure.InviteExpired,
+                InviteAcceptFailure.InviteInvalid,
+                InviteAcceptFailure.RoomFinalized,
+            )) {
                 val auth = FakeAuth()
                 val trips = FakeTrips(failure)
                 val joinFlow = flow(auth, trips)

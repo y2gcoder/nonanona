@@ -57,6 +57,9 @@ enum class InviteAcceptFailure {
     /** 초대를 쓸 수 없다(이미 다른 사람이 썼거나, 방장이 취소했거나, 없는 링크). 다시 시도하지 않고 새 링크를 요청한다. */
     InviteInvalid,
 
+    /** 정산이 이미 확정된 여행방이라 새로 참여할 수 없다. 다시 시도하지 않는다. */
+    RoomFinalized,
+
     /** 연결 문제. 보관한 초대로 다시 시도한다. */
     Network,
 

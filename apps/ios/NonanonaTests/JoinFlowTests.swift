@@ -95,7 +95,7 @@ struct JoinFlowTests {
     #expect(drafts.list().map(\.id) == [draft.id])
   }
 
-  @Test(arguments: [InviteAcceptFailure.inviteExpired, .inviteInvalid])
+  @Test(arguments: [InviteAcceptFailure.inviteExpired, .inviteInvalid, .roomFinalized])
   func deadInviteIsClearedAndNotRetried(failure: InviteAcceptFailure) async throws {
     let auth = FakeAuth()
     let trips = FakeTrips(failure)

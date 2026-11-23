@@ -431,11 +431,17 @@ struct SettlementView: View {
     }
   }
 
+  /// 서버의 UTC 시각(초 단위, Z)을 이 기기 시간대로 보인다. 읽지 못하면 받은 글자 그대로.
+  static func localTime(_ iso: String) -> String {
+    guard let date = ISO8601DateFormatter().date(from: iso) else { return iso }
+    return date.formatted(.dateTime.year().month().day().hour().minute())
+  }
+
   @ViewBuilder private func finalSections(_ final: FinalSettlement) -> some View {
     Section {
       VStack(alignment: .leading, spacing: Spacing.s) {
         StatusLabel("정산 확정됨", role: .positive).accessibilityIdentifier("settlement-status")
-        Text("확정 \(final.version)판 · \(final.finalizedAt.prefix(16).replacingOccurrences(of: "T", with: " "))")
+        Text("확정 \(final.version)판 · \(Self.localTime(final.finalizedAt))")
           .textRole(.supporting)
         Text("확정 번호 \(final.id.prefix(8)) · 기록 \(final.snapshotSHA256.prefix(8))")
           .textRole(.caption).foregroundStyle(.secondary).accessibilityIdentifier("settlement-final-id")

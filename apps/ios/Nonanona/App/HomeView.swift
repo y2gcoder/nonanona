@@ -14,8 +14,13 @@ struct HomeView: View {
           StatusLabel("로그인됨 · \(session.displayName)", role: .positive)
             .accessibilityIdentifier("account-status")
         } else {
-          StatusLabel("로그인 안 됨", role: .neutral)
-            .accessibilityIdentifier("account-status")
+          HStack {
+            StatusLabel("로그인 안 됨", role: .neutral)
+              .accessibilityIdentifier("account-status")
+            Spacer()
+            // 초대 없이도 참여한 여행방을 보려면 로그인한다.
+            Button("로그인", action: model.showLogin).accessibilityIdentifier("home-login")
+          }
         }
       }
       .listRowBackground(Color.clear)

@@ -76,10 +76,6 @@ class RoomController(
     private val sentReviews = mutableMapOf<ExpenseTarget, ExpenseReview>()
     private val sentFinalize = mutableMapOf<TripId, Pair<Long, UUID>>()
 
-    fun reset() {
-        mutable.value = RoomUiState()
-    }
-
     fun refreshTrips() {
         scope.launch { loadTrips() }
     }

@@ -58,16 +58,6 @@ final class RoomModel {
     self.settlement = settlement
   }
 
-  func reset() {
-    tripList = []
-    ledgers = [:]
-    previews = [:]
-    finals = [:]
-    reviewing = nil
-    settlementShown = nil
-    finalizeConfirmation = nil
-  }
-
   // MARK: - 읽기
 
   func refreshTrips() async {

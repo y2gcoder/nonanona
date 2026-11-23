@@ -56,6 +56,9 @@ import app.nonanona.design.readableWidth
 import app.nonanona.feature.trip.RoomLoadFailure
 import app.nonanona.feature.trip.TripSummary
 import java.text.NumberFormat
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 // 여행방 장부, 방장 검토, 송금표(미리보기·확정본). 계산은 서버가 하고 화면은 서버 값을 그린다.
@@ -75,6 +78,12 @@ fun originalAmount(
     if (digits == 0) return "${grouping.format(minor)} $currency"
     return "${minor / 100}.${(minor % 100).toString().padStart(2, '0')} $currency"
 }
+
+/** 서버의 UTC 시각(초 단위, Z)을 이 기기 시간대로 보인다. 읽지 못하면 받은 글자 그대로. */
+fun localTime(iso: String): String =
+    runCatching {
+        Instant.parse(iso).atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm"))
+    }.getOrDefault(iso)
 
 /** 홈의 여행방 목록. 로그인했을 때만 보인다. */
 fun LazyListScope.tripListItems(
@@ -603,7 +612,7 @@ fun SettlementScreen(
                                 stringResource(
                                     R.string.settlement_final_version,
                                     final.version,
-                                    final.finalizedAt.take(16).replace('T', ' '),
+                                    localTime(final.finalizedAt),
                                 ),
                                 style = TextRoles.supporting,
                             )

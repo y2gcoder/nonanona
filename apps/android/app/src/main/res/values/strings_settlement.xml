@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- 여행방 장부·방장 검토·송금표 문구(iOS RoomViews.swift와 같은 문장). -->
 <resources>
+    <string name="home_login">로그인</string>
     <string name="trips_section">여행방</string>
     <string name="trips_empty">참여한 여행방이 없어요.</string>
     <string name="trips_failed">여행방 목록을 불러오지 못했어요.</string>

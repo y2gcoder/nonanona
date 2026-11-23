@@ -3,7 +3,9 @@ package app.nonanona
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,8 +15,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -43,6 +47,7 @@ fun HomeScreen(
     trips: List<TripSummary> = emptyList(),
     tripsFailure: RoomLoadFailure? = null,
     onOpenTrip: (TripSummary) -> Unit = {},
+    onLogin: () -> Unit = {},
 ) {
     Scaffold(
         topBar = { TopAppBar(title = { Text(stringResource(R.string.app_name)) }) },
@@ -63,16 +68,29 @@ fun HomeScreen(
         ) {
             item {
                 val session = state.session
-                StatusLabel(
-                    text =
-                        if (session == null) {
-                            stringResource(R.string.account_signed_out)
-                        } else {
-                            stringResource(R.string.account_signed_in, session.displayName)
-                        },
-                    role = if (session == null) StatusRole.Neutral else StatusRole.Positive,
-                    modifier = Modifier.padding(horizontal = Spacing.m, vertical = Spacing.s).testTag("account_status"),
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth().padding(end = Spacing.s),
+                ) {
+                    StatusLabel(
+                        text =
+                            if (session == null) {
+                                stringResource(R.string.account_signed_out)
+                            } else {
+                                stringResource(R.string.account_signed_in, session.displayName)
+                            },
+                        role = if (session == null) StatusRole.Neutral else StatusRole.Positive,
+                        modifier = Modifier.padding(horizontal = Spacing.m, vertical = Spacing.s).testTag("account_status"),
+                    )
+                    // 초대 없이도 참여한 여행방을 보려면 로그인한다.
+                    if (session == null) {
+                        TextButton(
+                            onClick = onLogin,
+                            modifier = Modifier.testTag("home_login"),
+                        ) { Text(stringResource(R.string.home_login)) }
+                    }
+                }
             }
             if (state.pendingInvite != null) {
                 item { PendingInviteCard(onOpen = onOpenInvite, modifier = Modifier.padding(Spacing.m)) }

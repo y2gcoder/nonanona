@@ -104,6 +104,7 @@ fun NonanonaApp(viewModel: AppViewModel) {
                         trips = rooms.tripList,
                         tripsFailure = rooms.listFailure,
                         onOpenTrip = viewModel::openTrip,
+                        onLogin = viewModel::showLogin,
                     )
                 }
                 entry<Route.Draft>(metadata = ListDetailSceneStrategy.detailPane()) { route ->

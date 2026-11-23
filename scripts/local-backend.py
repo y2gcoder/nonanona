@@ -7,7 +7,7 @@
   python3 -I scripts/local-backend.py down          스택 정지 + 앱 설정 파일 삭제(앱은 테스트 모드로 돌아간다)
   python3 -I scripts/local-backend.py api-stop|api-start   API 게이트웨이만 멈추고 다시 띄운다(연결 실패 재현)
   python3 -I scripts/local-backend.py revoke-sessions      가상 회원 계정의 서버 세션을 지운다(세션 만료 재현)
-  python3 -I scripts/local-backend.py report               가상 회원 계정의 참여·초대 사용 수(비밀값 없음)
+  python3 -I scripts/local-backend.py report               가상 회원 계정이 초대로 참여한 방·초대 사용 수(비밀값 없음, 시드 정산 방 제외)
   python3 -I scripts/local-backend.py upload-report        올린 객체·지출 행 수와 지출 열 이름(비밀값·ID 없음)
   python3 -I scripts/local-backend.py fetch-artifact <파일> 올린 가림 사본을 관리자 권한으로 내려받는다(검사용)
   python3 -I scripts/local-backend.py fetch-artifacts <폴더> 올린 사본을 모두 <폴더>/<해시>.png로 내려받는다(검사용)
@@ -293,7 +293,8 @@ def main():
         out = query(f"""
           select
             (select count(*) from public.trip_members m join auth.users u on u.id = m.user_id
-              where u.email = '{MEMBER[0]}') as member_trips,
+              where u.email = '{MEMBER[0]}' and exists (select 1 from public.trip_invites i
+                where i.trip_id = m.trip_id and i.used_by = m.user_id)) as member_trips,
             (select count(*) from public.trip_invites where used_by is not null) as used_invites,
             (select count(*) from auth.sessions s join auth.users u on u.id = s.user_id
               where u.email = '{MEMBER[0]}') as member_sessions

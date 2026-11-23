@@ -535,7 +535,9 @@ begin
   end if;
   select * into v_f from public.finalizations where trip_id = p_trip order by version desc limit 1;
   if not found then return null; end if;
-  return jsonb_build_object('finalization_id', v_f.id, 'version', v_f.version, 'finalized_at', v_f.finalized_at,
+  -- 시각은 초 단위 UTC ISO 8601(끝에 Z). 기기가 자기 시간대로 보인다.
+  return jsonb_build_object('finalization_id', v_f.id, 'version', v_f.version,
+    'finalized_at', to_char(v_f.finalized_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
     'finalized_by', v_f.finalized_by, 'reviewed_revision', v_f.reviewed_revision, 'rule_version', v_f.rule_version,
     'snapshot_sha256', v_f.snapshot_sha256, 'snapshot', v_f.snapshot);
 end $$;

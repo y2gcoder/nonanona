@@ -67,6 +67,8 @@ sealed interface ShareResult {
 
 /** 방장의 검토 입력. 화면 배치가 바뀌어도 남도록 상태에 둔다. */
 data class ShareForm(
+    /** 이 입력을 연 지출 버전. 보낼 때 이 버전을 기대 버전으로 쓴다(그사이 바뀌었으면 서버가 거절한다). */
+    val baseVersion: Int,
     val payer: MemberId? = null,
     /** 외화 지출의 실제 원화 청구액(글자 그대로). */
     val verifiedKrwText: String = "",
@@ -121,6 +123,7 @@ data class ShareForm(
         ): ShareForm {
             var form =
                 ShareForm(
+                    baseVersion = expense.version,
                     payer = expense.payer,
                     verifiedKrwText = if (expense.currency != "KRW") expense.krwAmount?.toString().orEmpty() else "",
                     pair = members.take(2).map { it.id }.toSet(),

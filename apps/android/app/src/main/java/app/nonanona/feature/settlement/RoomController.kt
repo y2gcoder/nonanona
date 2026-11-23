@@ -94,7 +94,12 @@ class RoomController(
         mutable.update { it.copy(loadingLedger = it.loadingLedger + trip) }
         try {
             val ledger = trips.ledger(trip)
-            mutable.update { it.copy(ledgers = it.ledgers + (trip to ledger), ledgerFailure = it.ledgerFailure - trip) }
+            mutable.update {
+                rebaseForms(
+                    it.copy(ledgers = it.ledgers + (trip to ledger), ledgerFailure = it.ledgerFailure - trip),
+                    ledger,
+                )
+            }
             if (ledger.isFinalized && trip !in state.value.finals) loadFinal(trip)
         } catch (e: RoomLoadException) {
             if (e.failure == RoomLoadFailure.SessionExpired) onSessionExpired()
@@ -102,6 +107,26 @@ class RoomController(
         } finally {
             mutable.update { it.copy(loadingLedger = it.loadingLedger - trip) }
         }
+    }
+
+    /**
+     * 새 장부에서 버전이 바뀐 지출의 검토 입력은 최신 값으로 다시 채우고 알린다(옛 버전 입력을 새 버전에 보내지 않는다).
+     * 저장 중인 입력은 건드리지 않는다(그 결과가 같은 처리를 한다).
+     */
+    private fun rebaseForms(
+        state: RoomUiState,
+        ledger: RoomLedger,
+    ): RoomUiState {
+        val stale =
+            state.forms.filter { (target, form) ->
+                target.tripId == ledger.tripId &&
+                    state.reviewState[target] != ReviewSaveState.Saving &&
+                    ledger.expenses.firstOrNull { it.id == target.expenseId }?.let { it.version != form.baseVersion } == true
+            }
+        if (stale.isEmpty()) return state
+        stale.keys.forEach { sentReviews.remove(it) }
+        val fresh = stale.keys.associateWith { t -> ShareForm.of(ledger.expenses.first { it.id == t.expenseId }, ledger.members) }
+        return state.copy(forms = state.forms + fresh, reviewRefreshed = state.reviewRefreshed + stale.keys)
     }
 
     // ------------------------------------------------------------ 검토(방장)
@@ -113,11 +138,25 @@ class RoomController(
         if (!ledger.isHost || ledger.isFinalized) return false
         val expense = now.expense(target) ?: return false
         mutable.update {
-            it.copy(
-                forms = if (target in it.forms) it.forms else it.forms + (target to ShareForm.of(expense, ledger.members)),
-                reviewState = it.reviewState - target,
-                reviewRefreshed = it.reviewRefreshed - target,
-            )
+            val kept = it.forms[target]
+            if (kept != null && kept.baseVersion != expense.version) {
+                // 전에 열었던 입력이 옛 버전이다. 최신 값으로 다시 채우고 알린다.
+                sentReviews.remove(target)
+                it.copy(
+                    forms = it.forms + (target to ShareForm.of(expense, ledger.members)),
+                    reviewState = it.reviewState - target,
+                    reviewRefreshed = it.reviewRefreshed + target,
+                )
+            } else if (kept == null) {
+                it.copy(
+                    forms = it.forms + (target to ShareForm.of(expense, ledger.members)),
+                    reviewState = it.reviewState - target,
+                    reviewRefreshed = it.reviewRefreshed - target,
+                )
+            } else {
+                // 남아 있던 같은 버전 입력이면 그대로 둔다(뒤에서 새 장부로 다시 채웠다는 알림도 남긴다).
+                it.copy(reviewState = it.reviewState - target)
+            }
         }
         return true
     }
@@ -140,15 +179,15 @@ class RoomController(
         val payer = form.payer ?: return
         val shares = (form.shares(expense, ledger.members) as? ShareResult.Valid)?.shares ?: return
         val verified = if (expense.currency == "KRW") null else form.krw(expense)
-        send(target, expense.version, ExpenseReview.Decision.Include(payer, verified, shares))
+        send(target, form.baseVersion, ExpenseReview.Decision.Include(payer, verified, shares))
     }
 
     fun hold(
         target: ExpenseTarget,
         reason: String,
     ) {
-        val expense = state.value.expense(target) ?: return
-        send(target, expense.version, ExpenseReview.Decision.Hold(reason))
+        val form = state.value.forms[target] ?: return
+        send(target, form.baseVersion, ExpenseReview.Decision.Hold(reason))
     }
 
     private fun send(

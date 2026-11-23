@@ -76,9 +76,23 @@ final class RoomModel {
       let ledger = try await trips.ledger(trip)
       ledgers[trip] = ledger
       ledgerFailure[trip] = nil
+      rebaseForms(in: ledger)
       if ledger.isFinalized, finals[trip] == nil { await loadFinal(trip) }
     } catch {
       ledgerFailure[trip] = await roomFailure(error)
+    }
+  }
+
+  /// 새 장부에서 버전이 바뀐 지출의 검토 입력은 최신 값으로 다시 채우고 알린다(옛 버전 입력을 새 버전에 보내지 않는다).
+  /// 저장 중인 입력은 건드리지 않는다(그 결과가 같은 처리를 한다).
+  private func rebaseForms(in ledger: RoomLedger) {
+    for (target, form) in forms where target.tripID == ledger.tripID && reviewState[target] != .saving {
+      guard let expense = ledger.expenses.first(where: { $0.id == target.expenseID }),
+        expense.version != form.baseVersion
+      else { continue }
+      forms[target] = ShareForm(expense: expense, members: ledger.members)
+      sentReviews[target] = nil
+      reviewRefreshed.insert(target)
     }
   }
 
@@ -94,9 +108,17 @@ final class RoomModel {
     guard let ledger = ledgers[target.tripID], ledger.isHost, !ledger.isFinalized,
       let expense = ledger.expenses.first(where: { $0.id == target.expenseID })
     else { return }
-    if forms[target] == nil { forms[target] = ShareForm(expense: expense, members: ledger.members) }
     reviewState[target] = nil
-    reviewRefreshed.remove(target)
+    if let form = forms[target], form.baseVersion != expense.version {
+      // 전에 열었던 입력이 옛 버전이다. 최신 값으로 다시 채우고 알린다.
+      forms[target] = ShareForm(expense: expense, members: ledger.members)
+      sentReviews[target] = nil
+      reviewRefreshed.insert(target)
+    } else if forms[target] == nil {
+      forms[target] = ShareForm(expense: expense, members: ledger.members)
+      reviewRefreshed.remove(target)
+    }
+    // 남아 있던 같은 버전 입력이면 그대로 둔다(뒤에서 새 장부로 다시 채웠다는 알림도 남긴다).
     reviewing = target
   }
 
@@ -116,12 +138,12 @@ final class RoomModel {
       let payer = form.payer, case .success(let shares) = form.shares(for: expense, members: ledger.members)
     else { return }
     let verified = expense.currency == "KRW" ? nil : form.krw(for: expense)
-    await send(target, version: expense.version, .include(payer: payer, verifiedKRW: verified, shares: shares))
+    await send(target, version: form.baseVersion, .include(payer: payer, verifiedKRW: verified, shares: shares))
   }
 
   func hold(_ target: ExpenseTarget, reason: String) async {
-    guard let expense = expense(target) else { return }
-    await send(target, version: expense.version, .hold(reason: reason))
+    guard let form = forms[target] else { return }
+    await send(target, version: form.baseVersion, .hold(reason: reason))
   }
 
   private func send(_ target: ExpenseTarget, version: Int, _ decision: ExpenseReview.Decision) async {

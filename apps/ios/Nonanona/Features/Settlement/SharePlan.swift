@@ -44,6 +44,8 @@ enum ShareProblem: Error, Equatable, Sendable {
 
 /// 방장의 검토 입력. 화면 배치가 바뀌어도 남도록 모델에 둔다.
 struct ShareForm: Equatable, Sendable {
+  /// 이 입력을 연 지출 버전. 보낼 때 이 버전을 기대 버전으로 쓴다(그사이 바뀌었으면 서버가 거절한다).
+  let baseVersion: Int
   var payer: MemberID?
   /// 외화 지출의 실제 원화 청구액(글자 그대로).
   var verifiedKRWText = ""
@@ -54,6 +56,7 @@ struct ShareForm: Equatable, Sendable {
 
   /// 처음 열 때: 이미 포함한 지출이면 그 값, 아니면 결제자 미정·두 사람(목록 앞 두 명) 반씩.
   init(expense: LedgerExpense, members: [LedgerMember]) {
+    baseVersion = expense.version
     payer = expense.payer
     if expense.currency != "KRW", let krw = expense.krwAmount { verifiedKRWText = String(krw) }
     pair = Set(members.prefix(2).map(\.id))

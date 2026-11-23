@@ -10,6 +10,7 @@
   python3 -I scripts/local-backend.py report               가상 회원 계정의 참여·초대 사용 수(비밀값 없음)
   python3 -I scripts/local-backend.py upload-report        올린 객체·지출 행 수와 지출 열 이름(비밀값·ID 없음)
   python3 -I scripts/local-backend.py fetch-artifact <파일> 올린 가림 사본을 관리자 권한으로 내려받는다(검사용)
+  python3 -I scripts/local-backend.py fetch-artifacts <폴더> 올린 사본을 모두 <폴더>/<해시>.png로 내려받는다(검사용)
   python3 -I scripts/local-backend.py membership-remove|membership-restore   회원을 "가상 오사카 여행"에서 빼고 되돌린다
   python3 -I scripts/local-backend.py outsider-check       구성원이 아닌 가상 계정이 지출·객체에 닿지 못하는지 확인
 
@@ -300,6 +301,17 @@ def main():
             sys.exit(f"[local-backend] fetch failed: HTTP {st}")
         Path(sys.argv[2]).write_bytes(raw)
         log("fetched the uploaded artifact (admin) for host inspection")
+    elif cmd == "fetch-artifacts":
+        # 서버가 받은 모든 사본을 <폴더>/<artifact_sha256>.png로 꺼낸다(관리자 키, 호스트 검사용).
+        env = status()
+        out = Path(sys.argv[2])
+        out.mkdir(parents=True, exist_ok=True)
+        for row in rows("select artifact_path as p, artifact_sha256 as h from public.expenses order by created_at", "fetch-paths"):
+            st, raw = http(env, "GET", "/storage/v1/object/receipts/" + row["p"], key=env["SECRET_KEY"], token=env["SECRET_KEY"])
+            if st != 200:
+                sys.exit(f"[local-backend] fetch failed: HTTP {st}")
+            (out / f"{row['h']}.png").write_bytes(raw)
+        log("fetched every uploaded artifact (admin) for host inspection")
     elif cmd == "membership-remove":
         query(f"""delete from public.trip_members where role = 'member'
                   and trip_id = (select id from public.trips where name = '{UPLOAD_TRIP}')

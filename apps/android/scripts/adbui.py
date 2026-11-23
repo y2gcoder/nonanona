@@ -24,6 +24,7 @@ class Node:
         self.id = e.get("resource-id", "")
         self.desc = e.get("content-desc", "")
         self.enabled = e.get("enabled") == "true"
+        self.checked = e.get("checked") == "true"
         x1, y1, x2, y2 = map(int, re.findall(r"\d+", e.get("bounds", "[0,0][0,0]")))
         self.bounds = (x1, y1, x2, y2)
         self.center = ((x1 + x2) // 2, (y1 + y2) // 2)

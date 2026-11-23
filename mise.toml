@@ -66,6 +66,11 @@ description = "에뮬레이터 E2E(로컬 Supabase 모드, 영수증 올리기).
 dir = "apps/android"
 run = "python3 -I ../../scripts/local-backend.py reset && ./gradlew :app:assembleDebug && python3 -I scripts/e2e_upload.py app/build/outputs/apk/debug/app-debug.apk"
 
+[tasks."android:e2e-review"]
+description = "접히는 기기 에뮬레이터 E2E(목록 먼저 영수증 검토, 로컬 Supabase 모드). local:up 뒤, 접은 채 실행 중인 접히는 기기 에뮬레이터 하나에서 실행한다. iOS ios:e2e-review와 같은 순서 + 펴기(두 칸)·접기. 인자: [증거 폴더]"
+dir = "apps/android"
+run = "python3 -I ../../scripts/local-backend.py reset && ./gradlew :app:assembleDebug && python3 -I scripts/e2e_review.py app/build/outputs/apk/debug/app-debug.apk"
+
 [tasks."android:e2e-adaptive"]
 description = "접히는 기기 에뮬레이터 E2E(적응형 화면, 테스트 구현체): 펼침 두 칸 → 읽는 중 접기·펴기·반쯤 접기 → 중복 OCR 없음 → 시트·확인 창이 접힘을 피함 → 확인 창이 접기 뒤에도 남고 한 번만 올림 → 가로+큰 글자·낮은 창. 실행 중인 접히는 기기 에뮬레이터 하나(예: Pixel 9 Pro Fold 프로필). 인자: [증거 폴더]"
 dir = "apps/android"
@@ -121,6 +126,11 @@ run = "scripts/e2e-posture.sh"
 description = "시뮬레이터 E2E(로컬 Supabase 모드, 영수증 올리기). local:up 뒤 실행한다. 인자: <시뮬레이터 UDID> [증거 폴더]"
 dir = "apps/ios"
 run = "scripts/e2e-upload.sh"
+
+[tasks."ios:e2e-review"]
+description = "시뮬레이터 E2E(목록 먼저 영수증 검토, 로컬 Supabase 모드). local:up 뒤 새 시뮬레이터에서 실행한다: 10장 대기열 → 실패만 다시 읽기 → 직접 입력 → 값 고치기 → 놓친 가림 고치기·미리보기 → 입력 중 SIGKILL 뒤 이어서 → 회전·큰 글자 → 올릴 곳 없음·구성원 아님·최종 확인 전 0건 → 올리기·반복 수렴 → 서버 사본·필드 검사. 가로가 regular인 기기는 EXPECT_WIDE_LANDSCAPE=1. 인자: <시뮬레이터 UDID> [증거 폴더]"
+dir = "apps/ios"
+run = "scripts/e2e-review.sh"
 
 [tasks."ios:e2e-local"]
 description = "시뮬레이터 E2E(로컬 Supabase 모드). local:up 뒤 실행한다. 인자: <시뮬레이터 UDID> [증거 폴더]"

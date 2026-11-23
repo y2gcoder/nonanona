@@ -1,5 +1,9 @@
 package app.nonanona.feature.settlement
 
+import android.graphics.BitmapFactory
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import app.nonanona.feature.account.AccountId
 import app.nonanona.feature.trip.RoomLoadException
 import app.nonanona.feature.trip.RoomLoadFailure
 import app.nonanona.feature.trip.TripGateway
@@ -31,14 +35,39 @@ sealed interface ReviewSaveState {
 sealed interface ReceiptViewState {
     data object Loading : ReceiptViewState
 
-    data class Shown(
+    /** 해시가 맞고 구조가 온전하며(PngCheck) 플랫폼 디코더가 그림을 만든 사본만. */
+    class Shown(
         val image: MaskedReceiptImage,
-    ) : ReceiptViewState
+        val bitmap: ImageBitmap,
+    ) : ReceiptViewState {
+        override fun equals(other: Any?) = other is Shown && other.image == image
+
+        override fun hashCode() = image.hashCode()
+    }
 
     data class Failed(
         val failure: ReceiptViewFailure,
     ) : ReceiptViewState
 }
+
+/** 받은 PNG를 그림으로 끝까지 푼다. 풀리지 않으면 null(보이지 않고 다시 시도할 수 있는 실패가 된다). */
+fun interface ReceiptDecoder {
+    fun decode(png: ByteArray): ImageBitmap?
+
+    companion object {
+        /** 구조 검사(PngCheck, 잘린 PNG를 걸러 낸다) 뒤 BitmapFactory로 끝까지 푼다. */
+        val Platform =
+            ReceiptDecoder { png ->
+                if (!PngCheck.isComplete(png)) null else BitmapFactory.decodeByteArray(png, 0, png.size)?.asImageBitmap()
+            }
+    }
+}
+
+/** 가림 사본을 받아도 되는 맥락: 로그인한 계정과 지금 연 여행방. 받기 시작할 때와 응답이 왔을 때 같아야 보인다. */
+data class ReceiptContext(
+    val account: AccountId?,
+    val trip: TripId?,
+)
 
 sealed interface SettlementScreenState {
     data object Loading : SettlementScreenState
@@ -83,9 +112,14 @@ class RoomController(
     private val settlement: SettlementGateway,
     /** 세션이 끝났다는 실패를 받으면 부른다(앱이 세션을 지운다). */
     private val onSessionExpired: suspend () -> Unit,
-    /** 검토가 끝나면 부른다(화면을 닫는다). */
+    /** 검토가 끝나면 부른다(화면을 닫는다). 장부를 다시 읽기 전에 부른다. */
     private val onReviewSaved: (ExpenseTarget) -> Unit,
+    /** 앱이 정해 주는 지금 맥락(계정·연 여행방). null이면 맥락을 보지 않는다(시험). */
+    private val receiptContext: () -> ReceiptContext? = { null },
+    private val receiptDecoder: ReceiptDecoder = ReceiptDecoder.Platform,
 ) {
+    /** 저장이 끝나고 서버가 알려 준 새 버전(지출별). 장부가 그 버전으로 오면 입력을 조용히 새로 채운다(다른 변경 알림 없이). */
+    private val savedVersions = mutableMapOf<ExpenseTarget, Int>()
     private val mutable = MutableStateFlow(RoomUiState())
     val state: StateFlow<RoomUiState> = mutable.asStateFlow()
     private val sentReviews = mutableMapOf<ExpenseTarget, ExpenseReview>()
@@ -152,10 +186,15 @@ class RoomController(
                     target !in inFlight &&
                     ledger.expenses.firstOrNull { it.id == target.expenseId }?.let { it.version != form.baseVersion } == true
             }
+        // 이 기기가 방금 저장해서 생긴 버전이면 알리지 않는다.
+        val mine = stale.keys.filter { t -> savedVersions[t] == ledger.expenses.first { it.id == t.expenseId }.version }.toSet()
+        savedVersions.entries.removeAll { (t, v) ->
+            t.tripId == ledger.tripId && (ledger.expenses.firstOrNull { it.id == t.expenseId }?.version ?: 0) >= v
+        }
         if (stale.isEmpty()) return state
         stale.keys.forEach { sentReviews.remove(it) }
         val fresh = stale.keys.associateWith { t -> ShareForm.of(ledger.expenses.first { it.id == t.expenseId }, ledger.members) }
-        return state.copy(forms = state.forms + fresh, reviewRefreshed = state.reviewRefreshed + stale.keys)
+        return state.copy(forms = state.forms + fresh, reviewRefreshed = state.reviewRefreshed - mine + (stale.keys - mine))
     }
 
     // ------------------------------------------------------------ 검토(방장)
@@ -171,12 +210,14 @@ class RoomController(
         mutable.update {
             val kept = it.forms[target]
             if (kept != null && kept.baseVersion != expense.version) {
-                // 전에 열었던 입력이 옛 버전이다. 최신 값으로 다시 채우고 알린다.
+                // 전에 열었던 입력이 옛 버전이다. 최신 값으로 다시 채우고 알린다(이 기기가 저장한 버전이면 알리지 않는다).
                 sentReviews.remove(target)
+                val mine = savedVersions[target] == expense.version
+                if (mine) savedVersions.remove(target)
                 it.copy(
                     forms = it.forms + (target to ShareForm.of(expense, ledger.members)),
                     reviewState = it.reviewState - target,
-                    reviewRefreshed = it.reviewRefreshed + target,
+                    reviewRefreshed = if (mine) it.reviewRefreshed - target else it.reviewRefreshed + target,
                 )
             } else if (kept == null) {
                 it.copy(
@@ -236,9 +277,10 @@ class RoomController(
         inFlight[target] = InFlightReview(attempt, review)
         mutable.update { it.copy(reviewState = it.reviewState + (target to ReviewSaveState.Saving)) }
         scope.launch {
+            var reviewed: ReviewedExpense? = null
             val failure =
                 try {
-                    settlement.review(review, target.tripId)
+                    reviewed = settlement.review(review, target.tripId)
                     null
                 } catch (e: SettlementException) {
                     e.failure
@@ -257,9 +299,11 @@ class RoomController(
                         previews = it.previews - target.tripId,
                     )
                 }
-                loadLedger(target.tripId)
-                // 이 지출의 검토 화면만 닫는다(앱이 맨 위 화면이 이 지출일 때만 닫는다).
+                reviewed?.let { savedVersions[target] = it.version }
+                // 장부를 다시 읽기 전에 닫는다(앱이 맨 위 화면이 이 지출일 때만 닫는다). 읽는 동안 같은 지출을 다시 열면
+                // 그 화면은 닫지 않고, 장부가 저장한 버전으로 오면 입력을 조용히 새로 채운다.
                 onReviewSaved(target)
+                loadLedger(target.tripId)
             } else {
                 mutable.update { it.copy(reviewState = it.reviewState + (target to ReviewSaveState.Failed(failure))) }
                 when (failure) {
@@ -308,19 +352,29 @@ class RoomController(
     fun showReceipt(target: ExpenseTarget) {
         val artifact = state.value.expense(target)?.artifact ?: return
         if (state.value.receiptViews[target] == ReceiptViewState.Loading) return
+        val context = receiptContext()
+        if (context != null && (context.account == null || context.trip != target.tripId)) return
         val token = UUID.randomUUID()
         receiptLoads[target] = token
         mutable.update { it.copy(receiptViews = it.receiptViews + (target to ReceiptViewState.Loading)) }
         scope.launch {
             val result =
                 try {
-                    ReceiptViewState.Shown(trips.maskedReceipt(artifact, target.tripId))
+                    val image = trips.maskedReceipt(artifact, target.tripId)
+                    // 그림으로 끝까지 풀리지 않으면 보이지 않는다(다시 시도할 수 있다).
+                    receiptDecoder.decode(image.png)?.let { ReceiptViewState.Shown(image, it) }
+                        ?: ReceiptViewState.Failed(ReceiptViewFailure.Undecodable)
                 } catch (e: ReceiptViewException) {
                     ReceiptViewState.Failed(e.failure)
                 }
-            // 그사이 화면을 떠났거나 세션·여행방이 바뀌어 지웠으면 버린다.
+            // 그사이 지우거나 새로 받기 시작했으면(다른 작업) 아무것도 하지 않는다.
             if (receiptLoads[target] != token) return@launch
             receiptLoads.remove(target)
+            // 맥락(계정·여행방)이 바뀌었으면 옛 응답을 보이지 않고 받는 중 표시도 걷는다.
+            if (receiptContext() != context) {
+                mutable.update { it.copy(receiptViews = it.receiptViews - target) }
+                return@launch
+            }
             mutable.update { it.copy(receiptViews = it.receiptViews + (target to result)) }
             if ((result as? ReceiptViewState.Failed)?.failure == ReceiptViewFailure.SessionExpired) onSessionExpired()
         }

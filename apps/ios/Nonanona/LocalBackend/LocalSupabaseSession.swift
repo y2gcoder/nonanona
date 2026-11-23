@@ -26,10 +26,10 @@
     private let file: URL
     private let urlSession: URLSession
 
-    init(config: LocalBackendConfig, file: URL) {
+    /// `configuration`은 시험에서 HTTP 경계(URLProtocol)를 바꿔 끼울 때만 넘긴다. 기본은 임시(디스크 캐시 없는) 세션이다.
+    init(config: LocalBackendConfig, file: URL, configuration: URLSessionConfiguration = .ephemeral) {
       self.config = config
       self.file = file
-      let configuration = URLSessionConfiguration.ephemeral
       configuration.timeoutIntervalForRequest = 10
       urlSession = URLSession(configuration: configuration)
     }
@@ -70,16 +70,51 @@
       }
     }
 
-    /// 인증한 GET(비공개 Storage 객체 받기). 만료가 가까우면 먼저 갱신하고, JWT를 거절하면 한 번 갱신해 다시 받는다.
-    /// 메모리로만 받는다(임시 세션이라 디스크 캐시가 없다).
-    func authorizedGet(_ path: String) async throws -> Data {
+    /// 비공개 Storage 객체를 인증해 받는다(메모리로만, 임시 세션이라 디스크 캐시가 없다). 공개 URL은 쓰지 않는다.
+    ///
+    /// Storage는 토큰 문제를 둘로 알린다. `InvalidJWT`는 토큰 문제가 분명하므로 한 번 갱신해 다시 받는다.
+    /// `AccessDenied`는 잘못되거나 만료된 토큰과 정책 거절이 같은 코드라(로컬 스택에서 확인) Auth(`auth/v1/user`)에
+    /// 지금 토큰을 물어 가른다: Auth가 받으면 진짜 거절, 거절하면 한 번 갱신해 다시 받기, 닿지 않으면 연결 실패.
+    /// 갱신은 많아야 한 번이고, 갱신 뒤에도 토큰 거절이면 세션 만료(`session_expired`)로 끝낸다.
+    func storageGet(_ path: String) async throws -> Data {
       guard var session = stored() else { throw Failure(outcome: .http(status: 401, code: nil)) }
       if session.expiresAt.timeIntervalSinceNow < 5 { session = try await refresh(session) }
-      do {
-        return try await send(path: path, method: "GET", body: nil, contentType: nil, bearer: session.accessToken)
-      } catch let failure as Failure where Self.isRejectedJWT(failure.outcome) {
-        session = try await refresh(session)
-        return try await send(path: path, method: "GET", body: nil, contentType: nil, bearer: session.accessToken)
+      var refreshed = false
+      while true {
+        do {
+          return try await send(path: path, method: "GET", body: nil, contentType: nil, bearer: session.accessToken)
+        } catch let failure as Failure {
+          guard case .http(_, let code) = failure.outcome,
+            code == "InvalidJWT" || code == "AccessDenied" || Self.isRejectedJWT(failure.outcome)
+          else { throw failure }
+          if code == "AccessDenied" {
+            switch await probe(session) {
+            case .accepted: throw failure  // 토큰은 유효하다: 정책 거절
+            case .unreachable: throw Failure(outcome: .transport)
+            case .rejected: break
+            }
+          }
+          guard !refreshed else { throw Failure(outcome: .http(status: 401, code: "session_expired")) }
+          session = try await refresh(session)
+          refreshed = true
+        }
+      }
+    }
+
+    enum Probe: Equatable { case accepted, rejected, unreachable }
+
+    /// Auth가 이 토큰을 받는지 묻는다. 200이면 받음, 401·403이면 거절, 연결 실패·그 밖이면 닿지 않음.
+    private func probe(_ session: Stored) async -> Probe {
+      var request = URLRequest(url: URL(string: "auth/v1/user", relativeTo: config.baseURL)!)
+      request.setValue(config.publishableKey, forHTTPHeaderField: "apikey")
+      request.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+      guard let (_, response) = try? await urlSession.data(for: request),
+        let status = (response as? HTTPURLResponse)?.statusCode
+      else { return .unreachable }
+      switch status {
+      case 200: return .accepted
+      case 401, 403: return .rejected
+      default: return .unreachable
       }
     }
 

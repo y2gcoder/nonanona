@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import ReceiptImport
 import Testing
 
 @testable import Nonanona
@@ -9,8 +10,13 @@ private enum Fixture {
   static let tripID = "11111111-1111-4111-8111-111111111111"
   static let trip = TripID(value: tripID)
   static let host = LedgerMember(id: MemberID(value: "h"), displayName: "다라", isHost: true)
-  static let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3])
-  static let sha = SHA256.hash(data: png).map { String(format: "%02x", $0) }.joined()
+  /// 실제 가상 영수증 PNG(앱이 굽는 가린 사본과 같은 형식)와 그 앞 절반만 남긴 잘린 PNG.
+  static let png = try! Data(
+    contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+      .deletingLastPathComponent().appending(path: "fixtures/receipts/receipt-r01.png"))
+  static let sha = hex(png)
+  static let truncated = png.prefix(png.count / 2)
+  static func hex(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
   static let path = "\(tripID)/22222222-2222-4222-8222-222222222222/33333333-3333-4333-8333-333333333333.png"
   static let artifact = ReceiptArtifactRef(path: path, sha256: sha)
 
@@ -96,12 +102,14 @@ struct ReceiptViewTests {
         }
       }
     }
-    func release(_ failure: ReceiptViewFailure? = nil) {
+    /// `payload`를 주면 그 바이트(해시는 그 바이트의 것)를 돌려준다.
+    func release(_ failure: ReceiptViewFailure? = nil, payload: Data? = nil) {
       let done = lock.withLock { waiting.removeFirst() }
       if let failure {
         done.resume(throwing: failure)
       } else {
-        done.resume(returning: MaskedReceiptImage(png: Fixture.png, sha256: Fixture.sha))
+        let bytes = payload ?? Fixture.png
+        done.resume(returning: MaskedReceiptImage(png: bytes, sha256: Fixture.hex(bytes)))
       }
     }
   }
@@ -114,6 +122,11 @@ struct ReceiptViewTests {
     await model.loadLedger(Fixture.trip)
     model.openReview(r)
     return model
+  }
+
+  private func shown(_ state: ReceiptViewState?) -> MaskedReceiptImage? {
+    if case .shown(let decoded) = state { return decoded.image }
+    return nil
   }
 
   private func waitUntil(_ condition: () -> Bool) async {
@@ -132,7 +145,7 @@ struct ReceiptViewTests {
     #expect(model.receiptViews[r] == .loading)
     trips.release()
     await load.value
-    #expect(model.receiptViews[r] == .shown(MaskedReceiptImage(png: Fixture.png, sha256: Fixture.sha)))
+    #expect(shown(model.receiptViews[r]) == MaskedReceiptImage(png: Fixture.png, sha256: Fixture.sha))
     model.hideReceipt(r)
     #expect(model.receiptViews[r] == nil)
   }
@@ -193,6 +206,143 @@ struct ReceiptViewTests {
     trips.release()
     await retry.value
     #expect(trips.requests == 2)
-    #expect(model.receiptViews[r] == .shown(MaskedReceiptImage(png: Fixture.png, sha256: Fixture.sha)))
+    #expect(shown(model.receiptViews[r]) == MaskedReceiptImage(png: Fixture.png, sha256: Fixture.sha))
+  }
+
+  // MARK: - 그림으로 풀기
+
+  @Test func realPNGDecodesAndTruncatedPNGDoesNot() throws {
+    let decoded = try #require(DecodedReceipt.decode(MaskedReceiptImage(png: Fixture.png, sha256: Fixture.sha)))
+    #expect(decoded.cgImage.width == 720 && decoded.cgImage.height == 746)
+    #expect(
+      DecodedReceipt.decode(MaskedReceiptImage(png: Fixture.truncated, sha256: Fixture.hex(Fixture.truncated))) == nil)
+    let header = Fixture.png.prefix(33)  // 서명 + IHDR만
+    #expect(DecodedReceipt.decode(MaskedReceiptImage(png: header, sha256: Fixture.hex(header))) == nil)
+  }
+
+  /// 해시가 맞아도(그 바이트로 올라간 사본) 끝까지 풀리지 않으면 보이지 않고, 다시 시도할 수 있다.
+  @Test func undecodableBytesAreARetryableFailureNotAShownImage() async {
+    let trips = Trips()
+    let model = await model(trips)
+    let first = Task { await model.showReceipt(r) }
+    await waitUntil { trips.pending == 1 }
+    trips.release(payload: Fixture.truncated)
+    await first.value
+    #expect(model.receiptViews[r] == .failed(.undecodable))
+    let retry = Task { await model.showReceipt(r) }
+    await waitUntil { trips.pending == 1 }
+    trips.release()
+    await retry.value
+    #expect(shown(model.receiptViews[r]) == MaskedReceiptImage(png: Fixture.png, sha256: Fixture.sha))
+  }
+
+  // MARK: - 맥락(계정·여행방)
+
+  final class Context {
+    var account: AccountID? = AccountID(value: "host")
+    var trip: TripID? = Fixture.trip
+    var value: ReceiptContext { ReceiptContext(account: account, trip: trip) }
+  }
+
+  @Test func loadOnlyStartsForTheCurrentAccountAndTrip() async {
+    let trips = Trips()
+    let model = await model(trips)
+    let context = Context()
+    model.receiptContext = { context.value }
+    context.trip = TripID(value: "44444444-4444-4444-8444-444444444444")
+    await model.showReceipt(r)
+    context.trip = Fixture.trip
+    context.account = nil
+    await model.showReceipt(r)
+    #expect(trips.requests == 0 && model.receiptViews[r] == nil)
+  }
+
+  @Test(arguments: ["account", "trip", "signedOut"])
+  func delayedResponseAfterAContextChangeIsDropped(change: String) async {
+    let trips = Trips()
+    let model = await model(trips)
+    let context = Context()
+    model.receiptContext = { context.value }
+    let load = Task { await model.showReceipt(r) }
+    await waitUntil { trips.pending == 1 }
+    switch change {
+    case "account": context.account = AccountID(value: "other")
+    case "trip": context.trip = TripID(value: "44444444-4444-4444-8444-444444444444")
+    default: context.account = nil
+    }
+    trips.release()
+    await load.value
+    #expect(model.receiptViews[r] != .loading && shown(model.receiptViews[r]) == nil, "바뀐 맥락에 옛 사본을 보이지 않는다")
+  }
+}
+
+/// 앱 모델의 실제 전환(다른 계정 로그인, 다른 여행방 열기, 세션 만료)을 지나 늦게 온 사본은 보이지 않는다.
+@MainActor @Suite(.timeLimit(.minutes(1)))
+struct ReceiptTransitionTests {
+  final class Auth: AuthGateway, @unchecked Sendable {
+    var next = "host"
+    var providers: [SignInProvider] { [.apple] }
+    var testOnlyNotice: String? { nil }
+    func restoreSession() async -> AccountSession? {
+      AccountSession(accountID: AccountID(value: "host"), displayName: "다라")
+    }
+    func signIn(with provider: SignInProvider) async throws -> AccountSession {
+      AccountSession(accountID: AccountID(value: next), displayName: next)
+    }
+    func endSession() async {}
+  }
+
+  private let root = FileManager.default.temporaryDirectory.appending(path: "receipt-transition-\(UUID().uuidString)")
+
+  private func app(_ trips: ReceiptViewTests.Trips) async -> AppModel {
+    let auth = Auth()
+    let drafts = ReceiptDraftStore(root: root.appending(path: "receipt-import"))
+    let graph = AppGraph(
+      auth: auth, trips: trips, settlement: UnavailableSettlementGateway(), drafts: drafts,
+      joinFlow: JoinFlow(
+        auth: auth, trips: trips, pendingInvites: PendingInviteStore(file: root.appending(path: "i.json"))),
+      recognizer: VisionReceiptRecognizer(), processingHooks: ProcessingHooks())
+    let model = AppModel(graph: graph)
+    await model.load()
+    model.openTrip(TripSummary(id: Fixture.trip, name: "가상", isHost: true, isFinalized: false))
+    await model.refreshRoom(Fixture.trip)
+    model.rooms.openReview(ExpenseTarget(tripID: Fixture.trip, expenseID: "r"))
+    return model
+  }
+
+  private func waitUntil(_ condition: () -> Bool) async {
+    for _ in 0..<1000 {
+      if condition() { return }
+      try? await Task.sleep(for: .milliseconds(2))
+    }
+    Issue.record("timed out")
+  }
+
+  @Test(arguments: ["otherAccount", "otherTrip", "sessionExpired"])
+  func delayedResponseThroughARealTransitionIsNotShown(change: String) async {
+    let trips = ReceiptViewTests.Trips()
+    let model = await app(trips)
+    let r = ExpenseTarget(tripID: Fixture.trip, expenseID: "r")
+    let load = Task { await model.rooms.showReceipt(r) }
+    await waitUntil { trips.pending == 1 }
+    #expect(model.rooms.receiptViews[r] == .loading)
+    switch change {
+    case "otherAccount":
+      (model.graph.auth as? Auth)?.next = "member"
+      await model.signIn(with: .apple)
+      #expect(model.session?.accountID == AccountID(value: "member"))
+    case "otherTrip":
+      model.openTrip(
+        TripSummary(
+          id: TripID(value: "44444444-4444-4444-8444-444444444444"), name: "다른", isHost: true, isFinalized: false))
+    default:
+      // 서버가 세션 만료를 알렸을 때 정산 기능이 부르는 앱의 경로(세션을 지운다).
+      await model.rooms.onSessionExpired()
+      #expect(model.session == nil)
+    }
+    #expect(model.rooms.receiptViews[r] == nil, "전환과 함께 지운다")
+    trips.release()
+    await load.value
+    #expect(model.rooms.receiptViews[r] == nil, "늦게 온 응답을 보이지 않는다")
   }
 }

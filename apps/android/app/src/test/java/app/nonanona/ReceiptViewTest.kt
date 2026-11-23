@@ -1,12 +1,15 @@
 package app.nonanona
 
+import app.nonanona.feature.account.AccountId
 import app.nonanona.feature.settlement.ExpenseStatus
 import app.nonanona.feature.settlement.ExpenseTarget
 import app.nonanona.feature.settlement.LedgerExpense
 import app.nonanona.feature.settlement.LedgerMember
 import app.nonanona.feature.settlement.MaskedReceiptImage
 import app.nonanona.feature.settlement.MemberId
+import app.nonanona.feature.settlement.PngCheck
 import app.nonanona.feature.settlement.ReceiptArtifactRef
+import app.nonanona.feature.settlement.ReceiptContext
 import app.nonanona.feature.settlement.ReceiptViewException
 import app.nonanona.feature.settlement.ReceiptViewFailure
 import app.nonanona.feature.settlement.ReceiptViewState
@@ -33,8 +36,8 @@ class ReceiptViewTest {
     private val tripId = "11111111-1111-4111-8111-111111111111"
     private val trip = TripId(tripId)
     private val host = LedgerMember(MemberId("h"), "다라", true)
-    private val png = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3)
-    private val sha = MessageDigest.getInstance("SHA-256").digest(png).joinToString("") { "%02x".format(it) }
+    private val png = TestImages.png
+    private val sha = TestImages.sha(png)
     private val path = "$tripId/22222222-2222-4222-8222-222222222222/33333333-3333-4333-8333-333333333333.png"
     private val artifact = ReceiptArtifactRef(path, sha)
 
@@ -128,8 +131,12 @@ class ReceiptViewTest {
             val done = CompletableDeferred<ReceiptViewFailure?>()
             waiting += done
             done.await()?.let { throw ReceiptViewException(it) }
-            return MaskedReceiptImage(png, sha)
+            val bytes = payloads.removeFirstOrNull() ?: png
+            return MaskedReceiptImage(bytes, TestImages.sha(bytes))
         }
+
+        /** 다음 응답이 돌려줄 바이트(없으면 실제 PNG). */
+        val payloads = ArrayDeque<ByteArray>()
 
         fun release(failure: ReceiptViewFailure? = null) = waiting.removeAt(0).complete(failure)
     }
@@ -137,7 +144,16 @@ class ReceiptViewTest {
     private val r = ExpenseTarget(trip, "r")
     private val m = ExpenseTarget(trip, "m")
 
-    private fun controller(trips: Trips): RoomController {
+    private class Context {
+        var account: AccountId? = AccountId("host")
+        var trip: TripId? = TripId("11111111-1111-4111-8111-111111111111")
+        val value get() = ReceiptContext(account, trip)
+    }
+
+    private fun controller(
+        trips: Trips,
+        context: Context? = null,
+    ): RoomController {
         val c =
             RoomController(
                 CoroutineScope(Dispatchers.Unconfined),
@@ -145,6 +161,8 @@ class ReceiptViewTest {
                 UnavailableSettlementGateway,
                 onSessionExpired = {},
                 onReviewSaved = {},
+                receiptContext = { context?.value },
+                receiptDecoder = TestImages.decoder,
             )
         runBlocking { c.loadLedger(trip) }
         assertTrue(c.prepareReview(r))
@@ -158,7 +176,7 @@ class ReceiptViewTest {
         c.showReceipt(r)
         assertEquals(ReceiptViewState.Loading, c.state.value.receiptViews[r])
         trips.release()
-        assertEquals(ReceiptViewState.Shown(MaskedReceiptImage(png, sha)), c.state.value.receiptViews[r])
+        assertEquals(MaskedReceiptImage(png, sha), (c.state.value.receiptViews[r] as? ReceiptViewState.Shown)?.image)
         c.hideReceipt(r)
         assertNull(c.state.value.receiptViews[r])
     }
@@ -208,5 +226,64 @@ class ReceiptViewTest {
         trips.release()
         assertEquals(2, trips.requests)
         assertTrue(c.state.value.receiptViews[r] is ReceiptViewState.Shown)
+    }
+
+    // ------------------------------------------------------------ 그림으로 풀기
+
+    @Test
+    fun pngCheckAcceptsTheRealPngAndRejectsTruncatedOrHeaderOnly() {
+        assertTrue(PngCheck.isComplete(png))
+        assertFalse(PngCheck.isComplete(TestImages.truncated))
+        assertFalse(PngCheck.isComplete(png.copyOf(33)))
+        val badCrc = png.copyOf().also { it[40] = (it[40] + 1).toByte() }
+        assertFalse("청크 CRC가 맞지 않는다", PngCheck.isComplete(badCrc))
+        assertTrue(TestImages.decoder.decode(png)!!.width == 720)
+    }
+
+    @Test
+    fun undecodableBytesAreARetryableFailureNotAShownImage() {
+        val trips = Trips()
+        val c = controller(trips)
+        trips.payloads.addLast(TestImages.truncated)
+        c.showReceipt(r)
+        trips.release()
+        assertEquals(ReceiptViewState.Failed(ReceiptViewFailure.Undecodable), c.state.value.receiptViews[r])
+        c.showReceipt(r)
+        trips.release()
+        assertEquals(MaskedReceiptImage(png, sha), (c.state.value.receiptViews[r] as? ReceiptViewState.Shown)?.image)
+    }
+
+    // ------------------------------------------------------------ 맥락(계정·여행방)
+
+    @Test
+    fun loadOnlyStartsForTheCurrentAccountAndTrip() {
+        val trips = Trips()
+        val context = Context()
+        val c = controller(trips, context)
+        context.trip = TripId("44444444-4444-4444-8444-444444444444")
+        c.showReceipt(r)
+        context.trip = trip
+        context.account = null
+        c.showReceipt(r)
+        assertEquals(0, trips.requests)
+        assertNull(c.state.value.receiptViews[r])
+    }
+
+    @Test
+    fun delayedResponseAfterAContextChangeIsDropped() {
+        for (change in listOf("account", "trip", "signedOut")) {
+            val trips = Trips()
+            val context = Context()
+            val c = controller(trips, context)
+            c.showReceipt(r)
+            when (change) {
+                "account" -> context.account = AccountId("other")
+                "trip" -> context.trip = TripId("44444444-4444-4444-8444-444444444444")
+                else -> context.account = null
+            }
+            // 앱의 지우기(상태 흐름 수집)가 아직 돌지 않았어도 응답 자리에서 맥락을 다시 본다.
+            trips.release()
+            assertNull("$change: 바뀐 맥락에 옛 사본·받는 중 표시를 남기지 않는다", c.state.value.receiptViews[r])
+        }
     }
 }

@@ -161,7 +161,7 @@
       else { throw ReceiptViewFailure.mismatch }
       let data: Data
       do {
-        data = try await session.authorizedGet("storage/v1/object/authenticated/receipts/\(artifact.path)")
+        data = try await session.storageGet("storage/v1/object/authenticated/receipts/\(artifact.path)")
       } catch let failure as LocalSupabaseSession.Failure {
         throw Self.receiptViewFailure(failure.outcome)
       }
@@ -191,6 +191,7 @@
       switch outcome {
       case .transport: return .network
       case .http(_, "NoSuchKey"), .http(404, _): return .missing
+      // 세션 경계가 Auth로 토큰을 확인한 뒤에만 AccessDenied를 넘긴다(진짜 거절).
       case .http(_, "AccessDenied"), .http(403, _): return .denied
       case .http(_, "InvalidJWT"), .http(401, _): return .sessionExpired
       case .http(_, let code?) where sessionEndedCodes.contains(code): return .sessionExpired

@@ -73,6 +73,9 @@ enum class ReceiptViewFailure {
 
     /** 받은 바이트가 장부의 사본(해시·PNG·이 여행방 경로)과 다르다. 보여 주지 않는다. */
     Mismatch,
+
+    /** 해시는 맞지만 그림으로 끝까지 풀리지 않는다(잘린·깨진 PNG). 보여 주지 않는다. */
+    Undecodable,
     Network,
     Unavailable,
     Unknown,

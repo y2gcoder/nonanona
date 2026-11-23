@@ -388,16 +388,16 @@ struct ReceiptAttachmentSection: View {
             Text("사본을 불러오는 중…").textRole(.supporting)
           }
           .accessibilityIdentifier("review-receipt-loading")
-        case .shown(let image):
-          if let uiImage = UIImage(data: image.png) {
-            Image(uiImage: uiImage)
-              .resizable()
-              .scaledToFit()
-              .frame(maxWidth: .infinity)
-              .accessibilityLabel("가린 영수증 사본")
-              .accessibilityIdentifier("review-receipt-image")
-          }
-          Text("올린 사본과 같아요 · 확인 \(image.sha256.prefix(8))")
+        case .shown(let decoded):
+          Image(decorative: decoded.cgImage, scale: 1)
+            .resizable()
+            .scaledToFit()
+            .frame(maxWidth: .infinity)
+            .accessibilityElement()
+            .accessibilityLabel("가린 영수증 사본")
+            .accessibilityAddTraits(.isImage)
+            .accessibilityIdentifier("review-receipt-image")
+          Text("올린 사본과 같아요 · 확인 \(decoded.image.sha256.prefix(8))")
             .textRole(.caption).foregroundStyle(.secondary).accessibilityIdentifier("review-receipt-verified")
           Button("사본 닫기", action: onHide).accessibilityIdentifier("review-receipt-hide")
         case .failed(let failure):
@@ -423,6 +423,7 @@ extension ReceiptViewFailure {
     case .denied: "이 사본을 볼 권한이 없어요."
     case .missing: "사본을 찾을 수 없거나 볼 수 없어요."
     case .mismatch: "받은 사본이 올린 사본과 달라 보여 주지 않았어요."
+    case .undecodable: "사본 그림을 열 수 없어요. 다시 시도해 주세요."
     case .network: "인터넷에 연결할 수 없어요. 연결을 확인하고 다시 시도해 주세요."
     case .unavailable: "지금은 사본을 불러올 수 없어요. 잠시 후 다시 시도해 주세요."
     case .unknown: "사본을 불러오지 못했어요. 다시 시도해 주세요."

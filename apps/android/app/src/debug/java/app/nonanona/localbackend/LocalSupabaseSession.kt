@@ -131,19 +131,68 @@ class LocalSupabaseSession(
         }
 
     /**
-     * 인증한 GET(비공개 Storage 객체 받기). 만료가 가까우면 먼저 갱신하고, JWT를 거절하면 한 번 갱신해 다시 받는다.
-     * 메모리로만 받는다(HTTP 캐시를 쓰지 않는다).
+     * 비공개 Storage 객체를 인증해 받는다(메모리로만, HTTP 캐시를 쓰지 않는다). 공개 URL은 쓰지 않는다.
+     *
+     * Storage는 토큰 문제를 둘로 알린다. InvalidJWT는 토큰 문제가 분명하므로 한 번 갱신해 다시 받는다.
+     * AccessDenied는 잘못되거나 만료된 토큰과 정책 거절이 같은 코드라(로컬 스택에서 확인) Auth(/auth/v1/user)에 지금 토큰을
+     * 물어 가른다: Auth가 받으면 진짜 거절, 거절하면 한 번 갱신해 다시 받기, 닿지 않으면 연결 실패.
+     * 갱신은 많아야 한 번이고, 갱신 뒤에도 토큰 거절이면 세션 만료(session_expired)로 끝낸다(iOS storageGet과 같은 규칙).
      */
-    suspend fun authorizedGet(path: String): ByteArray =
+    suspend fun storageGet(path: String): ByteArray =
         lock.withLock {
             var session = read() ?: throw LocalBackendException(Outcome.Http(401, null))
             if (session.expiresAtMillis - clock() < 5_000) session = refresh(session)
-            try {
-                send(path, null, null, session.accessToken, method = "GET")
-            } catch (e: LocalBackendException) {
-                if (!isRejectedJwt(e.outcome)) throw e
-                send(path, null, null, refresh(session).accessToken, method = "GET")
+            var refreshed = false
+            while (true) {
+                try {
+                    return@withLock send(path, null, null, session.accessToken, method = "GET")
+                } catch (e: LocalBackendException) {
+                    val code = (e.outcome as? Outcome.Http)?.code
+                    if (code != "InvalidJWT" && code != "AccessDenied" && !isRejectedJwt(e.outcome)) throw e
+                    if (code == "AccessDenied") {
+                        when (probe(session)) {
+                            Probe.Accepted -> throw e
+
+                            // 토큰은 유효하다: 정책 거절
+                            Probe.Unreachable -> throw LocalBackendException(Outcome.Transport)
+
+                            Probe.Rejected -> Unit
+                        }
+                    }
+                    if (refreshed) throw LocalBackendException(Outcome.Http(401, "session_expired"))
+                    session = refresh(session)
+                    refreshed = true
+                }
             }
+            @Suppress("UNREACHABLE_CODE")
+            throw IllegalStateException()
+        }
+
+    private enum class Probe { Accepted, Rejected, Unreachable }
+
+    /** Auth가 이 토큰을 받는지 묻는다. 200이면 받음, 401·403이면 거절, 연결 실패·그 밖이면 닿지 않음(잠금 안에서 부른다). */
+    private suspend fun probe(session: Stored): Probe =
+        try {
+            runInterruptible(Dispatchers.IO) {
+                val connection = URI(config.baseUrl + "/auth/v1/user").toURL().openConnection() as HttpURLConnection
+                try {
+                    connection.connectTimeout = TIMEOUT_MILLIS
+                    connection.readTimeout = TIMEOUT_MILLIS
+                    connection.useCaches = false
+                    connection.setRequestProperty("apikey", config.publishableKey)
+                    connection.setRequestProperty("Authorization", "Bearer ${session.accessToken}")
+                    when (connection.responseCode) {
+                        200 -> Probe.Accepted
+                        401, 403 -> Probe.Rejected
+                        else -> Probe.Unreachable
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            }
+        } catch (e: IOException) {
+            currentCoroutineContext().ensureActive()
+            Probe.Unreachable
         }
 
     /** Auth가 지금 세션을 받아들이는지 확인한다(Storage는 잘못된 토큰과 권한 없음을 같은 코드로 알리므로 구분용). */

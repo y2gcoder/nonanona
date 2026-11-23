@@ -82,7 +82,8 @@ final class AppModel {
   private(set) var loaded = false
   private(set) var drafts: [ReceiptDraft] = []
   private(set) var session: AccountSession? {
-    didSet { if session == nil { rooms.clearReceipts() } }
+    // 세션이 끝나거나 다른 계정이 되면 연 가림 사본을 지운다.
+    didSet { if session?.accountID != oldValue?.accountID { rooms.clearReceipts() } }
   }
   private(set) var pendingInvite: PendingInvite?
   private(set) var room: TripRoom? {
@@ -136,6 +137,8 @@ final class AppModel {
     self.graph = graph
     rooms = RoomModel(trips: graph.trips, settlement: graph.settlement)
     rooms.onSessionExpired = { [weak self] in await self?.sessionEnded() }
+    // 사본은 지금 계정·연 여행방 맥락에서만 받고 보인다(응답이 올 때 다시 확인한다).
+    rooms.receiptContext = { [weak self] in ReceiptContext(account: self?.session?.accountID, trip: self?.room?.id) }
   }
 
   /// 서버가 세션을 받지 않았다. 세션만 지운다(초안·보관한 초대는 그대로). 다시 로그인하면 이어서 쓴다.

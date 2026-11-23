@@ -35,6 +35,7 @@ import app.nonanona.feature.receiptimport.incomingPhoto
 import app.nonanona.feature.receiptimport.nextToReview
 import app.nonanona.feature.receiptimport.sharedImageUris
 import app.nonanona.feature.settlement.ExpenseTarget
+import app.nonanona.feature.settlement.ReceiptContext
 import app.nonanona.feature.settlement.RoomController
 import app.nonanona.feature.trip.InviteAcceptFailure
 import app.nonanona.feature.trip.InviteCode
@@ -235,6 +236,8 @@ class AppViewModel(
             settlement = graph.adapters.settlement,
             onSessionExpired = ::sessionEnded,
             onReviewSaved = { target -> if (backStack.lastOrNull() == Route.Expense(target)) back() },
+            // 사본은 지금 계정·연 여행방 맥락에서만 받고 보인다(응답이 올 때 다시 확인한다, 지우기를 기다리지 않는다).
+            receiptContext = { state.value.let { ReceiptContext(it.session?.accountId, it.room?.id) } },
         )
 
     /** 서버가 세션을 받지 않았다. 세션만 지운다(초안·보관한 초대는 그대로). 다시 로그인하면 이어서 쓴다. */

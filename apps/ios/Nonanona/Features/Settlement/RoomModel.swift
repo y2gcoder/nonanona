@@ -1,4 +1,6 @@
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 import Observation
 
 /// 검토 화면에 열린 지출(여행방 ID + 지출 ID). 안정 ID라 창 크기·회전이 바뀌어도 같은 지출이 남는다.
@@ -15,8 +17,39 @@ enum ReviewSaveState: Equatable {
 /// 검토 화면에서 연 가림 사본. 메모리에만 두고 화면을 떠나거나 세션·여행방이 바뀌면 지운다.
 enum ReceiptViewState: Equatable {
   case loading
-  case shown(MaskedReceiptImage)
+  /// 해시가 맞고 ImageIO가 끝까지 풀어 그림을 만든 사본만.
+  case shown(DecodedReceipt)
   case failed(ReceiptViewFailure)
+}
+
+/// 화면에 그릴 사본: 받은 바이트와, 그 바이트를 끝까지 푼 그림.
+struct DecodedReceipt: Equatable {
+  let image: MaskedReceiptImage
+  let cgImage: CGImage
+
+  static func == (a: DecodedReceipt, b: DecodedReceipt) -> Bool { a.image == b.image }
+
+  /// 구조가 온전한 PNG(`PNGCheck`)이고 ImageIO가 그림을 만드는 바이트만 받는다. 아니면 nil.
+  /// ImageIO만으로는 잘린 PNG도 그림이 되므로(로그만 남긴다) 구조를 먼저 본다.
+  static func decode(_ image: MaskedReceiptImage) -> DecodedReceipt? {
+    guard PNGCheck.isComplete(image.png),
+      let source = CGImageSourceCreateWithData(image.png as CFData, nil),
+      CGImageSourceGetType(source) as String? == UTType.png.identifier,
+      CGImageSourceGetCount(source) == 1,
+      CGImageSourceGetStatus(source) == .statusComplete,
+      CGImageSourceGetStatusAtIndex(source, 0) == .statusComplete,
+      let cgImage = CGImageSourceCreateImageAtIndex(
+        source, 0, [kCGImageSourceShouldCacheImmediately: true] as CFDictionary),
+      cgImage.width > 0, cgImage.height > 0
+    else { return nil }
+    return DecodedReceipt(image: image, cgImage: cgImage)
+  }
+}
+
+/// 가림 사본을 받아도 되는 맥락: 로그인한 계정과 지금 연 여행방. 받기 시작할 때와 응답이 왔을 때 같아야 보인다.
+struct ReceiptContext: Equatable {
+  let account: AccountID?
+  let trip: TripID?
 }
 
 enum SettlementScreenState: Equatable {
@@ -49,6 +82,10 @@ final class RoomModel {
   private(set) var receiptViews: [ExpenseTarget: ReceiptViewState] = [:]
   /// 받는 중인 사본 요청. 지우면 늦게 온 응답을 버린다.
   private var receiptLoads: [ExpenseTarget: UUID] = [:]
+  /// 앱이 정해 주는 지금 맥락(계정·연 여행방). 정해 두면 그 여행방 지출만 받고, 응답이 올 때 맥락이 바뀌었으면 버린다.
+  var receiptContext: (() -> ReceiptContext)?
+  /// 저장이 끝나고 서버가 알려 준 새 버전(지출별). 장부가 그 버전으로 오면 입력을 조용히 새로 채운다(다른 변경 알림 없이).
+  private var savedVersions: [ExpenseTarget: Int] = [:]
   private(set) var forms: [ExpenseTarget: ShareForm] = [:]
   private(set) var reviewState: [ExpenseTarget: ReviewSaveState] = [:]
   /// 보낸 검토(응답을 못 받았을 수 있다). 같은 내용으로 다시 보내면 같은 요청 키를 쓴다.
@@ -116,6 +153,21 @@ final class RoomModel {
       else { continue }
       forms[target] = ShareForm(expense: expense, members: ledger.members)
       sentReviews[target] = nil
+      noteRebase(target, to: expense.version)
+    }
+    for (target, version) in savedVersions where target.tripID == ledger.tripID {
+      if let expense = ledger.expenses.first(where: { $0.id == target.expenseID }), expense.version >= version {
+        savedVersions[target] = nil
+      }
+    }
+  }
+
+  /// 새 버전으로 다시 채웠다는 알림. 이 기기가 방금 저장해서 생긴 버전이면 알리지 않는다.
+  private func noteRebase(_ target: ExpenseTarget, to version: Int) {
+    if savedVersions[target] == version {
+      savedVersions[target] = nil
+      reviewRefreshed.remove(target)
+    } else {
       reviewRefreshed.insert(target)
     }
   }
@@ -142,7 +194,7 @@ final class RoomModel {
       // 전에 열었던 입력이 옛 버전이다. 최신 값으로 다시 채우고 알린다.
       forms[target] = ShareForm(expense: expense, members: ledger.members)
       sentReviews[target] = nil
-      reviewRefreshed.insert(target)
+      noteRebase(target, to: expense.version)
     } else if forms[target] == nil {
       forms[target] = ShareForm(expense: expense, members: ledger.members)
       reviewRefreshed.remove(target)
@@ -196,15 +248,17 @@ final class RoomModel {
     guard inFlight[target]?.attempt == attempt else { return }
     inFlight[target] = nil
     switch result {
-    case .success:
+    case .success(let reviewed):
       sentReviews[target] = nil
       reviewState[target] = nil
       // 저장한 입력(보낸 버전에서 연 것)만 지운다.
       if forms[target]?.baseVersion == review.expectedVersion { forms[target] = nil }
       previews[target.tripID] = nil
-      await loadLedger(target.tripID)
-      // 이 지출의 검토 화면만 닫는다(그사이 다른 지출을 열었으면 그대로 둔다).
+      savedVersions[target] = reviewed.version
+      // 장부를 다시 읽기 전에 닫는다(이 지출의 검토 화면만). 읽는 동안 같은 지출을 다시 열면 그 화면은 닫지 않고,
+      // 장부가 저장한 버전으로 오면 입력을 조용히 새로 채운다.
       if reviewing == target { reviewing = nil }
+      await loadLedger(target.tripID)
     case .failure(let error):
       let failure = error as? SettlementFailure ?? .unknown
       reviewState[target] = .failed(failure)
@@ -236,6 +290,8 @@ final class RoomModel {
   func showReceipt(_ target: ExpenseTarget) async {
     guard reviewing == target, let artifact = expense(target)?.artifact else { return }
     if case .loading = receiptViews[target] { return }
+    let context = receiptContext?()
+    if let context, context.account == nil || context.trip != target.tripID { return }
     let token = UUID()
     receiptLoads[target] = token
     receiptViews[target] = .loading
@@ -246,10 +302,18 @@ final class RoomModel {
       result = .failure(error as? ReceiptViewFailure ?? .unknown)
     }
     // 그사이 화면을 떠났거나 세션·여행방이 바뀌어 지웠으면 버린다.
+    // 그사이 지우거나 새로 받기 시작했으면(다른 작업) 아무것도 하지 않는다.
     guard receiptLoads[target] == token else { return }
     receiptLoads[target] = nil
+    // 맥락(계정·여행방)이 바뀌었으면 옛 응답을 보이지 않고 받는 중 표시도 걷는다.
+    guard receiptContext?() == context else {
+      receiptViews[target] = nil
+      return
+    }
     switch result {
-    case .success(let image): receiptViews[target] = .shown(image)
+    case .success(let image):
+      // 그림으로 끝까지 풀리지 않으면 보이지 않는다(다시 시도할 수 있다).
+      receiptViews[target] = DecodedReceipt.decode(image).map { .shown($0) } ?? .failed(.undecodable)
     case .failure(let failure):
       receiptViews[target] = .failed(failure)
       if failure == .sessionExpired { await onSessionExpired() }

@@ -220,7 +220,7 @@ class LocalTripGateway(
         }
         val bytes =
             try {
-                session.authorizedGet("/storage/v1/object/authenticated/receipts/${artifact.path}")
+                session.storageGet("/storage/v1/object/authenticated/receipts/${artifact.path}")
             } catch (e: LocalBackendException) {
                 throw ReceiptViewException(receiptViewFailure(e.outcome))
             }
@@ -341,9 +341,14 @@ class LocalTripGateway(
             val http = outcome as Outcome.Http
             return when {
                 http.code == "NoSuchKey" || http.status == 404 -> ReceiptViewFailure.Missing
+
+                // 세션 경계가 Auth로 토큰을 확인한 뒤에만 AccessDenied를 넘긴다(진짜 거절).
                 http.code == "AccessDenied" || http.status == 403 -> ReceiptViewFailure.Denied
+
                 http.code == "InvalidJWT" || http.code in sessionEndedCodes || http.status == 401 -> ReceiptViewFailure.SessionExpired
+
                 http.status == 429 || http.status >= 500 -> ReceiptViewFailure.Unavailable
+
                 else -> ReceiptViewFailure.Unknown
             }
         }

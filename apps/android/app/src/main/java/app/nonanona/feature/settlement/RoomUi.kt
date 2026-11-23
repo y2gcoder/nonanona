@@ -1,6 +1,5 @@
 package app.nonanona.feature.settlement
 
-import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -39,13 +38,11 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -558,19 +555,12 @@ private fun ReceiptAttachment(
             }
 
             is ReceiptViewState.Shown -> {
-                val bitmap =
-                    remember(
-                        state.image.sha256,
-                    ) { BitmapFactory.decodeByteArray(state.image.png, 0, state.image.png.size)?.asImageBitmap() }
-                val description = stringResource(R.string.receipt_image_description)
-                if (bitmap != null) {
-                    Image(
-                        bitmap = bitmap,
-                        contentDescription = description,
-                        contentScale = ContentScale.FillWidth,
-                        modifier = Modifier.fillMaxWidth().testTag("review_receipt_image"),
-                    )
-                }
+                Image(
+                    bitmap = state.bitmap,
+                    contentDescription = stringResource(R.string.receipt_image_description),
+                    contentScale = ContentScale.FillWidth,
+                    modifier = Modifier.fillMaxWidth().testTag("review_receipt_image"),
+                )
                 Text(
                     stringResource(R.string.receipt_verified, state.image.sha256.take(8)),
                     style = TextRoles.caption,
@@ -605,6 +595,7 @@ fun ReceiptViewFailure.messageRes(): Int =
         ReceiptViewFailure.Denied -> R.string.receipt_failure_denied
         ReceiptViewFailure.Missing -> R.string.receipt_failure_missing
         ReceiptViewFailure.Mismatch -> R.string.receipt_failure_mismatch
+        ReceiptViewFailure.Undecodable -> R.string.receipt_failure_undecodable
         ReceiptViewFailure.Network -> R.string.failure_network
         ReceiptViewFailure.Unavailable -> R.string.receipt_failure_unavailable
         ReceiptViewFailure.Unknown -> R.string.receipt_failure_unknown

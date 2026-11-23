@@ -31,6 +31,8 @@ class Adapters(
 class DraftUploadContext(
     val destination: TripRoom?,
     val confirmedCount: Int,
+    /** 직접 입력으로 확인한 건수(사본이 없어 올리지 않는다). */
+    val manualEntryCount: Int,
     val state: UploadState,
     val signedIn: Boolean,
     val onRequest: () -> Unit,

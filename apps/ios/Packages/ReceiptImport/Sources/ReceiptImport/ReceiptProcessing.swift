@@ -12,17 +12,21 @@ public enum ProcessingFailure: String, Error, Codable, Equatable, Sendable {
 }
 
 /// 사용자가 확인한 영수증: 허용 필드와 가림을 구운 사본의 위치·해시. 원본과 OCR 전문은 들어가지 않는다.
+/// 읽지 못한 사진에 값을 직접 입력해 확인하면 사본이 없다(`artifactFileName == nil`). 이 경우 사진은 기기 밖으로 나가지 않는다.
 public struct ConfirmedReceipt: Codable, Equatable, Sendable {
   public let itemID: String
   public let fields: AllowedReceiptFields
-  public let artifactFileName: String
-  public let artifactSHA256: String
+  public let artifactFileName: String?
+  public let artifactSHA256: String?
+
+  public var isManualEntry: Bool { artifactFileName == nil }
 }
 
-/// 기기 밖으로 보낼 수 있는 한 건: 확인한 영수증과, 경계 검사를 통과한 가림 사본 바이트.
+/// 기기 밖으로 보낼 수 있는 한 건: 확인한 영수증과, 경계 검사를 통과한 가림 사본 바이트·해시.
 public struct OutboundReceipt: Equatable, Sendable {
   public let receipt: ConfirmedReceipt
   public let artifactPNG: Data
+  public let artifactSHA256: String
 }
 
 public struct ProcessingItem: Codable, Equatable, Identifiable, Sendable {
@@ -58,10 +62,15 @@ public struct ProcessingManifest: Codable, Equatable, Sendable {
 public struct ProcessingHooks: Sendable {
   public var delayPerItem: Duration
   public var failFirstAttemptAtPosition: Int?
+  /// 이 위치 사진의 가림 제안을 비운다(제안이 민감한 줄을 놓친 경우를 재현).
+  public var dropSuggestionsAtPosition: Int?
 
-  public init(delayPerItem: Duration = .zero, failFirstAttemptAtPosition: Int? = nil) {
+  public init(
+    delayPerItem: Duration = .zero, failFirstAttemptAtPosition: Int? = nil, dropSuggestionsAtPosition: Int? = nil
+  ) {
     self.delayPerItem = delayPerItem
     self.failFirstAttemptAtPosition = failFirstAttemptAtPosition
+    self.dropSuggestionsAtPosition = dropSuggestionsAtPosition
   }
 }
 

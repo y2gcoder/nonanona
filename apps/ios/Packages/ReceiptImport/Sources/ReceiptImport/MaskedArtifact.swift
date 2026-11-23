@@ -47,7 +47,16 @@ enum Masking {
     }
   }
 
-  /// 확인한 경우에만 부른다. 새 비트맵에 검은 사각형을 굽고 원본 메타데이터 없이 PNG로 인코딩한다.
+  /// 사용자가 더한 띠(정수 퍼센트)를 픽셀 사각형으로. 위는 내림, 아래는 올림이라 경계 픽셀까지 덮는다.
+  static func rects(for regions: [MaskRegion], width: Int, height: Int) -> [CGRect] {
+    regions.map { region in
+      let y0 = (region.topPercent * height) / 100
+      let y1 = min(height, (region.bottomPercent * height + 99) / 100)
+      return CGRect(x: 0, y: y0, width: width, height: y1 - y0)
+    }
+  }
+
+  /// 확인(사본)과 검토 화면 미리보기만 부른다. 새 비트맵에 검은 사각형을 굽고 원본 메타데이터 없이 PNG로 인코딩한다.
   static func flatten(original: URL, rects: [CGRect]) throws -> MaskedArtifact {
     let image = try ImageLoading.cgImage(original)
     let width = image.width

@@ -193,6 +193,51 @@ struct AdaptiveStateTests {
     #expect(model.uploads[draft.id] == nil)
   }
 
+  /// 검토 중인 영수증과 고치던 값은 모델에 있어 분할 보기가 접히고 펴져도 남는다. "확인하고 다음"은 목록 순서로 다음 사진을 열고,
+  /// 남은 사진이 없으면 목록으로 돌아간다. 확인한 값은 고친 값이다.
+  @Test func reviewSurvivesWidthChangesAndConfirmAdvancesInOrder() async throws {
+    let (model, draft) = try model()
+    await model.load()
+    try await until("처리가") { model.processing[draft.id]?.processedCount == 2 }
+    model.selection = .draft(draft.id)
+    model.startReview(draftID: draft.id)
+    let items = try #require(model.processing[draft.id]?.items.sorted { $0.position < $1.position })
+    let first = ReviewTarget(draftID: draft.id, itemID: items[0].id)
+    #expect(model.reviewing == first, "목록 순서의 첫 확인 필요 사진")
+    try await until("제안이") { model.proposals[first] != nil }
+    model.edit(first, .amount("1500"))
+    model.edit(first, .addRegion)
+
+    let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 951, height: 669))
+    window.rootViewController = UIHostingController(rootView: RootView(model: model))
+    window.makeKeyAndVisible()
+    defer { window.isHidden = true }
+    for (sizeClass, size) in [
+      (UIUserInterfaceSizeClass.regular, CGSize(width: 951, height: 669)),
+      (.compact, CGSize(width: 466, height: 678)),
+      (.regular, CGSize(width: 951, height: 669)),
+    ] {
+      window.frame = CGRect(origin: .zero, size: size)
+      window.traitOverrides.horizontalSizeClass = sizeClass
+      try await until("분할 보기가 바뀌기가", timeout: .seconds(5)) {
+        splitViewController(in: window)?.isCollapsed == (sizeClass == .compact)
+      }
+      #expect(model.reviewing == first)
+      #expect(model.resolvedReview(first).amount == "1500")
+      #expect(model.resolvedReview(first).regions.count == 1)
+    }
+
+    await model.confirmAndNext(first)
+    let second = ReviewTarget(draftID: draft.id, itemID: items[1].id)
+    #expect(model.reviewing == second)
+    #expect(model.item(first)?.confirmed?.fields.amountMinor == 1500)
+    try await until("다음 제안이") { model.proposals[second] != nil }
+    await model.confirmAndNext(second)
+    #expect(model.reviewing == nil, "남은 확인 필요 사진이 없으면 목록으로")
+    #expect(model.reviewFinished.contains(draft.id))
+    #expect(recognizer.calls == 2, "검토와 배치 변경이 OCR을 다시 돌리지 않는다")
+  }
+
   /// 시스템 분할 보기를 실제 창에 띄워 좁은 창(compact) ↔ 넓은 창(regular)을 오가게 한다(접기·펴기·분할 화면과 같은 신호).
   /// 넓으면 목록과 고른 화면이 나란히, 좁으면 고른 화면이 위에 쌓이고, 고른 초안은 그대로다.
   @Test func splitViewFollowsWidthClassAndKeepsSelection() async throws {

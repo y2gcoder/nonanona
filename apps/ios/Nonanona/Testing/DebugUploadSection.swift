@@ -28,12 +28,17 @@
 
   struct DebugUploadSection: View {
     let context: DraftUploadContext
+    var manualEntryCount = 0
 
     var body: some View {
       Section {
         if let destination = context.destination {
           Text("올릴 곳: \(destination.name)").textRole(.body).accessibilityIdentifier("upload-destination")
           Text("확인한 영수증 \(context.confirmedCount)장").textRole(.supporting)
+          if manualEntryCount > 0 {
+            Text("직접 입력 \(manualEntryCount)건은 사진이 없어 이번에는 올리지 않아요(기기에만 있어요).")
+              .textRole(.supporting).accessibilityIdentifier("upload-manual-excluded")
+          }
           statusView
           if !context.signedIn {
             Button("다시 로그인하기", action: context.onLogin).accessibilityIdentifier("upload-login")

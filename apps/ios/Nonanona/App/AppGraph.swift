@@ -51,11 +51,12 @@ struct AppGraph: Sendable {
   }
 
   #if DEBUG
-    /// 검증용: 실행 환경 변수로 처리를 늦추거나 한 위치의 첫 시도를 실패시킨다(debug 빌드만).
+    /// 검증용: 실행 환경 변수로 처리를 늦추거나, 한 위치의 첫 시도를 실패시키거나, 한 위치의 가림 제안을 비운다(debug 빌드만).
     static func debugProcessingHooks(_ env: [String: String] = ProcessInfo.processInfo.environment) -> ProcessingHooks {
       ProcessingHooks(
         delayPerItem: .milliseconds(env["NONANONA_PROCESSING_DELAY_MS"].flatMap(Int.init) ?? 0),
-        failFirstAttemptAtPosition: env["NONANONA_FAIL_FIRST_ATTEMPT_POSITION"].flatMap(Int.init))
+        failFirstAttemptAtPosition: env["NONANONA_FAIL_FIRST_ATTEMPT_POSITION"].flatMap(Int.init),
+        dropSuggestionsAtPosition: env["NONANONA_DROP_SUGGESTIONS_POSITION"].flatMap(Int.init))
     }
   #endif
 }

@@ -7,6 +7,7 @@
     <string name="debug_upload_no_trip">참여한 여행방이 없어요. 초대 링크로 참여한 뒤 올릴 수 있어요.</string>
     <string name="debug_upload_destination">올릴 곳: %1$s</string>
     <string name="debug_upload_count">확인한 영수증 %1$d장</string>
+    <string name="debug_upload_manual_excluded">직접 입력 %1$d건은 사진이 없어 이번에는 올리지 않아요(기기에만 있어요).</string>
     <string name="debug_upload_login">다시 로그인하기</string>
     <string name="debug_upload_start">여행방에 올리기(개발용)</string>
     <string name="debug_upload_confirm_title">‘%1$s’에 영수증 %2$d장을 올릴까요?</string>

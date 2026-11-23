@@ -13,12 +13,23 @@ import app.nonanona.feature.account.SignInFailure
 import app.nonanona.feature.account.SignInProvider
 import app.nonanona.feature.receiptimport.BoundaryViolation
 import app.nonanona.feature.receiptimport.DraftSource
+import app.nonanona.feature.receiptimport.FieldProblem
 import app.nonanona.feature.receiptimport.ItemState
+import app.nonanona.feature.receiptimport.MaskPreview
+import app.nonanona.feature.receiptimport.MaskRegion
+import app.nonanona.feature.receiptimport.OcrProposal
+import app.nonanona.feature.receiptimport.ProcessingItem
 import app.nonanona.feature.receiptimport.ProcessingManifest
 import app.nonanona.feature.receiptimport.ReceiptDraft
 import app.nonanona.feature.receiptimport.ReceiptDraftStore
 import app.nonanona.feature.receiptimport.ReceiptProcessor
+import app.nonanona.feature.receiptimport.ResolvedReview
+import app.nonanona.feature.receiptimport.ReviewDraft
+import app.nonanona.feature.receiptimport.ReviewEdit
+import app.nonanona.feature.receiptimport.ReviewForm
+import app.nonanona.feature.receiptimport.Validation
 import app.nonanona.feature.receiptimport.incomingPhoto
+import app.nonanona.feature.receiptimport.nextToReview
 import app.nonanona.feature.receiptimport.sharedImageUris
 import app.nonanona.feature.trip.InviteAcceptFailure
 import app.nonanona.feature.trip.InviteCode
@@ -35,12 +46,19 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.UUID
 
 sealed interface Route {
     data object Home : Route
 
     data class Draft(
         val id: String,
+    ) : Route
+
+    /** 영수증 한 장의 검토. 넓은 창에서는 초안(영수증 목록) 옆의 칸, 좁은 창에서는 그 위에 쌓인다. */
+    data class Receipt(
+        val draftId: String,
+        val itemId: String,
     ) : Route
 
     data object Invite : Route
@@ -97,8 +115,34 @@ data class AppUiState(
     val uploads: Map<String, UploadState> = emptyMap(),
     /** 열려 있는 올리기 최종 확인. 화면이 아니라 상태에 두어 화면 배치가 바뀌어도 닫히지 않는다. */
     val uploadConfirmation: UploadConfirmation? = null,
+    /** 저장된 검토 입력(디스크와 같음), OCR 제안(기기 안에서만, OCR 전문 포함), 미리보기, 확인한 사본. 키는 검토 화면 Route. */
+    val reviewDrafts: Map<Route.Receipt, ReviewDraft> = emptyMap(),
+    val proposals: Map<Route.Receipt, OcrProposal> = emptyMap(),
+    val previews: Map<Route.Receipt, MaskPreview> = emptyMap(),
+    val confirmedArtifacts: Map<Route.Receipt, ByteArray> = emptyMap(),
+    /** 목록 행의 한 줄 요약(가게 · 날짜 · 금액 · 가림). 확인 필요한 사진만. */
+    val rowSummaries: Map<Route.Receipt, String> = emptyMap(),
+    /** 검토 화면이 원본 대신 가린 사본 미리보기를 보이는지. 배치가 바뀌어도 남도록 상태에 둔다. */
+    val showsMaskedPreview: Boolean = false,
+    /** "확인하고 다음"을 처리하는 중인 사진(두 번 누르기 막기). */
+    val confirming: Route.Receipt? = null,
+    /** 확인할 사진을 다 보고 목록으로 돌아온 초안. 목록이 남은 상태를 알린다. */
+    val reviewFinished: Set<String> = emptySet(),
 ) {
-    fun confirmedCount(draftId: String): Int = processing[draftId]?.items?.count { it.state == ItemState.Confirmed } ?: 0
+    /** 올릴 수 있는 영수증: 확인했고 가린 사본이 있는 것. 직접 입력(사본 없음)은 이번 단계에서 올리지 않는다. */
+    fun confirmedCount(draftId: String): Int =
+        processing[draftId]?.items?.count { it.state == ItemState.Confirmed && it.confirmed?.isManualEntry == false } ?: 0
+
+    fun manualEntryCount(draftId: String): Int = processing[draftId]?.items?.count { it.confirmed?.isManualEntry == true } ?: 0
+
+    fun item(target: Route.Receipt): ProcessingItem? = processing[target.draftId]?.items?.firstOrNull { it.id == target.itemId }
+
+    fun resolvedReview(target: Route.Receipt): ResolvedReview = (reviewDrafts[target] ?: ReviewDraft()).resolved(proposals[target])
+
+    fun fieldProblems(target: Route.Receipt): Set<FieldProblem> =
+        resolvedReview(target).let { r ->
+            (ReviewForm.validate(r.date, r.amount, r.currency, r.merchant) as? Validation.Invalid)?.problems ?: emptySet()
+        }
 }
 
 /**
@@ -190,8 +234,239 @@ class AppViewModel(
         }
     }
 
-    private fun publish(manifest: ProcessingManifest) =
+    private fun publish(manifest: ProcessingManifest) {
+        val before = state.value.processing[manifest.draftId]
         mutableState.update { it.copy(processing = it.processing + (manifest.draftId to manifest)) }
+        loadRowSummaries(manifest)
+        // 열린 사진을 다시 읽어 확인할 수 있게 되면 제안을 불러온다(직접 입력하던 값은 저장된 입력에 남아 있다).
+        val open = backStack.lastOrNull() as? Route.Receipt ?: return
+        if (open.draftId != manifest.draftId) return
+        val was = before?.items?.firstOrNull { it.id == open.itemId }?.state
+        if (was != manifest.items.firstOrNull { it.id == open.itemId }?.state) loadReview(open)
+    }
+
+    // 검토
+
+    /** 목록 순서의 첫 Ready 사진부터 검토한다. */
+    fun startReview(draftId: String) {
+        val next = state.value.processing[draftId]?.nextToReview(null) ?: return
+        openReceipt(Route.Receipt(draftId, next.id))
+    }
+
+    fun openReceipt(target: Route.Receipt) {
+        mutableState.update { it.copy(reviewFinished = it.reviewFinished - target.draftId) }
+        showOnly(Route.Home, Route.Draft(target.draftId), target)
+        loadReview(target)
+    }
+
+    fun setShowsMaskedPreview(value: Boolean) = mutableState.update { it.copy(showsMaskedPreview = value) }
+
+    /** 디스크의 제안·검토 입력·확인한 사본을 불러온다. 이미 불러온 입력은 덮어쓰지 않는다(입력 중인 글자를 지키기 위해). */
+    private fun loadReview(target: Route.Receipt) {
+        val processor = processors[target.draftId] ?: return
+        viewModelScope.launch {
+            val proposal = runCatching { processor.proposal(target.itemId) }.getOrNull()
+            val saved = runCatching { processor.review(target.itemId) }.getOrNull()
+            val artifact = runCatching { processor.confirmedArtifact(target.itemId) }.getOrNull()
+            mutableState.update {
+                it.copy(
+                    proposals = if (proposal != null) it.proposals + (target to proposal) else it.proposals - target,
+                    reviewDrafts =
+                        if (it.reviewDrafts[target] == null &&
+                            saved != null
+                        ) {
+                            it.reviewDrafts + (target to saved)
+                        } else {
+                            it.reviewDrafts
+                        },
+                    confirmedArtifacts =
+                        if (artifact !=
+                            null
+                        ) {
+                            it.confirmedArtifacts + (target to artifact)
+                        } else {
+                            it.confirmedArtifacts - target
+                        },
+                )
+            }
+        }
+    }
+
+    private fun loadRowSummaries(manifest: ProcessingManifest) {
+        val processor = processors[manifest.draftId] ?: return
+        val missing =
+            manifest.items.filter {
+                it.state == ItemState.Ready && state.value.rowSummaries[Route.Receipt(manifest.draftId, it.id)] == null
+            }
+        if (missing.isEmpty()) return
+        viewModelScope.launch {
+            for (item in missing) {
+                val target = Route.Receipt(manifest.draftId, item.id)
+                val proposal = runCatching { processor.proposal(item.id) }.getOrNull() ?: continue
+                val saved = runCatching { processor.review(item.id) }.getOrNull()
+                mutableState.update {
+                    it.copy(
+                        rowSummaries =
+                            it.rowSummaries + (target to summary((it.reviewDrafts[target] ?: saved ?: ReviewDraft()).resolved(proposal))),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun summary(r: ResolvedReview): String =
+        listOf(r.merchant, r.date, if (r.amount.isEmpty()) "" else "${r.amount} ${r.currency}", "가림 ${r.maskCount}곳")
+            .filter { it.isNotEmpty() }
+            .joinToString(" · ")
+
+    fun edit(
+        target: Route.Receipt,
+        change: ReviewEdit,
+    ) {
+        val processor = processors[target.draftId] ?: return
+        if (state.value.confirming == target) return
+        var saved: ReviewDraft? = null
+        mutableState.update {
+            val draft = it.reviewDrafts[target] ?: ReviewDraft()
+            val resolved = draft.resolved(it.proposals[target])
+            val next =
+                when (change) {
+                    is ReviewEdit.Date -> {
+                        draft.copy(date = change.text)
+                    }
+
+                    is ReviewEdit.Amount -> {
+                        draft.copy(amount = change.text)
+                    }
+
+                    is ReviewEdit.Currency -> {
+                        draft.copy(currency = change.code)
+                    }
+
+                    is ReviewEdit.Merchant -> {
+                        draft.copy(merchant = change.text)
+                    }
+
+                    is ReviewEdit.ToggleLine -> {
+                        val lines = resolved.maskLineIds.toMutableSet()
+                        if (!lines.remove(change.id)) lines += change.id
+                        draft.copy(maskLineIds = lines.sorted())
+                    }
+
+                    ReviewEdit.AddRegion -> {
+                        draft.copy(regions = draft.regions + MaskRegion.of(UUID.randomUUID().toString()))
+                    }
+
+                    is ReviewEdit.MoveRegion -> {
+                        draft.copy(
+                            regions =
+                                draft.regions.map { r ->
+                                    if (r.id ==
+                                        change.id
+                                    ) {
+                                        r.moved(change.delta)
+                                    } else {
+                                        r
+                                    }
+                                },
+                        )
+                    }
+
+                    is ReviewEdit.ResizeRegion -> {
+                        draft.copy(
+                            regions =
+                                draft.regions.map { r ->
+                                    if (r.id ==
+                                        change.id
+                                    ) {
+                                        r.resized(change.delta)
+                                    } else {
+                                        r
+                                    }
+                                },
+                        )
+                    }
+
+                    is ReviewEdit.RemoveRegion -> {
+                        draft.copy(regions = draft.regions.filter { r -> r.id != change.id })
+                    }
+                }
+            saved = next
+            val after = next.resolved(it.proposals[target])
+            val masksChanged = after.maskLineIds != resolved.maskLineIds || after.regions != resolved.regions
+            it.copy(
+                reviewDrafts = it.reviewDrafts + (target to next),
+                previews = if (masksChanged) it.previews - target else it.previews,
+                rowSummaries = if (it.proposals[target] != null) it.rowSummaries + (target to summary(after)) else it.rowSummaries,
+            )
+        }
+        val draft = saved ?: return
+        viewModelScope.launch { runCatching { processor.saveReview(target.itemId, draft) } }
+    }
+
+    /** 지금 가림으로 만든 가린 사본 미리보기. 확인과 같은 굽기 함수를 쓰고 디스크에 쓰지 않는다. */
+    fun requestPreview(target: Route.Receipt) {
+        val processor = processors[target.draftId] ?: return
+        if (state.value.item(target)?.state != ItemState.Ready) return
+        val resolved = state.value.resolvedReview(target)
+        viewModelScope.launch {
+            val preview =
+                runCatching { processor.preview(target.itemId, resolved.maskLineIds, resolved.regions) }.getOrNull() ?: return@launch
+            mutableState.update {
+                val now = it.resolvedReview(target)
+                if (now.maskLineIds == resolved.maskLineIds &&
+                    now.regions == resolved.regions
+                ) {
+                    it.copy(previews = it.previews + (target to preview))
+                } else {
+                    it
+                }
+            }
+        }
+    }
+
+    /**
+     * "확인하고 다음": 지금 사진을 확인해 디스크에 남긴 뒤(가린 사본 또는 직접 입력), 목록 순서의 다음 Ready 사진을 연다.
+     * 다음이 없으면 목록으로 돌아가 남은 상태를 보인다. 값이 맞지 않으면 아무것도 저장하지 않는다.
+     */
+    fun confirmAndNext(target: Route.Receipt) {
+        val processor = processors[target.draftId] ?: return
+        val current = state.value
+        if (current.confirming != null) return
+        val item = current.item(target) ?: return
+        val resolved = current.resolvedReview(target)
+        val fields =
+            (ReviewForm.validate(resolved.date, resolved.amount, resolved.currency, resolved.merchant) as? Validation.Valid)?.fields
+                ?: return
+        mutableState.update { it.copy(confirming = target) }
+        viewModelScope.launch {
+            val ok =
+                runCatching {
+                    when (item.state) {
+                        ItemState.Ready -> processor.confirm(target.itemId, fields, resolved.maskLineIds, resolved.regions)
+                        ItemState.Failed -> processor.confirmManual(target.itemId, fields)
+                        else -> error("not reviewable")
+                    }
+                }.isSuccess
+            if (!ok) {
+                mutableState.update { it.copy(confirming = null) }
+                return@launch
+            }
+            val manifest = processor.snapshot()
+            val next = manifest.nextToReview(target.itemId)
+            mutableState.update {
+                it.copy(
+                    confirming = null,
+                    processing = it.processing + (manifest.draftId to manifest),
+                    reviewDrafts = it.reviewDrafts - target,
+                    previews = it.previews - target,
+                    reviewFinished = if (next == null) it.reviewFinished + target.draftId else it.reviewFinished,
+                )
+            }
+            if (backStack.lastOrNull() != target) return@launch
+            if (next != null) openReceipt(Route.Receipt(target.draftId, next.id)) else showOnly(Route.Home, Route.Draft(target.draftId))
+        }
+    }
 
     /** 올릴 곳과 장수를 묻는 최종 확인을 연다. 참여한 여행방, 로그인, 확인한 영수증이 있을 때만 연다. */
     fun requestUpload(draftId: String) {
@@ -241,13 +516,13 @@ class AppViewModel(
                 val fields = item.receipt.fields
                 val upload =
                     ReceiptExpenseUpload(
-                        requestId = ReceiptExpenseUpload.requestId(room.id, item.receipt.artifactSha256),
+                        requestId = ReceiptExpenseUpload.requestId(room.id, item.artifactSha256),
                         date = fields.date,
                         amountMinor = fields.amountMinor,
                         currency = fields.currency,
                         merchant = fields.merchant,
                         artifactPng = item.artifactPng,
-                        artifactSha256 = item.receipt.artifactSha256,
+                        artifactSha256 = item.artifactSha256,
                     )
                 val failure =
                     try {

@@ -5,6 +5,7 @@ import app.nonanona.feature.receiptimport.BoundaryViolation
 import app.nonanona.feature.receiptimport.DraftSource
 import app.nonanona.feature.receiptimport.IncomingPhoto
 import app.nonanona.feature.receiptimport.ItemState
+import app.nonanona.feature.receiptimport.MaskRegion
 import app.nonanona.feature.receiptimport.OcrLine
 import app.nonanona.feature.receiptimport.OcrResult
 import app.nonanona.feature.receiptimport.PngChunks
@@ -15,6 +16,9 @@ import app.nonanona.feature.receiptimport.ReceiptDraftStore
 import app.nonanona.feature.receiptimport.ReceiptFlattener
 import app.nonanona.feature.receiptimport.ReceiptProcessor
 import app.nonanona.feature.receiptimport.ReceiptRecognizer
+import app.nonanona.feature.receiptimport.ReviewDraft
+import app.nonanona.feature.receiptimport.ReviewForm
+import app.nonanona.feature.receiptimport.Validation
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -197,9 +201,9 @@ class ReceiptProcessorTest {
             val receipt = processor.confirm(id, proposal.fields, proposal.suggestedMaskLineIds.toSet())
             val outbound = processor.outboundReceipts()
             assertEquals(listOf(receipt), outbound.map { it.receipt })
-            assertArrayEquals(store.artifactFile(draft.id, receipt.artifactFileName).readBytes(), outbound.single().artifactPng)
+            assertArrayEquals(store.artifactFile(draft.id, receipt.artifactFileName!!).readBytes(), outbound.single().artifactPng)
 
-            val artifact = store.artifactFile(draft.id, receipt.artifactFileName).readBytes()
+            val artifact = store.artifactFile(draft.id, receipt.artifactFileName!!).readBytes()
             val original = store.photoFile(draft.id, draft.photos[0].name).readBytes()
             assertFalse(artifact.contentEquals(original))
             assertTrue(PngChunks.allowed.containsAll(PngChunks.names(artifact)))
@@ -223,7 +227,7 @@ class ReceiptProcessorTest {
             assertTrue(ink > 0)
 
             // 가림 사본이 원본으로 바뀌면 내보내지 않는다.
-            store.artifactFile(draft.id, receipt.artifactFileName).writeBytes(original)
+            store.artifactFile(draft.id, receipt.artifactFileName!!).writeBytes(original)
             try {
                 processor.outboundReceipts()
                 fail("boundary must fail closed")
@@ -259,5 +263,154 @@ class ReceiptProcessorTest {
             expect(
                 ProcessorError.WrongState,
             ) { processor.confirm(items[1].id, AllowedReceiptFields("2026-11-03", 100, "JPY", null), emptySet()) }
+        }
+
+    /**
+     * 제안이 놓친 민감한 줄(전화·카드)을 사용자가 고친다: 전화 줄은 OCR 줄로, 카드 줄은 직접 더한 띠로 가린다.
+     * 미리보기와 확인한 사본이 같은 바이트이고, 두 줄 모두 검정이다. 미리보기는 디스크에 쓰지 않는다(iOS와 같은 경우).
+     */
+    @Test
+    fun correctedMissedMasksAreBakedLikeThePreview() =
+        runBlocking {
+            val store = ReceiptDraftStore(tmp.newFolder())
+            val draft = store.create(DraftSource.Share, listOf(fixture(0)))
+            val processor = processor(store, TruthRecognizer())
+            processor.run()
+            val id =
+                processor
+                    .snapshot()
+                    .items
+                    .single()
+                    .id
+            val tel =
+                processor
+                    .proposal(id)
+                    .ocr.lines
+                    .first { it.text.contains("TEL") }
+            val region = MaskRegion.of("card", 79, 6)
+
+            val preview = processor.preview(id, setOf(tel.id), listOf(region))
+            assertEquals(2, preview.maskCount)
+            assertEquals(
+                ItemState.Ready,
+                store
+                    .loadProcessing(draft.id)!!
+                    .items
+                    .single()
+                    .state,
+            )
+            assertFalse("미리보기는 디스크에 쓰지 않는다", store.artifactFile(draft.id, "$id.png").exists())
+
+            val proposal = processor.proposal(id)
+            val receipt = processor.confirm(id, proposal.fields, setOf(tel.id), listOf(region))
+            val artifact = store.artifactFile(draft.id, receipt.artifactFileName!!).readBytes()
+            assertArrayEquals("보여 준 미리보기와 같은 사본", preview.pngBytes, artifact)
+            val image = ImageIO.read(artifact.inputStream())
+
+            fun black(y: Int) = (0 until image.width step image.width / 10).all { image.getRGB(it, y) and 0xFFFFFF == 0 }
+            for (y in 166 until 188) assertTrue("TEL $y", black(y))
+            for (y in 597 until 621) assertTrue("card $y", black(y))
+            assertFalse("다른 줄은 그대로", black(400))
+        }
+
+    /** 읽지 못한 사진: 다시 읽어도 실패 → 직접 입력 값이 다시 읽기를 지나도 남고 → 사본 없이 확인 → 경계는 내보내지 않는다. */
+    @Test
+    fun manualEntrySurvivesRetryAndNeverLeavesDevice() =
+        runBlocking {
+            val store = ReceiptDraftStore(tmp.newFolder())
+            val draft = store.create(DraftSource.Share, listOf(fixture(0), fixture(9)))
+            val processor = processor(store, TruthRecognizer())
+            processor.run()
+            val failed =
+                processor
+                    .snapshot()
+                    .items
+                    .single { it.state == ItemState.Failed }
+                    .id
+            processor.saveReview(failed, ReviewDraft(date = "2026-11-08", amount = "1760", merchant = "ゆきみ茶屋"))
+            processor.retry(failed)
+            assertEquals("다시 읽는 중에도 직접 입력이 남는다", "1760", processor.review(failed)?.amount)
+            processor.run()
+            assertEquals(
+                2,
+                processor
+                    .snapshot()
+                    .items
+                    .single { it.id == failed }
+                    .attempts,
+            )
+            val resolved = processor.review(failed)!!.resolved(null)
+            assertEquals("JPY", resolved.currency)
+            val fields =
+                (
+                    ReviewForm.validate(
+                        resolved.date,
+                        resolved.amount,
+                        resolved.currency,
+                        resolved.merchant,
+                    ) as Validation.Valid
+                ).fields
+            val manual = processor.confirmManual(failed, fields)
+            assertTrue(manual.isManualEntry)
+            assertEquals(
+                ItemState.Confirmed,
+                store
+                    .loadProcessing(draft.id)!!
+                    .items
+                    .single { it.id == failed }
+                    .state,
+            )
+            assertFalse("확인하면 검토 입력을 지운다", store.reviewFile(draft.id, failed).exists())
+            assertTrue("직접 입력(사본 없음)은 내보내지 않는다", processor.outboundReceipts().isEmpty())
+
+            val ready =
+                processor
+                    .snapshot()
+                    .items
+                    .single { it.state == ItemState.Ready }
+                    .id
+            val proposal = processor.proposal(ready)
+            processor.confirm(ready, proposal.fields, proposal.suggestedMaskLineIds.toSet())
+            assertEquals(listOf(ready), processor.outboundReceipts().map { it.receipt.itemId })
+        }
+
+    @Test
+    fun reviewDraftIsDurableAndOverridesOnlyWhatUserChanged() =
+        runBlocking {
+            val store = ReceiptDraftStore(tmp.newFolder())
+            store.create(DraftSource.Share, listOf(fixture(0)))
+            val processor = processor(store, TruthRecognizer())
+            processor.run()
+            val id =
+                processor
+                    .snapshot()
+                    .items
+                    .single()
+                    .id
+            processor.saveReview(id, ReviewDraft(amount = "1500", regions = listOf(MaskRegion.of("r", 10))))
+            // 처리기를 새로 만든다(앱 종료 뒤 다시 열기와 같다).
+            val reopened = processor(store, TruthRecognizer())
+            val proposal = reopened.proposal(id)
+            val resolved = reopened.review(id)!!.resolved(proposal)
+            assertEquals("1500", resolved.amount)
+            assertEquals("고치지 않은 값은 제안 그대로", "2026-11-03", resolved.date)
+            assertEquals(listOf(10), resolved.regions.map { it.topPercent })
+            assertEquals(proposal.suggestedMaskLineIds.toSet(), resolved.maskLineIds)
+            val fields =
+                (
+                    ReviewForm.validate(
+                        resolved.date,
+                        resolved.amount,
+                        resolved.currency,
+                        resolved.merchant,
+                    ) as Validation.Valid
+                ).fields
+            reopened.confirm(id, fields, resolved.maskLineIds, resolved.regions)
+            try {
+                reopened.saveReview(id, ReviewDraft())
+                fail("확인한 사진은 고칠 수 없다")
+            } catch (e: ProcessorException) {
+                assertEquals(ProcessorError.WrongState, e.error)
+            }
         }
 }

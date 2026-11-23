@@ -107,6 +107,11 @@ class ReceiptDraftStore(
         itemId: String,
     ) = File(File(draftsDir, id), "proposals/$itemId.json")
 
+    fun reviewFile(
+        id: String,
+        itemId: String,
+    ) = File(File(draftsDir, id), "reviews/$itemId.json")
+
     fun artifactFile(
         id: String,
         fileName: String,

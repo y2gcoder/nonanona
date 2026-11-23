@@ -46,6 +46,13 @@ object DebugUploadSection : DebugUploadUi {
                 modifier = Modifier.testTag("upload_destination"),
             )
             Text(stringResource(R.string.debug_upload_count, context.confirmedCount), style = TextRoles.supporting)
+            if (context.manualEntryCount > 0) {
+                Text(
+                    stringResource(R.string.debug_upload_manual_excluded, context.manualEntryCount),
+                    style = TextRoles.supporting,
+                    modifier = Modifier.testTag("upload_manual_excluded"),
+                )
+            }
             status(context.state)?.let { (text, isError) ->
                 Text(
                     text,

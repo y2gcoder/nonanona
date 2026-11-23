@@ -35,9 +35,15 @@ import app.nonanona.design.TextRoles
 import app.nonanona.design.rememberPaneDirective
 import app.nonanona.feature.account.LoginSheet
 import app.nonanona.feature.account.LoginState
+import app.nonanona.feature.receiptimport.DraftReviewState
 import app.nonanona.feature.receiptimport.DraftScreen
 import app.nonanona.feature.receiptimport.DraftSource
+import app.nonanona.feature.receiptimport.ItemState
 import app.nonanona.feature.receiptimport.ReceiptDraftStore
+import app.nonanona.feature.receiptimport.ReceiptReviewActions
+import app.nonanona.feature.receiptimport.ReceiptReviewContent
+import app.nonanona.feature.receiptimport.ReceiptReviewScreen
+import app.nonanona.feature.receiptimport.count
 import app.nonanona.feature.trip.InviteScreen
 import app.nonanona.feature.trip.TripRoomScreen
 
@@ -85,7 +91,7 @@ fun NonanonaApp(viewModel: AppViewModel) {
                     HomeScreen(
                         state = state,
                         snackbarHostState = snackbarFor(Route.Home),
-                        selectedDraftId = (top as? Route.Draft)?.id.takeIf { twoPane },
+                        selectedDraftId = ((top as? Route.Draft)?.id ?: (top as? Route.Receipt)?.draftId).takeIf { twoPane },
                         onPickPhotos = { pickPhotos.launch(PickVisualMediaRequest(PickVisualMedia.ImageOnly)) },
                         onOpenDraft = { viewModel.openDetail(Route.Draft(it)) },
                         onOpenInvite = { viewModel.openDetail(Route.Invite) },
@@ -95,7 +101,14 @@ fun NonanonaApp(viewModel: AppViewModel) {
                     DraftScreen(
                         draft = state.drafts.firstOrNull { it.id == route.id },
                         processing = state.processing[route.id],
+                        review =
+                            DraftReviewState(
+                                rowSummaries = state.rowSummaries.filterKeys { it.draftId == route.id }.mapKeys { it.key.itemId },
+                                finished = route.id in state.reviewFinished,
+                            ),
                         snackbarHostState = snackbarFor(route),
+                        onOpen = { viewModel.openReceipt(Route.Receipt(route.id, it)) },
+                        onStartReview = { viewModel.startReview(route.id) },
                         onRetry = { viewModel.retryPhoto(route.id, it) },
                         debugConfirmLabel = viewModel.debugConfirmLabel,
                         onDebugConfirm = { viewModel.debugConfirm(route.id, it) },
@@ -107,6 +120,7 @@ fun NonanonaApp(viewModel: AppViewModel) {
                                         DraftUploadContext(
                                             destination = state.room,
                                             confirmedCount = state.confirmedCount(route.id),
+                                            manualEntryCount = state.manualEntryCount(route.id),
                                             state = state.uploads[route.id] ?: UploadState.Idle,
                                             signedIn = state.session != null,
                                             onRequest = { viewModel.requestUpload(route.id) },
@@ -116,6 +130,45 @@ fun NonanonaApp(viewModel: AppViewModel) {
                                 }
                             },
                     )
+                }
+                // 영수증 검토는 세 번째 칸(extra)이다. 두 칸이면 영수증 목록(초안) 옆, 한 칸이면 그 위에 쌓인다.
+                entry<Route.Receipt>(metadata = ListDetailSceneStrategy.extraPane()) { route ->
+                    val item = state.item(route)
+                    val draft = state.drafts.firstOrNull { it.id == route.draftId }
+                    val manifest = state.processing[route.draftId]
+                    if (item != null && draft != null && manifest != null) {
+                        ReceiptReviewScreen(
+                            content =
+                                ReceiptReviewContent(
+                                    item = item,
+                                    photo = draft.photos[item.position - 1],
+                                    proposal = state.proposals[route],
+                                    review = state.resolvedReview(route),
+                                    problems =
+                                        if (item.state == ItemState.Ready || item.state == ItemState.Failed) {
+                                            state.fieldProblems(route)
+                                        } else {
+                                            emptySet()
+                                        },
+                                    preview = state.previews[route],
+                                    confirmedArtifact = state.confirmedArtifacts[route],
+                                    confirmedCount = manifest.count(ItemState.Confirmed),
+                                    totalCount = manifest.items.size,
+                                    busy = state.confirming != null,
+                                    showsMaskedPreview = state.showsMaskedPreview,
+                                ),
+                            actions =
+                                ReceiptReviewActions(
+                                    edit = { viewModel.edit(route, it) },
+                                    requestPreview = { viewModel.requestPreview(route) },
+                                    retry = { viewModel.retryPhoto(route.draftId, route.itemId) },
+                                    confirmAndNext = { viewModel.confirmAndNext(route) },
+                                    setShowsMaskedPreview = viewModel::setShowsMaskedPreview,
+                                ),
+                            snackbarHostState = snackbarFor(route),
+                            onBack = viewModel::back.takeUnless { twoPane },
+                        )
+                    }
                 }
                 entry<Route.Invite>(metadata = ListDetailSceneStrategy.detailPane()) {
                     InviteScreen(

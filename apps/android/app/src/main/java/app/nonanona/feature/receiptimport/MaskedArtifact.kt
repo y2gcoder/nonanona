@@ -23,7 +23,7 @@ class MaskedArtifact private constructor(
     val sha256: String = ProposalBuilder.sha256Hex(pngBytes)
 
     companion object {
-        /** 확인한 경우에만 부른다. 그리기에 필요한 PNG 청크만 남긴다. */
+        /** 확인(사본)과 검토 화면 미리보기만 부른다. 그리기에 필요한 PNG 청크만 남긴다. */
         fun flatten(
             flattener: ReceiptFlattener,
             original: File,
@@ -47,6 +47,16 @@ object Masking {
             intArrayOf(0, floor(top - pad).toInt().coerceAtLeast(0), width, ceil(bottom + pad).toInt().coerceAtMost(height))
         }
 }
+
+/** 사용자가 더한 띠(정수 퍼센트)를 픽셀 사각형으로. 위는 내림, 아래는 올림이라 경계 픽셀까지 덮는다(iOS와 같음). */
+fun Masking.regionRects(
+    regions: List<MaskRegion>,
+    width: Int,
+    height: Int,
+): List<IntArray> =
+    regions.map { region ->
+        intArrayOf(0, region.topPercent * height / 100, width, minOf(height, (region.bottomPercent * height + 99) / 100))
+    }
 
 /** 그리기에 필요한 PNG 청크만 남긴다(eXIf, tEXt, iTXt, iCCP, tIME 등 제거). */
 object PngChunks {

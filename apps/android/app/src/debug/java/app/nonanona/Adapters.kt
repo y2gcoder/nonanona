@@ -58,7 +58,7 @@ private fun debugFlag(
     return Properties().apply { file.reader(Charsets.UTF_8).use { load(it) } }.getProperty(name) == "true"
 }
 
-/** 검증용: files/debug-processing.properties(delayMillisPerItem, failFirstAttemptAtPosition)가 있으면 읽는다. */
+/** 검증용: files/debug-processing.properties(delayMillisPerItem, failFirstAttemptAtPosition, dropSuggestionsAtPosition)가 있으면 읽는다. */
 private fun processingHooks(context: Context): ProcessingHooks {
     val file = File(context.filesDir, "debug-processing.properties")
     if (!file.isFile) return ProcessingHooks()
@@ -66,6 +66,7 @@ private fun processingHooks(context: Context): ProcessingHooks {
     return ProcessingHooks(
         delayMillisPerItem = p.getProperty("delayMillisPerItem")?.toLongOrNull() ?: 0,
         failFirstAttemptAtPosition = p.getProperty("failFirstAttemptAtPosition")?.toIntOrNull(),
+        dropSuggestionsAtPosition = p.getProperty("dropSuggestionsAtPosition")?.toIntOrNull(),
     )
 }
 

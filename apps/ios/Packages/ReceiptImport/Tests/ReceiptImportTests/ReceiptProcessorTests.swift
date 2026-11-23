@@ -173,7 +173,7 @@ struct ReceiptProcessorTests {
     let receipt = try await processor.confirm(
       id, fields: proposal.fields, maskLineIDs: Set(proposal.suggestedMaskLineIDs))
 
-    let artifact = try Data(contentsOf: store.artifactURL(draft.id, receipt.artifactFileName))
+    let artifact = try Data(contentsOf: store.artifactURL(draft.id, try #require(receipt.artifactFileName)))
     let original = try Data(contentsOf: fixtures.appending(path: t.file))
     #expect(artifact != original)
     #expect(Set(try PNGChunks.names(artifact)).isSubset(of: PNGChunks.allowed))
@@ -214,12 +214,12 @@ struct ReceiptProcessorTests {
     let receipt = try await processor.confirm(id, fields: proposal.fields, maskLineIDs: [])
     let outbound = try await processor.outboundReceipts()
     #expect(outbound.map(\.receipt) == [receipt], "확인한 한 장만")
-    let stored = try Data(contentsOf: store.artifactURL(draft.id, receipt.artifactFileName))
+    let stored = try Data(contentsOf: store.artifactURL(draft.id, try #require(receipt.artifactFileName)))
     #expect(outbound.first?.artifactPNG == stored)
 
     // 가림 사본이 원본으로 바뀌면 내보내지 않는다.
     let original = try Data(contentsOf: store.photoURL(draft.id, draft.photoFileNames[0]))
-    try original.write(to: store.artifactURL(draft.id, receipt.artifactFileName))
+    try original.write(to: store.artifactURL(draft.id, receipt.artifactFileName!))
     await #expect(throws: BoundaryViolation.artifactHashMismatch) { try await processor.outboundReceipts() }
   }
 

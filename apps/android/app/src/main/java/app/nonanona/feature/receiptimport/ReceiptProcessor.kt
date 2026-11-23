@@ -74,7 +74,16 @@ class ReceiptProcessor(
                         throw ProcessingException(ProcessingFailure.RecognitionError)
                     }
                     val file = store.photoFile(draftId, item.photoFileName)
-                    Result.success(ProposalBuilder.make(runInterruptible(dispatcher) { recognizer.recognize(file) }))
+                    val proposal = ProposalBuilder.make(runInterruptible(dispatcher) { recognizer.recognize(file) })
+                    Result.success(
+                        if (hooks.dropSuggestionsAtPosition ==
+                            item.position
+                        ) {
+                            proposal.copy(suggestedMaskLineIds = emptyList())
+                        } else {
+                            proposal
+                        },
+                    )
                 } catch (e: CancellationException) {
                     // 디스크에는 Processing으로 남는다. 다음에 처리기를 만들 때 대기열로 돌아간다.
                     throw e
@@ -101,42 +110,113 @@ class ReceiptProcessor(
             OcrProposal.fromJson(store.proposalFile(draftId, id).readText())
         }
 
-    /** 가림을 픽셀에 굽는 유일한 경로. 사용자가 값과 가림을 확인했을 때만 부른다. */
+    /** 검토 중인 입력(값·가림). 확인하면 지운다. 기기 안 초안 폴더에만 있다. */
+    suspend fun review(id: String): ReviewDraft? =
+        mutex.withLock {
+            find(id, ItemState.Queued, ItemState.Processing, ItemState.Ready, ItemState.Failed)
+            store.reviewFile(draftId, id).takeIf { it.isFile }?.let { ReviewDraft.fromJson(it.readText()) }
+        }
+
+    /** 고칠 때마다 원자적으로 쓴다. 다시 읽는 중에도(직접 입력하던 값) 쓸 수 있고, 확인한 사진은 고칠 수 없다. */
+    suspend fun saveReview(
+        id: String,
+        review: ReviewDraft,
+    ) = mutex.withLock {
+        find(id, ItemState.Queued, ItemState.Processing, ItemState.Ready, ItemState.Failed)
+        store.writeAtomic(store.reviewFile(draftId, id), review.toJson().toByteArray())
+    }
+
+    /** 확인하면 만들어질 가린 사본을 보여 주기 위한 미리보기. 같은 굽기 함수를 쓰지만 디스크에 쓰지 않는다. */
+    suspend fun preview(
+        id: String,
+        maskLineIds: Set<Int>,
+        regions: List<MaskRegion>,
+    ): MaskPreview =
+        mutex.withLock {
+            val item = find(id, ItemState.Ready)
+            MaskPreview(flatten(item, maskLineIds, regions).pngBytes, maskLineIds.size + regions.size)
+        }
+
+    /**
+     * 가림을 픽셀에 굽는 유일한 경로. 사용자가 값과 가림을 확인했을 때만 부른다.
+     * 가림은 고른 OCR 줄과 사용자가 더한 띠(regions, OCR이 찾지 못한 곳)다.
+     */
     suspend fun confirm(
         id: String,
         fields: AllowedReceiptFields,
         maskLineIds: Set<Int>,
+        regions: List<MaskRegion> = emptyList(),
     ): ConfirmedReceipt =
         mutex.withLock {
             val item = find(id, ItemState.Ready)
-            if (ProposalBuilder.isoDate(fields.date) != fields.date || fields.amountMinor <= 0 || fields.currency.length != 3) {
-                throw ProcessorException(ProcessorError.InvalidFields)
-            }
-            val proposal = OcrProposal.fromJson(store.proposalFile(draftId, id).readText())
-            val rects = Masking.rects(proposal.ocr.lines, maskLineIds, proposal.ocr.pixelWidth, proposal.ocr.pixelHeight)
-            val artifact =
-                runInterruptible(dispatcher) {
-                    MaskedArtifact.flatten(flattener, store.photoFile(draftId, item.photoFileName), rects)
-                }
+            check(fields)
+            val artifact = flatten(item, maskLineIds, regions)
             val fileName = "$id.png"
             store.writeAtomic(store.artifactFile(draftId, fileName), artifact.pngBytes)
             val receipt = ConfirmedReceipt(id, fields, fileName, artifact.sha256)
             replace(item.copy(state = ItemState.Confirmed, confirmed = receipt))
+            store.reviewFile(draftId, id).delete()
             receipt
         }
 
+    /** 읽지 못한 사진에 사용자가 값을 직접 입력해 확인한다. 사본을 만들지 않으므로 사진은 기기 밖으로 나가지 않는다. */
+    suspend fun confirmManual(
+        id: String,
+        fields: AllowedReceiptFields,
+    ): ConfirmedReceipt =
+        mutex.withLock {
+            val item = find(id, ItemState.Failed)
+            check(fields)
+            val receipt = ConfirmedReceipt(id, fields, null, null)
+            replace(item.copy(state = ItemState.Confirmed, failure = null, confirmed = receipt))
+            store.reviewFile(draftId, id).delete()
+            receipt
+        }
+
+    /** 확인한 사진의 가린 사본(기기 안). 검토 화면이 확인한 결과를 보여 줄 때만 쓴다. */
+    suspend fun confirmedArtifact(id: String): ByteArray? =
+        mutex.withLock {
+            val name = find(id, ItemState.Confirmed).confirmed?.artifactFileName ?: return@withLock null
+            store.artifactFile(draftId, name).readBytes()
+        }
+
+    private fun check(fields: AllowedReceiptFields) {
+        val valid =
+            ReviewForm.validate(
+                fields.date,
+                ReviewForm.amountText(fields.amountMinor, fields.currency),
+                fields.currency,
+                fields.merchant.orEmpty(),
+            )
+        if (valid !is Validation.Valid || valid.fields != fields) throw ProcessorException(ProcessorError.InvalidFields)
+    }
+
+    private suspend fun flatten(
+        item: ProcessingItem,
+        maskLineIds: Set<Int>,
+        regions: List<MaskRegion>,
+    ): MaskedArtifact {
+        val proposal = OcrProposal.fromJson(store.proposalFile(draftId, item.id).readText())
+        val (width, height) = proposal.ocr.pixelWidth to proposal.ocr.pixelHeight
+        val rects = Masking.rects(proposal.ocr.lines, maskLineIds, width, height) + Masking.regionRects(regions, width, height)
+        return runInterruptible(dispatcher) { MaskedArtifact.flatten(flattener, store.photoFile(draftId, item.photoFileName), rects) }
+    }
+
     /**
-     * 기기 밖으로 보낼 수 있는 것: 확인한 영수증만. 가림 사본이 확인 당시와 같고, 허용한 PNG 청크만 있고,
+     * 기기 밖으로 보낼 수 있는 것: 가린 사본이 있는 확인한 영수증만. 가림 사본이 확인 당시와 같고, 허용한 PNG 청크만 있고,
      * 원본과 다른 바이트인지 다시 확인한다. 하나라도 어긋나면 아무것도 돌려주지 않는다.
      */
     suspend fun outboundReceipts(): List<OutboundReceipt> =
         mutex.withLock {
             manifest.items.mapNotNull { item ->
                 val receipt = item.confirmed?.takeIf { item.state == ItemState.Confirmed } ?: return@mapNotNull null
-                val artifact = store.artifactFile(draftId, receipt.artifactFileName)
+                // 직접 입력한 값(사본 없음)은 이번 단계에서 기기 밖으로 보내지 않는다(서버가 사본 없는 지출을 받지 않는다).
+                val fileName = receipt.artifactFileName ?: return@mapNotNull null
+                val expected = receipt.artifactSha256 ?: return@mapNotNull null
+                val artifact = store.artifactFile(draftId, fileName)
                 if (!artifact.isFile) throw BoundaryViolation("artifact_missing")
                 val bytes = artifact.readBytes()
-                if (ProposalBuilder.sha256Hex(bytes) != receipt.artifactSha256) throw BoundaryViolation("artifact_hash_mismatch")
+                if (ProposalBuilder.sha256Hex(bytes) != expected) throw BoundaryViolation("artifact_hash_mismatch")
                 PngChunks.names(bytes).firstOrNull { it !in PngChunks.allowed }?.let {
                     throw BoundaryViolation("disallowed_png_chunk")
                 }
@@ -144,7 +224,7 @@ class ReceiptProcessor(
                     throw BoundaryViolation("artifact_equals_original")
                 }
                 // 검사한 바이트를 그대로 넘긴다. 검사 뒤에 파일을 다시 읽지 않는다.
-                OutboundReceipt(receipt, bytes)
+                OutboundReceipt(receipt, bytes, expected)
             }
         }
 

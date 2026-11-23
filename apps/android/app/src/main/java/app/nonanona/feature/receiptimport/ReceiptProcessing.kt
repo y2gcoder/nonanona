@@ -47,13 +47,18 @@ data class AllowedReceiptFields(
     }
 }
 
-/** 사용자가 확인한 영수증: 허용 필드와 가림을 구운 사본의 위치·해시. 원본과 OCR 전문은 들어가지 않는다. */
+/**
+ * 사용자가 확인한 영수증: 허용 필드와 가림을 구운 사본의 위치·해시. 원본과 OCR 전문은 들어가지 않는다.
+ * 읽지 못한 사진에 값을 직접 입력해 확인하면 사본이 없다(artifactFileName == null). 이 경우 사진은 기기 밖으로 나가지 않는다.
+ */
 data class ConfirmedReceipt(
     val itemId: String,
     val fields: AllowedReceiptFields,
-    val artifactFileName: String,
-    val artifactSha256: String,
+    val artifactFileName: String?,
+    val artifactSha256: String?,
 ) {
+    val isManualEntry: Boolean get() = artifactFileName == null
+
     fun toJson(): JSONObject =
         JSONObject()
             .put("itemId", itemId)
@@ -66,16 +71,17 @@ data class ConfirmedReceipt(
             ConfirmedReceipt(
                 o.getString("itemId"),
                 AllowedReceiptFields.fromJson(o.getJSONObject("fields")),
-                o.getString("artifactFileName"),
-                o.getString("artifactSha256"),
+                if (o.isNull("artifactFileName")) null else o.getString("artifactFileName"),
+                if (o.isNull("artifactSha256")) null else o.getString("artifactSha256"),
             )
     }
 }
 
-/** 기기 밖으로 보낼 수 있는 한 건: 확인한 영수증과, 경계 검사를 통과한 가림 사본 바이트. */
+/** 기기 밖으로 보낼 수 있는 한 건: 확인한 영수증과, 경계 검사를 통과한 가림 사본 바이트·해시. */
 class OutboundReceipt(
     val receipt: ConfirmedReceipt,
     val artifactPng: ByteArray,
+    val artifactSha256: String,
 )
 
 enum class ItemState { Queued, Processing, Ready, Failed, Confirmed }
@@ -146,6 +152,8 @@ data class ProcessingManifest(
 data class ProcessingHooks(
     val delayMillisPerItem: Long = 0,
     val failFirstAttemptAtPosition: Int? = null,
+    /** 이 위치 사진의 가림 제안을 비운다(제안이 민감한 줄을 놓친 경우를 재현). */
+    val dropSuggestionsAtPosition: Int? = null,
 )
 
 enum class ProcessorError { ItemNotFound, WrongState, InvalidFields }

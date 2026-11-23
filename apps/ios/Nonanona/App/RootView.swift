@@ -20,7 +20,15 @@ struct RootView: View {
         // 목록을 숨겨 고른 화면이 창 전체(접히는 부분 포함)를 쓰는 일이 없게 한다. 두 열은 시스템이 접힘에 맞춘다.
         .toolbar(removing: .sidebarToggle)
     } detail: {
-      detail
+      // 상세 열 안의 쌓기: 초안(영수증 목록) 위에 영수증 검토를 올린다. 좁은 창에서는 분할 보기가 목록 위에 이어 쌓는다.
+      NavigationStack {
+        detail
+          .navigationDestination(item: $model.reviewing) { target in
+            // 모델을 자기 body에서 읽는 뷰로 둔다. 목적지 클로저는 모델이 바뀌어도 다시 불리지 않아, 값을 클로저에서 만들면
+            // 화면이 예전 값에 머물고 입력 칸이 그 값(빈 글자)을 다시 써 버린다(시뮬레이터에서 재현).
+            ReviewDestination(model: model, target: target).id(target)
+          }
+      }
     }
     .navigationSplitViewStyle(.balanced)
     .tint(.primary)
@@ -58,6 +66,11 @@ struct RootView: View {
         DraftView(
           draft: draft, photoURLs: model.graph.drafts.photoURLs(of: draft),
           processing: model.processing[draft.id],
+          rowSummary: { model.rowSummaries[ReviewTarget(draftID: draft.id, itemID: $0)] },
+          reviewFinished: model.reviewFinished.contains(draft.id),
+          manualEntryCount: model.manualEntryCount(draftID: draft.id),
+          onOpen: { model.openReview(ReviewTarget(draftID: draft.id, itemID: $0)) },
+          onStartReview: { model.startReview(draftID: draft.id) },
           onRetry: { model.retryPhoto(draftID: draft.id, itemID: $0) },
           onDebugConfirm: debugConfirm(draft.id),
           upload: DraftUploadContext(
@@ -83,6 +96,38 @@ struct RootView: View {
       }
     case nil:
       DetailPlaceholder()
+    }
+  }
+}
+
+/// 검토 화면 목적지. 모델(@Observable)을 body에서 읽어, 처리 상태·입력이 바뀌면 다시 그린다.
+private struct ReviewDestination: View {
+  @Bindable var model: AppModel
+  let target: ReviewTarget
+
+  var body: some View {
+    if let item = model.item(target), let draft = model.drafts.first(where: { $0.id == target.draftID }),
+      let manifest = model.processing[target.draftID]
+    {
+      ReceiptReviewView(
+        content: ReceiptReviewContent(
+          item: item,
+          photoURL: model.graph.drafts.photoURLs(of: draft)[item.position - 1],
+          proposal: model.proposals[target],
+          review: model.resolvedReview(target),
+          problems: item.state == .ready || item.state == .failed ? model.fieldProblems(target) : [],
+          preview: model.previews[target],
+          confirmedArtifact: model.confirmedArtifacts[target],
+          confirmedCount: manifest.count(.confirmed),
+          totalCount: manifest.items.count,
+          readyCount: manifest.count(.ready),
+          busy: model.confirming != nil),
+        showsMaskedPreview: $model.showsMaskedPreview,
+        actions: ReceiptReviewActions(
+          edit: { model.edit(target, $0) },
+          requestPreview: { model.requestPreview(target) },
+          retry: { model.retryPhoto(draftID: target.draftID, itemID: target.itemID) },
+          confirmAndNext: { Task { await model.confirmAndNext(target) } }))
     }
   }
 }

@@ -58,7 +58,8 @@ final class ReceiptReviewUITests: XCTestCase {
     if status.exists && (status.label == "대기 중" || status.label == "읽는 중") { snapshot("ios-review-retrying") }
     waitFor(timeout: 60) { status.exists && status.label == "읽지 못함" }
     XCTAssertEqual(scrollTo(app.textFields["review-amount"]).value as? String, "1760", "다시 읽기를 지나도 입력이 남는다")
-    replaceText(app.textFields["review-date"], "2026-11-08")
+    // 일본어 자판에서 붙여넣은 것 같은 전각 날짜. 앱이 2026-11-08로 맞춘다(디스크 값은 스크립트가 확인).
+    replaceText(app.textFields["review-date"], "２０２６－１１－０８")
     dismissKeyboard()
     waitFor(timeout: 5) { confirm.isEnabled }
     snapshot("ios-review-manual-entry")
@@ -138,6 +139,28 @@ final class ReceiptReviewUITests: XCTestCase {
     replaceText(scrollTo(app.textFields["review-amount"]), "999")
     dismissKeyboard()
     snapshot("ios-review-before-kill")
+  }
+
+  /// 저장 실패 주입(스크립트가 `debug-fail-writes`에 `reviews/`를 적음): 입력을 고치면 저장하지 못했다고 알리고, 화면 입력은 남는다.
+  func testV6b_DraftSaveFailureIsSurfaced() throws {
+    app.activate()
+    replaceText(scrollTo(app.textFields["review-amount"]), "888")
+    dismissKeyboard()
+    XCTAssertTrue(app.staticTexts["review-save-error"].waitForExistence(timeout: 10))
+    XCTAssertEqual(app.textFields["review-amount"].value as? String, "888", "저장하지 못해도 화면의 입력은 남는다")
+    snapshot("ios-review-save-failed")
+  }
+
+  /// 확인 저장 실패 주입(`processing.json`도): "확인하고 다음"이 확인을 남기지 못했다고 알리고, 같은 사진에 머문다.
+  func testV6c_ConfirmFailureKeepsReceiptUnconfirmed() throws {
+    app.activate()
+    let title = currentTitle()
+    app.buttons["review-confirm-next"].tap()
+    XCTAssertTrue(app.staticTexts["review-confirm-error"].waitForExistence(timeout: 10))
+    XCTAssertEqual(currentTitle(), title, "다음 사진으로 가지 않는다")
+    snapshot("ios-review-confirm-failed")
+    XCTAssertEqual(scrollTo(app.staticTexts["review-progress"]).label, "확인 3/10")
+    XCTAssertEqual(app.staticTexts["review-status"].label, "확인 필요")
   }
 
   /// 다시 연 뒤: 확인 3장이 남고, "확인할 영수증 검토"가 목록 순서의 첫 확인 필요 사진(입력하던 값 그대로)을 연다.

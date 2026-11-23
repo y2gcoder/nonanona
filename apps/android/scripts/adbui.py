@@ -42,6 +42,31 @@ def dump():
     raise RuntimeError("uiautomator dump failed")
 
 
+def dump_windows():
+    """모든 창(입력기 포함)의 노드. 화면 자판의 키는 content-desc로 나온다."""
+    for _ in range(6):
+        out = sh("uiautomator dump --windows /sdcard/uiw.xml >/dev/null 2>&1; cat /sdcard/uiw.xml", check=False)
+        if out.startswith("<?xml"):
+            return [Node(e) for e in ET.fromstring(out).iter("node")]
+        time.sleep(0.5)
+    raise RuntimeError("uiautomator dump --windows failed")
+
+
+def ime_type(text):
+    """화면 자판(Gboard)의 키를 눌러 입력한다. adb input text와 달리 실제 입력기를 거친다."""
+    for ch in text:
+        key = None
+        for _ in range(6):
+            key = next((n for n in dump_windows() if n.desc == ch), None)
+            if key:
+                break
+            time.sleep(0.5)
+        if key is None:
+            raise TimeoutError(f"no onscreen key {ch!r}")
+        sh(f"input tap {key.center[0]} {key.center[1]}")
+        time.sleep(0.3)
+
+
 def find(nodes=None, *, id=None, text=None, contains=None, desc=None):
     nodes = dump() if nodes is None else nodes
     for n in nodes:

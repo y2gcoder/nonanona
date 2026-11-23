@@ -20,7 +20,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import check_artifact  # noqa: E402  (같은 폴더의 PNG 디코더)
+
 SENSITIVE_KEYS = ("TEL", "カード", "会員", "承認", "予約")
+ALLOWED_CURRENCIES = {"JPY", "KRW", "USD", "EUR"}
+EXPENSE_COLUMNS = ["id", "trip_id", "client_request_id", "request_fingerprint", "uploaded_by", "expense_date", "amount_minor",
+                   "currency", "merchant", "artifact_path", "artifact_sha256", "created_at"]
 
 
 def norm(o):
@@ -81,6 +87,9 @@ def main():
     ap.add_argument("--received")
     ap.add_argument("--report")
     ap.add_argument("--checker")
+    ap.add_argument("--truth-file", default="receipt-r01.png")
+    ap.add_argument("--screenshot")
+    ap.add_argument("--bounds")
     ap.add_argument("--merchant", default="ゆきみ茶屋", help="직접 입력한 가게 이름(Android E2E는 adb로 ASCII만 칠 수 있다)")
     ap.add_argument("--suffix", default="(수정)", help="고친 가게 이름 끝에 붙인 글자")
     args = ap.parse_args()
@@ -204,13 +213,79 @@ def main():
             "device_confirmed_with_artifact": len(confirmed),
             "manual_entries_on_server": [f for f in manual if any(
                 s["amount_minor"] == f["amountminor"] and s["date"] == f["date"] for s in server_fields)],
-            "device_fields_match_server": sorted((c["confirmed"]["fields"]["date"], c["confirmed"]["fields"]["amountminor"],
-                                                  c["confirmed"]["fields"]["merchant"]) for c in confirmed.values())
-            == sorted((s["date"], s["amount_minor"], s["merchant"]) for s in server_fields),
+            # 사본 해시로 짝지어 날짜·금액·통화·가게가 기기에서 확인한 값과 정확히 같은지(통화 포함).
+            "device_fields_match_server": {
+                c["confirmed"]["artifactsha256"]: (c["confirmed"]["fields"]["date"], c["confirmed"]["fields"]["amountminor"],
+                                                   c["confirmed"]["fields"]["currency"], c["confirmed"]["fields"]["merchant"])
+                for c in confirmed.values()
+            } == {s["artifact_sha256"]: (s["date"], s["amount_minor"], s["currency"], s["merchant"]) for s in server_fields},
+            "server_currencies_allowed": all(s["currency"] in ALLOWED_CURRENCIES for s in server_fields),
+            # 지출 행에는 허용한 열만 있다(OCR 전문·원본 위치·기기 정보 같은 열이 없다).
+            "server_columns_are_allowlist": report["expense_columns"].split(",") == EXPENSE_COLUMNS,
         }
         result["pass"] = (len(checks) == len(confirmed) and all(c["equals_confirmed_artifact"] and not c["equals_any_original"]
                                                               and c["artifact_check"]["pass"] for c in checks)
-                          and not result["manual_entries_on_server"] and result["device_fields_match_server"])
+                          and not result["manual_entries_on_server"] and result["device_fields_match_server"]
+                          and result["server_currencies_allowed"] and result["server_columns_are_allowlist"])
+
+    elif args.command == "rotated":
+        # EXIF 방향이 붙은 사진을 확인한 사본: 똑바로 선 크기이고, 똑바른 정답(--truth-file)의 민감한 줄이 모두 검정이며,
+        # 띠 밖은 똑바른 원본과 거의 같다(JPEG 손실만큼 허용).
+        it = item_at(items, args.position)
+        artifact = (d / "confirmed" / it["confirmed"]["artifactfilename"]).read_bytes()
+        truth_file = Path(args.fixtures) / args.truth_file
+        truth = next(t for t in json.loads((Path(args.fixtures) / "ground-truth.json").read_text()) if t["file"] == args.truth_file)
+        tw, th, src = check_artifact.decode(truth_file.read_bytes())
+        aw, ah, art = check_artifact.decode(artifact)
+        ink = black = 0
+        for sline in truth["sensitive"]:
+            x0, y0, x1, y1 = sline["rect"]
+            for y in range(y0, y1):
+                for x in range(x0, x1):
+                    if all(v < 128 for v in src(x, y)):
+                        ink += 1
+                        black += art(x, y) == (0, 0, 0)
+        bands = [(s_["rect"][1] - 40, s_["rect"][3] + 40) for s_ in truth["sensitive"]]
+        diffs = []
+        if (aw, ah) == (tw, th):
+            for y in range(0, th, 4):
+                if any(a <= y <= b for a, b in bands):
+                    continue
+                for x in range(0, tw, 4):
+                    diffs.append(max(abs(p - q) for p, q in zip(src(x, y), art(x, y))))
+        mean = sum(diffs) / len(diffs) if diffs else 999
+        result = {"check": "exif-rotated", "position": args.position, "upright_size": [aw, ah], "expected_size": [tw, th],
+                  "sensitive_ink_pixels": ink, "sensitive_ink_pixels_black": black,
+                  "outside_mean_abs_diff": round(mean, 2), "outside_samples": len(diffs),
+                  "chunks": check_artifact.chunks_of(artifact)}
+        result["pass"] = (aw, ah) == (tw, th) and ink > 0 and ink == black and mean < 12 and \
+            set(result["chunks"]) <= check_artifact.ALLOWED
+
+    elif args.command == "align":
+        # 화면 기록에서 검토 화면 원본 그림 칸을 잘라, 줄마다 글자 픽셀 비율이 똑바른 정답 그림과 같은 모양인지 본다.
+        # 옆으로 누운 그림이면 줄 모양이 달라 상관이 낮다(가림 띠는 반투명이라 글자 판정에 들지 않는다).
+        x0, y0, x1, y1 = (int(v) for v in args.bounds.split(","))
+        sw, sh_, shot = check_artifact.decode(Path(args.screenshot).read_bytes())
+        tw, th, src = check_artifact.decode((Path(args.fixtures) / args.truth_file).read_bytes())
+
+        def profile(w0, h0, w1, h1, px, bins=100):
+            rows = []
+            for b in range(bins):
+                y = h0 + (h1 - h0) * b // bins
+                xs = range(w0, w1, max(1, (w1 - w0) // 120))
+                rows.append(sum(1 for x in xs if all(v < 90 for v in px(x, y)[:3])) / len(xs))
+            return rows
+
+        a = profile(x0, y0, x1, y1, shot)
+        b = profile(0, 0, tw, th, src)
+        ma, mb = sum(a) / len(a), sum(b) / len(b)
+        cov = sum((p - ma) * (q - mb) for p, q in zip(a, b))
+        var = (sum((p - ma) ** 2 for p in a) * sum((q - mb) ** 2 for q in b)) ** 0.5
+        corr = cov / var if var else 0
+        box_aspect = (x1 - x0) / (y1 - y0)
+        result = {"check": "ui-alignment", "row_profile_correlation": round(corr, 3), "box_aspect": round(box_aspect, 3),
+                  "upright_aspect": round(tw / th, 3)}
+        result["pass"] = corr > 0.6 and abs(box_aspect - tw / th) < 0.02
     else:
         sys.exit(__doc__)
 

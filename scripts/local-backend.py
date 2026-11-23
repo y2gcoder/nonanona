@@ -213,7 +213,7 @@ def upload_report():
         (select string_agg(column_name, ',' order by ordinal_position) from information_schema.columns
            where table_schema = 'public' and table_name = 'expenses') as expense_columns,
         (select json_agg(json_build_object('date', expense_date, 'amount_minor', amount_minor, 'currency', currency,
-           'merchant', merchant)) from public.expenses) as expense_fields""", "upload-report")
+           'merchant', merchant, 'artifact_sha256', artifact_sha256) order by created_at) from public.expenses) as expense_fields""", "upload-report")
     print(json.dumps(r[0], ensure_ascii=False))
 
 

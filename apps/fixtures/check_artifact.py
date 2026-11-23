@@ -30,6 +30,10 @@ def chunks(data):
     return out
 
 
+def chunks_of(data):
+    return [n for n, _ in chunks(data)]
+
+
 def decode(data):
     """8비트 그레이·RGB·RGBA PNG를 (너비, 높이, 픽셀 RGB 함수)로 푼다."""
     parts = chunks(data)

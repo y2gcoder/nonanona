@@ -31,7 +31,7 @@ CHECKER = FIXTURES.parent / "check_artifact.py"
 NAMES = [f"receipt-r{i:02d}.png" for i in range(1, 11)]
 WORK = Path(tempfile.mkdtemp(prefix="nonanona-review-"))
 LOG = []
-MERCHANT = "Yukimi"  # adb input text는 ASCII만 칠 수 있다
+MERCHANT = "yukimi"  # 직접 입력은 화면 자판(Gboard) 키를 눌러 친다(대문자 전환 없이)
 SUFFIX = " edit"
 
 
@@ -58,9 +58,23 @@ def report(expect):
     return r
 
 
-def pull_draft():
+def draft_names():
+    return base.run_as("ls files/receipt-import/drafts 2>/dev/null").split()
+
+
+def draft_with(photos):
+    """사진 수로 초안을 고른다(10장 초안과 EXIF 1장 초안)."""
+    for name in draft_names():
+        props = base.run_as(f"cat files/receipt-import/drafts/{name}/draft.properties")
+        line = next((x for x in props.splitlines() if x.startswith("photos=")), "photos=")
+        if len([n for n in line.split("=", 1)[1].split(",") if n.strip()]) == photos:
+            return name
+    return None
+
+
+def pull_draft(name=None):
     """앱 전용 저장소의 초안 폴더를 호스트의 새 폴더로 꺼낸다(검사용, 기기에서는 지우지 않는다)."""
-    name = until(lambda: next(iter(base.run_as("ls files/receipt-import/drafts 2>/dev/null").split()), None), 30, "draft saved")
+    name = name or until(lambda: draft_with(10) or next(iter(draft_names()), None), 30, "draft saved")
     raw = u.adb("exec-out", "run-as", PKG, "tar", "-c", "-C", "files/receipt-import/drafts", name, binary=True)
     dest = Path(tempfile.mkdtemp(dir=WORK, prefix="draft-"))
     archive = dest / "draft.tar"
@@ -70,8 +84,8 @@ def pull_draft():
     return dest / name
 
 
-def inspect(*args, out=None):
-    cmd = [sys.executable, "-I", str(CHECK), *args, "--draft", str(pull_draft()), "--fixtures", str(FIXTURES)]
+def inspect(*args, out=None, draft=None):
+    cmd = [sys.executable, "-I", str(CHECK), *args, "--draft", str(pull_draft(draft)), "--fixtures", str(FIXTURES)]
     if out:
         cmd += ["--out", str(out)]
     r = subprocess.run(cmd, capture_output=True, text=True)
@@ -121,16 +135,29 @@ def reach(screen, **query):
     raise TimeoutError(f"not reachable in {screen}: {query}")
 
 
-def type_into(id_, value, screen="review_screen"):
+def type_into(id_, value, screen="review_screen", ime=False):
+    """입력 칸을 비우고 친다. ime=True면 화면 자판(Gboard)의 키를 눌러 실제 입력기를 거친다."""
     field = reach(screen, id=id_)
     u.tap(field)
     time.sleep(0.8)
-    current = u.find(id=id_).text or ""
+    # 자판이 올라오는 동안 칸이 잠깐 덤프에서 빠질 수 있다. 다시 보일 때까지 기다린다.
+    current = until(lambda: u.find(id=id_), 10, f"{id_} visible after focus").text or ""
     u.sh("input keyevent KEYCODE_MOVE_END")
     if current:
         u.sh("input keyevent " + " ".join(["KEYCODE_DEL"] * (len(current) + 2)))
-    u.sh("input text " + value.replace(" ", "%s"))
+    if ime:
+        u.ime_type(value)
+    else:
+        u.sh("input text " + value.replace(" ", "%s"))
     until(lambda: (u.find(id=id_).text or "") == value, 10, f"{id_} = {value!r}")
+
+
+def write_faults(*parts):
+    """debug 빌드의 저장 실패 주입(경로 조각). 인자가 없으면 끈다."""
+    if parts:
+        base.run_as('printf "' + "\\n".join(parts) + '\\n" > files/receipt-import/debug-fail-writes')
+    else:
+        base.run_as("rm -f files/receipt-import/debug-fail-writes")
 
 
 def append_into(id_, suffix):
@@ -212,15 +239,17 @@ def main():
     assert texts("review_status") == "읽지 못함"
     assert not u.find(id="review_confirm_next").enabled, "값이 없으면 확인할 수 없다"
     assert reach("review_screen", id="review_date_problem"), "왜 확인할 수 없는지 보인다"
-    type_into("review_merchant", MERCHANT)
-    type_into("review_amount", "1760")
+    type_into("review_merchant", MERCHANT, ime=True)
+    type_into("review_amount", "1760", ime=True)
     hide_keyboard()
     u.tap(reach("review_screen", id="review_retry"))
     until(lambda: texts("review_status") in ("대기 중", "읽는 중"), 10, "retrying")
     base.shot("android-review-retrying")
     until(lambda: texts("review_status") == "읽지 못함", 60, "failed again")
     assert reach("review_screen", id="review_amount").text == "1760", "다시 읽기를 지나도 입력이 남는다"
-    type_into("review_date", "2026-11-08")
+    # 날짜 칸은 숫자 자판이다. 구분자 키 없이 숫자 8자리를 화면 자판으로 치면 2026-11-08로 받는다.
+    type_into("review_date", "20261108", ime=True)
+    assert not u.find(id="review_date_problem"), "숫자 8자리 날짜를 받아야 한다"
     hide_keyboard()
     base.shot("android-review-manual-entry")
     nxt = confirm_next()
@@ -276,11 +305,27 @@ def main():
     assert texts("review_progress") == "확인 3/10"
     inspect("masked", "--position", "1", out=OUT / "android-review-missed-mask-check.json")
 
-    # 5. 입력만 하고 앱 종료 → 다시 열어 이어서
+    # 5. 입력만 하고 → 저장 실패 주입(입력 저장, 확인) → 앱 종료 → 다시 열어 이어서
     type_into("review_amount", "999")
     hide_keyboard()
     base.shot("android-review-before-kill")
-    typed = inspect("typed")["TYPED_POSITION"]
+    typed_title = title()
+    write_faults("reviews/")
+    type_into("review_amount", "888")
+    hide_keyboard()
+    until(lambda: u.find(id="review_save_error"), 10, "save error shown")
+    assert reach("review_screen", id="review_amount").text == "888", "저장하지 못해도 화면의 입력은 남는다"
+    adaptive.shot("android-review-save-failed")
+    write_faults("reviews/", "processing.json")
+    u.tap(u.find(id="review_confirm_next"))
+    until(lambda: u.find(id="review_confirm_error"), 10, "confirm error shown")
+    assert title() == typed_title, "확인을 저장하지 못하면 다음 사진으로 가지 않는다"
+    adaptive.shot("android-review-confirm-failed")
+    reach("review_screen", id="review_status")
+    assert texts("review_progress") == "확인 3/10" and texts("review_status") == "확인 필요"
+    write_faults()
+    typed = inspect("typed")["TYPED_POSITION"]  # 디스크에는 마지막으로 쓴 입력(999)이 남았다
+    log(f"injected storage failures: draft save and confirm surfaced, photo {typed} still unconfirmed with durable 999")
     victim = base.pid()
     u.sh(f"run-as {PKG} kill -9 {victim}")
     log(f"SIGKILL app pid {victim} while photo {typed} has unconfirmed input; reopen from launcher")
@@ -371,8 +416,38 @@ def main():
             "--checker", str(CHECKER), out=OUT / "android-review-received-check.json")
     inspect("states", "--label", "final", out=OUT / "android-review-state-final.json")
     (OUT / "android-review-outsider.json").write_text(backend("outsider-check"))
-    base.run_as("rm -f files/debug-processing.properties")
+    exif_rotated_photo()
     log("PASS")
+
+
+def exif_rotated_photo():
+    """EXIF 방향(6)이 붙은 가상 JPEG: 검토 화면의 원본이 똑바로 보이고, 확인한 사본이 똑바로 선 크기로 민감한 줄을 가린다."""
+    base.run_as("rm -f files/debug-processing.properties")
+    u.sh(f"am force-stop {PKG}")
+    jpg = WORK / "receipt-r01-exif6.jpg"
+    subprocess.run([sys.executable, "-I", str(FIXTURES.parent / "make_exif_rotated.py"), str(FIXTURES / "receipt-r01.png"), str(jpg)],
+                   check=True, capture_output=True)
+    u.sh("rm -rf /sdcard/Pictures/NonanonaExif && mkdir -p /sdcard/Pictures/NonanonaExif")
+    u.adb("push", str(jpg), "/sdcard/Pictures/NonanonaExif/")
+    u.sh("am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Pictures/NonanonaExif/receipt-r01-exif6.jpg")
+    base.share_from_files(["receipt-r01-exif6.jpg"], folder="NonanonaExif")
+    u.tap(u.wait(id="draft_row", timeout=30))  # 최신 초안(EXIF 1장)이 맨 위
+    until(lambda: texts("processing_summary") == "읽음 1/1", 60, "exif photo read")
+    u.tap(reach("draft_screen", id="item_1_open"))
+    until(lambda: title() == "사진 1" and texts("review_status") == "확인 필요", 15, "exif photo review")
+    hide_keyboard()
+    box = u.wait(id="review_original", timeout=10)
+    display, _, _ = adaptive.active_display()
+    u.sh(f"screencap -d {display} -p /sdcard/exif-ui.png")
+    u.adb("pull", "/sdcard/exif-ui.png", str(WORK / "exif-ui.png"))
+    adaptive.shot("android-review-exif-original")
+    exif_draft = draft_with(1)
+    inspect("align", "--screenshot", str(WORK / "exif-ui.png"), "--bounds", ",".join(map(str, box.bounds)),
+            out=OUT / "android-review-exif-ui-alignment.json", draft=exif_draft)
+    confirm_list = u.find(id="review_confirm_next")
+    u.tap(confirm_list)
+    u.wait(id="draft_screen", timeout=15)
+    inspect("rotated", "--position", "1", out=OUT / "android-review-exif-artifact.json", draft=exif_draft)
 
 
 if __name__ == "__main__":

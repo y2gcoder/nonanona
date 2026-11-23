@@ -90,7 +90,16 @@ run_test testV5_CorrectMissedMaskWithPreview TEST_RUNNER_MISSED_POSITION="$MISSE
   TEST_RUNNER_MASK_LINE_IDS="$MASK_LINE_IDS" TEST_RUNNER_BAND_TOP="$BAND_TOP" TEST_RUNNER_BAND_HEIGHT="$BAND_HEIGHT"
 inspect masked --position "$MISSED_POSITION" --out "$OUT/ios-review-missed-mask-check.json"
 run_test testV6_TypeWithoutConfirming
-eval "$(inspect typed)"  # TYPED_POSITION
+FAULTS="$(dirname "$(dirname "$(draft_dir)")")/debug-fail-writes"  # receipt-import/debug-fail-writes (debug 빌드만 읽음)
+printf 'reviews/\n' > "$FAULTS"
+log "inject storage failure: draft saves"
+run_test testV6b_DraftSaveFailureIsSurfaced
+printf 'reviews/\nprocessing.json\n' > "$FAULTS"
+log "inject storage failure: draft saves and processing manifest"
+run_test testV6c_ConfirmFailureKeepsReceiptUnconfirmed
+rm -f "$FAULTS"
+eval "$(inspect typed)"  # TYPED_POSITION: 디스크에는 마지막으로 쓴 입력(999)이 남았다
+log "storage failures surfaced; photo $TYPED_POSITION still unconfirmed with the last durable input"
 pid="$(app_pid)"
 kill -9 "$pid"
 log "SIGKILL app pid $pid while photo $TYPED_POSITION has unconfirmed input; reopen"

@@ -107,6 +107,130 @@ final class AdaptiveLayoutUITests: XCTestCase {
     XCTAssertTrue(app.staticTexts["참여함"].waitForExistence(timeout: 15))
   }
 
+  // MARK: iPhone Duo 자세
+  //
+  // 자세는 `simctl`·XCTest로 바꿀 수 없어 Device Hub의 자세 버튼을 눌러야 한다(`scripts/e2e-posture.sh`).
+  // 테스트가 `<POSTURE_DIR>/want-<단계>`를 쓰면 스크립트가 버튼을 누르고 `done-<단계>`를 쓴다.
+  // 버튼에 접근성 이름이 없어 Device Hub가 그리는 기기 모양으로 부른다: folded(접음, 바깥 화면),
+  // book(두 번째 버튼, 안쪽 화면이 접힘에서 꺾임), flat(세 번째 버튼, 안쪽 화면이 평평함).
+  // XCTest 화면 기록은 바깥 화면만 찍어(안쪽 화면을 쓰면 검은 화면) book·flat 화면은 스크립트가 simctl로 찍는다.
+
+  /// 읽는 중에 folded → book → flat → folded를 지나도 같은 초안(사진 2장)과 처리 상태가 보인다.
+  /// 안쪽 화면(가로 regular)에서는 목록과 초안이 나란히, book에서는 요약·사진 상태가 division 밖에 있다.
+  func testP2_PostureChangeWhileReadingKeepsDraftAndProgress() throws {
+    app.activate()
+    openTwoPhotoDraft()
+    let summary = app.staticTexts["processing-summary"]
+    XCTAssertTrue(summary.waitForExistence(timeout: 10))
+    XCTAssertLessThan(processed(summary), 2, "처리를 늦췄으므로 아직 읽는 중이어야 한다")
+    let folded = app.windows.firstMatch.frame
+    XCTAssertFalse(listBeside(), "바깥 화면은 한 화면씩 보인다")
+    record("folded-reading", summary)
+    snapshot("ios-posture-folded-reading")
+
+    for step in ["book", "flat"] {
+      awaitPosture(step)
+      XCTAssertTrue(twoPhotoHeader().waitForExistence(timeout: 10), "\(step): 같은 초안")
+      waitFor(timeout: 10) { self.app.windows.firstMatch.frame.width > folded.width && self.listBeside() }
+      XCTAssertTrue(summary.exists)
+      let progress = processed(summary)
+      XCTAssertLessThan(progress, 2, "\(step): 아직 읽는 중(자세 변경을 처리 중에 지난다)")
+      record("\(step)-reading", summary)
+      assertOffDivision([summary, app.staticTexts["item-1-status"]], step, enforce: step == "book")
+      record("\(step)-list", app.buttons["draft-row"].firstMatch)
+    }
+
+    awaitPosture("folded")
+    XCTAssertTrue(twoPhotoHeader().waitForExistence(timeout: 10), "다시 접은 뒤에도 같은 초안")
+    waitFor(timeout: 10) { self.app.windows.firstMatch.frame == folded && !self.listBeside() }
+    XCTAssertTrue(summary.exists)
+    record("refolded-reading", summary)
+    snapshot("ios-posture-refolded-reading")
+    waitFor(timeout: 240) { self.processed(summary) == 2 }
+    let confirm = app.buttons["item-1-debug-confirm"]
+    XCTAssertTrue(confirm.waitForExistence(timeout: 10))
+    confirm.tap()
+    waitFor(timeout: 30) { self.app.staticTexts["item-1-status"].label == "확인함" }
+  }
+
+  /// 올릴 곳·장수 최종 확인 창이 열린 채 book → flat → folded를 지나도 같은 문장으로 남고(book에서는 division 밖),
+  /// 한 번 올리면 한 번만 올라간다.
+  func testP3_UploadConfirmationSurvivesPostureChange() throws {
+    app.activate()
+    openLink("nonanona://invite/SYNTHINVITE01")
+    app.buttons["invite-primary"].tap()
+    let apple = app.buttons["login-apple"]
+    XCTAssertTrue(apple.waitForExistence(timeout: 10))
+    apple.tap()
+    XCTAssertTrue(app.staticTexts["참여함"].waitForExistence(timeout: 15))
+    goBack()
+    openTwoPhotoDraft()
+
+    let start = app.buttons["upload-start"]
+    XCTAssertTrue(start.waitForExistence(timeout: 10))
+    start.tap()
+    let title = app.staticTexts["‘가상 도쿄 여행’에 영수증 1장을 올릴까요?"]
+    let final = app.buttons.matching(identifier: "upload-final").firstMatch
+    XCTAssertTrue(final.waitForExistence(timeout: 10))
+    XCTAssertTrue(title.exists)
+    record("folded-confirmation", final)
+    snapshot("ios-posture-folded-confirmation")
+
+    for step in ["book", "flat", "folded"] {
+      awaitPosture(step)
+      XCTAssertTrue(final.waitForExistence(timeout: 10), "\(step): 같은 올릴 곳·장수를 묻는다")
+      waitFor(timeout: 10) { title.exists && final.isHittable }
+      record("\(step)-confirmation", final)
+      if step == "folded" { snapshot("ios-posture-refolded-confirmation") }
+      if step != "folded" { assertOffDivision([title, final], step, enforce: step == "book") }
+    }
+    final.tap()
+
+    let status = app.staticTexts["upload-status"]
+    waitFor(timeout: 30) { status.exists && status.label == "올림 1장(이미 올린 0장 포함)" }
+    XCTAssertFalse(title.exists)
+  }
+
+  private var postureDir: URL? {
+    ProcessInfo.processInfo.environment["POSTURE_DIR"].map { URL(fileURLWithPath: $0) }
+  }
+
+  /// 스크립트에 자세 변경을 부탁하고, 바꿨다는 표시가 올 때까지 기다린다.
+  private func awaitPosture(_ step: String) {
+    guard let dir = postureDir else { return XCTFail("POSTURE_DIR 없음") }
+    let name = "\(name.contains("testP2") ? "P2" : "P3")-\(step)"
+    FileManager.default.createFile(atPath: dir.appendingPathComponent("want-\(name)").path, contents: Data())
+    let done = dir.appendingPathComponent("done-\(name)").path
+    let deadline = Date().addingTimeInterval(180)
+    let failed = dir.appendingPathComponent("failed-\(name)").path
+    while !FileManager.default.fileExists(atPath: done) {
+      XCTAssertFalse(FileManager.default.fileExists(atPath: failed), "Device Hub 자세 버튼(\(step))을 누르지 못했다")
+      XCTAssertLessThan(Date(), deadline, "자세 변경(\(step))을 기다리다 시간이 다 됐다")
+      Thread.sleep(forTimeInterval: 0.3)
+    }
+  }
+
+  /// 창 크기와 요소 위치를 기록한다(증거).
+  private func record(_ label: String, _ element: XCUIElement) {
+    let window = app.windows.firstMatch.frame
+    print("POSTURE \(label) window=\(window) element=\(element.identifier) frame=\(element.frame)", terminator: "")
+    print(" label=\(element.label)")
+  }
+
+  /// 요소가 division 예약 영역과 겹치지 않는다. XCTest는 예약 영역을 읽지 못한다. 앱 DEBUG 로그(`Theme.swift`)가
+  /// book 자세에서 알린 영역(창 가운데 40pt, 951pt 창의 455.5–495.5)을 쓴다. `enforce == false`면 기록만 한다.
+  private func assertOffDivision(_ elements: [XCUIElement], _ step: String, enforce: Bool) {
+    let window = app.windows.firstMatch.frame
+    let division = CGRect(x: window.midX - 20, y: window.minY, width: 40, height: window.height)
+    for element in elements where element.exists {
+      let f = element.frame
+      let name = element.identifier.isEmpty ? element.label : element.identifier
+      print("POSTURE \(step) division=\(division) \(name)=\(f) overlaps=\(f.intersects(division))")
+      guard enforce else { continue }
+      XCTAssertFalse(f.intersects(division), "\(step): \(name)이 division 위에 있다 \(f)")
+    }
+  }
+
   private func twoPhotoHeader() -> XCUIElement {
     app.staticTexts.matching(NSPredicate(format: "label == '사진 2장'")).firstMatch
   }

@@ -1,5 +1,9 @@
 import SwiftUI
 
+#if DEBUG
+  import os
+#endif
+
 // 공통 디자인 기준(docs/design/mobile-foundations.md)의 역할을 SwiftUI 시스템 스타일에 연결한다.
 // 색은 임시 중립 팔레트(시스템 라벨·배경색)다. 브랜드 색을 정하면 이 파일만 바꾼다.
 
@@ -66,8 +70,28 @@ private struct AdaptiveContentMargins: ViewModifier {
       } action: {
         margins = $0
       }
+      #if DEBUG
+        // 시스템이 알려 준 division 예약 영역을 남긴다(iPhone Duo 자세 E2E가 읽는다, 창 좌표).
+        .onGeometryChange(for: String.self) { proxy in
+          var regions = "unavailable"
+          if #available(iOS 27.1, *) {
+            let global = proxy.frame(in: .global)
+            regions =
+              proxy.reservedRegions(kind: .division).map {
+                "\($0.frame.offsetBy(dx: global.minX, dy: global.minY)) active=\($0.isActive)"
+              }.description
+          }
+          return "view=\(proxy.frame(in: .global)) divisions=\(regions)"
+        } action: {
+          layoutLog.debug("reserved \($0, privacy: .public)")
+        }
+      #endif
   }
 }
+
+#if DEBUG
+  private let layoutLog = Logger(subsystem: "app.nonanona", category: "layout")
+#endif
 
 /// 글자 역할. 시스템 텍스트 스타일을 써서 Dynamic Type을 따른다.
 /// Android 대응: sectionTitle=titleMedium, body=bodyLarge, supporting=bodyMedium, caption=bodySmall, status=labelMedium.

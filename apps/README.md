@@ -125,23 +125,38 @@ mise run local:down
 | 확인 | iOS | Android |
 | --- | --- | --- |
 | 단위 테스트 | `ContentMargins` 5건(좁은 창, 읽기 폭, 세로 접힘 한쪽·같으면 앞쪽, 창 밖 접힘, 가로 접힘). 처리 중 장면 다시 활성화 5번 → OCR 2번·시도 `[1,1]`·선택 유지. 최종 확인이 올릴 곳을 지키고 한 번만 올림, 올릴 곳이 바뀐 뒤의 예전 확인은 올리지 않음. 실제 창에 띄운 분할 보기를 669×951(regular) → 466×678(compact) → 951×669(regular) → 320×951(compact)로 바꿔도 접힘·펼침이 따라가고 선택 유지 | `ContentMargins` 6건(iOS와 같은 경우 + 폭 0인 hinge) |
-| E2E 기기 | iPhone 18 Pro Max(가로 regular), iPhone Duo 바깥 화면(466×678pt, iPhone Duo 런타임 iOS 27.2 24B91016s), iPhone 18 Pro(iOS 27.2) 시뮬레이터. 세 기기 모두 A1–A4 통과 | Pixel 9 Pro Fold 프로필 에뮬레이터(API 36, 안쪽 2076×2152px·바깥 1080×2424px, hinge x=1038px) |
-| 읽는 중 배치 바꾸기 | 세로 → 가로 → 세로: 같은 초안(사진 2장)·처리 상태. Pro Max 가로에서만 목록과 초안이 나란히 | 펼침(두 칸, 읽음 0/2) → 접기(바깥 화면 한 칸, 같은 초안 0/2) → 펴기(두 칸) → 반쯤 접기(목록 0–1038, 상세 1097–2076) |
-| 중복 OCR | 디스크의 사진별 시도 `[1,1]`, `[1]` | 같음 |
-| 접힘 피하기 | (반쯤 접기 확인하지 못함, 아래 공백) | 반쯤 접은 채 로그인 시트 (0–1038), 최종 확인 제목·버튼 (577–920)이 hinge 한쪽 |
-| 최종 확인 유지 | 열린 채 가로 → 세로: 같은 문장, 누를 수 있음 → 올림 1장(이미 올린 0장 포함) | 열린 채 접기 → 펴기: 같은 문장 → 올림 1장(이미 올린 0장 포함) |
+| E2E 기기 | iPhone 18 Pro Max(가로 regular), iPhone Duo 바깥 화면(466×678pt, iPhone Duo 런타임 iOS 27.2 24B91016s), iPhone 18 Pro(iOS 27.2) 시뮬레이터. 세 기기 모두 A1–A4 통과. 새 iPhone Duo 시뮬레이터에서 `ios:e2e-posture`(A1, P2, P3) 통과 | Pixel 9 Pro Fold 프로필 에뮬레이터(API 36, 안쪽 2076×2152px·바깥 1080×2424px, hinge x=1038px) |
+| 읽는 중 배치 바꾸기 | 세로 → 가로 → 세로: 같은 초안(사진 2장)·처리 상태. Pro Max 가로에서만 목록과 초안이 나란히. iPhone Duo 시뮬레이터 자세(아래 "iPhone Duo 자세"): folded(466×678, 한 화면, 읽음 0/2) → book(951×669, 목록 0–455.7·초안 495.7–) → flat(951×669, 목록 0–320·초안 320–) → folded: 같은 초안·읽음 0/2, 모두 읽은 뒤 확인 | 펼침(두 칸, 읽음 0/2) → 접기(바깥 화면 한 칸, 같은 초안 0/2) → 펴기(두 칸) → 반쯤 접기(목록 0–1038, 상세 1097–2076) |
+| 중복 OCR | 디스크의 사진별 시도 `[1,1]`, `[1]`(회전, Duo 자세 변경 모두) | 같음 |
+| 접힘 피하기 | Duo book: 시스템이 division(455.5–495.5)을 알리고 분할 보기 열과 최종 확인 알림(97.7–371.7)을 그 밖에 둔다. 처리 요약·사진 상태도 밖. Duo flat: 열·알림이 가운데에 걸친다(아래) | 반쯤 접은 채 로그인 시트 (0–1038), 최종 확인 제목·버튼 (577–920)이 hinge 한쪽 |
+| 최종 확인 유지 | 열린 채 가로 → 세로: 같은 문장, 누를 수 있음 → 올림 1장(이미 올린 0장 포함). Duo 열린 채 folded → book → flat → folded: 같은 문장, 누를 수 있음 → 올림 1장(이미 올린 0장 포함) | 열린 채 접기 → 펴기: 같은 문장 → 올림 1장(이미 올린 0장 포함) |
 | 큰 글자 + 가로 | `accessibility-extra-large`: 초안 마지막 행, 로그인 시트 버튼까지 스크롤로 닿고 다시 로그인 | `font_scale 2.0`: 같음 |
 | 낮고 좁은 창 | 단위 테스트의 320×951 compact | `wm size 1300x1000`(533×410dp): 한 칸, 마지막 행까지 스크롤 |
 | 기존 흐름 회귀(바뀐 내비게이션·최종 확인) | `ios:e2e`, `ios:e2e-upload`(로컬 Supabase, 서버 객체·지출 1/1, 가림 사본 검사, 비구성원 차단) 통과. 단위 테스트, `ios:build`, `ios:release-check` 통과 | `android:e2e`, `android:e2e-receipts`, `android:e2e-local`, `android:e2e-upload`(같은 서버 검사) 통과(폰 에뮬레이터). 단위 테스트, lint(오류 0), release APK에 INTERNET·로컬·테스트·개발용 올리기 클래스 0 |
 
 ```sh
 mise run ios:e2e-adaptive -- <시뮬레이터 UDID> [증거 폴더]       # 가로가 regular인 기기는 EXPECT_WIDE_LANDSCAPE=1
+mise run ios:e2e-posture -- <iPhone Duo 시뮬레이터 UDID> [증거 폴더]  # Device Hub 자세 버튼을 누른다(아래)
 mise run android:e2e-adaptive -- [증거 폴더]                    # 접히는 기기 에뮬레이터(emu fold/unfold/posture)
 ```
 
 접히는 기기 에뮬레이터는 설치된 시스템 이미지로 만든다: `avdmanager create avd -n Nonanona_Fold -k "system-images;android-36;google_apis;arm64-v8a" -d pixel_9_pro_fold`. iOS iPhone Duo 시뮬레이터는 iPhone Duo 전용 런타임으로 만든다: `xcrun simctl create "Nonanona Duo" com.apple.CoreSimulator.SimDeviceType.iPhone-Duo com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4`. 같은 시뮬레이터에서 E2E를 여러 번 돌리면 사진 앱에 가상 영수증이 겹쳐 쌓여 공유 단계가 흔들린다. 새 시뮬레이터에서 돌린다.
 
-**증거 공백**: iPhone Duo의 접기·펴기·반쯤 접기는 Device Hub GUI로만 바꿀 수 있어 확인하지 못했다(`simctl`·XCTest에 자세 명령이 없다). 2026-11-22에 다시 시도했지만 막혔다: `orca computer permissions`(Orca 1.4.256)는 손쉬운 사용·화면 기록을 둘 다 `granted`로 보고하는데, `orca computer get-app-state`는 Device Hub와 Finder 모두 `permission_denied`(Accessibility permission is required)를 돌려줘 Device Hub의 자세 컨트롤에 닿지 못했다. 권한 설정은 바꾸지 않았다. iOS는 크기 종류·크기 변경, 장면 다시 활성화, division 영역 계산을 단위 테스트로 대신했다. iOS 넓은 창은 Pro Max 가로로만 봤다(Duo 안쪽 화면 미확인). 실기기, 태블릿, Android 실제 두 앱 분할 화면, 데스크톱 창은 확인하지 않았다. 입력 칸은 아직 없어 키보드가 가리는 경우는 해당이 없다.
+### iPhone Duo 자세 (2026-11-23, 시뮬레이터)
+
+`ios:e2e-posture`는 Xcode Device Hub 아래쪽 자세 버튼을 Orca Computer Use(`orca computer click --restore-window`)로 누른다. 자세는 `simctl`·XCTest로 바꿀 수 없다. 테스트가 신호 파일로 자세 변경을 부탁하고 스크립트가 누른 뒤 다음 단계로 간다. 사전 조건: 새 Duo 시뮬레이터를 Device Hub 창(1100×800pt, 버튼 좌표가 이 크기에 맞음)에 접은 채 띄우고, `orca computer permissions`에서 손쉬운 사용·화면 기록 허용. 누를 때마다 Device Hub를 앞으로 가져오므로 그동안 다른 창을 쓰면 클릭이 `window_not_focused`로 거절된다(스크립트가 다섯 번까지 다시 누르고, 그래도 안 되면 테스트가 실패한다). 백그라운드 클릭(창을 앞으로 가져오지 않음)으로는 Device Hub의 시뮬레이터 목록 선택이 바뀌지 않아 앞으로 가져와 누른다.
+
+자세 버튼은 접근성 이름이 없어 Device Hub가 그리는 기기 모양으로 부른다: **folded**(첫 번째, 바깥 화면 466×678pt), **book**(두 번째 책 아이콘, 안쪽 화면이 접힘에서 꺾인 그림), **flat**(세 번째, 평평한 그림). 두 안쪽 자세 모두 창은 951×669pt(가로 regular)다. Apple이 말하는 "반쯤 접기"가 어느 버튼인지는 확인하지 못했다. 앱 DEBUG 빌드가 `ReservedRegion` division을 로그로 남긴다(`Theme.swift`, 스크립트가 `ios-layout-reserved.log`로 모음).
+
+| 자세 | 시스템이 알린 division | 배치(창 좌표 pt) |
+| --- | --- | --- |
+| folded | 없음 | 한 화면. 처리 요약 x 20–80, 최종 확인 올리기 버튼 195–335 |
+| book | 세로 455.5–495.5(폭 40), 활성 | 목록 0–455.7, 초안 495.7–. 처리 요약 515.7–575.7, 사진 상태 587.7–638.3. 최종 확인 알림은 왼쪽 칸(제목 97.7–357.7, 올리기 231.7–371.7). 모두 division 밖(테스트가 확인) |
+| flat | 초안 열(320–867)이 division이 있는 값과 빈 값을 같은 시각에 함께 남김 | 열이 기본 폭으로 돌아감: 목록 0–320, 초안 320–867. 내용이 division 쪽으로 옮겨지지 않음: 사진 상태 412–463, 최종 확인 알림이 가운데(제목 303.7–563.7, 올리기 437.7–577.7)로 455.5–495.5와 겹침(기록만, 테스트는 실패로 보지 않음) |
+
+flat에서 시스템이 가운데를 피하지 않는 것이 평평한 화면이라 의도된 동작인지, 앱 여백이 division을 놓친 것인지는 정하지 못했다. 실기기에서 확인할 일로 남긴다. 증거는 실행마다 증거 폴더에 남는다: 테스트 로그(창·요소 좌표), Device Hub 창과 두 화면의 `simctl io --display` 사진(`device-hub/`), division 로그. XCTest 화면 기록(`XCUIScreen.main`, `app.screenshot()`)은 바깥 화면만 찍어 안쪽 자세에서는 검은 화면이므로 안쪽 화면 사진은 스크립트가 찍는다.
+
+**증거 공백**: 위 자세 결과는 시뮬레이터다. 실제 iPhone Duo 하드웨어의 접힘 각도·hinge 센서, 자세 사이 중간 각도는 확인하지 않았다. 2026-11-22에는 Orca Computer Use가 Device Hub에 `permission_denied`를 받아 막혔고, 2026-11-23에 권한이 맞춰진 뒤 위처럼 확인했다(권한 설정은 이 작업에서 바꾸지 않았다). Duo 자세 E2E는 큰 글자·로그인 시트를 다루지 않는다(큰 글자 + 가로는 `ios:e2e-adaptive`). 실기기, 태블릿, Android 실제 두 앱 분할 화면, 데스크톱 창은 확인하지 않았다. 입력 칸은 아직 없어 키보드가 가리는 경우는 해당이 없다.
 
 ## 로컬 Supabase 모드 (debug 전용)
 

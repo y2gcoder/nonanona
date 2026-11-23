@@ -31,6 +31,7 @@ class ReceiptProcessor(
     private val running = AtomicBoolean(false)
     private var manifest: ProcessingManifest
     private var inFlight = 0
+    private val savedRevisions = mutableMapOf<String, Long>()
     var peakInFlight = 0
         private set
 
@@ -117,13 +118,20 @@ class ReceiptProcessor(
             store.reviewFile(draftId, id).takeIf { it.isFile }?.let { ReviewDraft.fromJson(it.readText()) }
         }
 
-    /** 고칠 때마다 원자적으로 쓴다. 다시 읽는 중에도(직접 입력하던 값) 쓸 수 있고, 확인한 사진은 고칠 수 없다. */
+    /**
+     * 고칠 때마다 원자적으로 쓴다. 다시 읽는 중에도(직접 입력하던 값) 쓸 수 있고, 확인한 사진은 고칠 수 없다.
+     * [revision]을 주면 이미 쓴 것보다 오래된 입력은 쓰지 않는다. 쓰지 못하면 던지고, 디스크에는 마지막으로 쓴 입력이 남는다.
+     */
     suspend fun saveReview(
         id: String,
         review: ReviewDraft,
+        revision: Long? = null,
     ) = mutex.withLock {
         find(id, ItemState.Queued, ItemState.Processing, ItemState.Ready, ItemState.Failed)
+        val saved = savedRevisions[id]
+        if (revision != null && saved != null && revision <= saved) return@withLock
         store.writeAtomic(store.reviewFile(draftId, id), review.toJson().toByteArray())
+        if (revision != null) savedRevisions[id] = revision
     }
 
     /** 확인하면 만들어질 가린 사본을 보여 주기 위한 미리보기. 같은 굽기 함수를 쓰지만 디스크에 쓰지 않는다. */
@@ -152,9 +160,17 @@ class ReceiptProcessor(
             check(fields)
             val artifact = flatten(item, maskLineIds, regions)
             val fileName = "$id.png"
-            store.writeAtomic(store.artifactFile(draftId, fileName), artifact.pngBytes)
+            val artifactFile = store.artifactFile(draftId, fileName)
+            store.writeAtomic(artifactFile, artifact.pngBytes)
             val receipt = ConfirmedReceipt(id, fields, fileName, artifact.sha256)
-            replace(item.copy(state = ItemState.Confirmed, confirmed = receipt))
+            try {
+                commit(item.copy(state = ItemState.Confirmed, confirmed = receipt))
+            } catch (e: ReceiptStorageException) {
+                // 확인 상태를 디스크에 쓰지 못했다. 사본을 지우고 확인 전 상태(검토 입력 포함)를 그대로 둔다.
+                artifactFile.delete()
+                throw e
+            }
+            // 확인이 디스크에 남은 뒤에만 검토 입력을 지운다.
             store.reviewFile(draftId, id).delete()
             receipt
         }
@@ -168,7 +184,7 @@ class ReceiptProcessor(
             val item = find(id, ItemState.Failed)
             check(fields)
             val receipt = ConfirmedReceipt(id, fields, null, null)
-            replace(item.copy(state = ItemState.Confirmed, failure = null, confirmed = receipt))
+            commit(item.copy(state = ItemState.Confirmed, failure = null, confirmed = receipt))
             store.reviewFile(draftId, id).delete()
             receipt
         }
@@ -269,6 +285,14 @@ class ReceiptProcessor(
         val item = manifest.items.firstOrNull { it.id == id } ?: throw ProcessorException(ProcessorError.ItemNotFound)
         if (item.state !in states) throw ProcessorException(ProcessorError.WrongState)
         return item
+    }
+
+    /** 확인처럼 되돌릴 수 없는 변화: 디스크에 먼저 쓰고, 성공했을 때만 메모리 상태를 바꾸고 알린다. */
+    private fun commit(item: ProcessingItem) {
+        val next = manifest.copy(items = manifest.items.map { if (it.id == item.id) item else it })
+        store.saveProcessing(next)
+        manifest = next
+        onChange(manifest)
     }
 
     private fun replace(item: ProcessingItem) {

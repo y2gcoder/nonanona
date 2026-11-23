@@ -29,12 +29,17 @@ struct ReceiptReviewContent {
   let totalCount: Int
   let readyCount: Int
   let busy: Bool
+  /// 고친 입력을 디스크에 쓰지 못했다(입력은 화면·메모리에 남아 있다).
+  let saveFailed: Bool
+  /// 확인을 디스크에 남기지 못했다(확인되지 않았다).
+  let confirmFailed: Bool
 }
 
 struct ReceiptReviewActions {
   let edit: (ReviewEdit) -> Void
   let requestPreview: () -> Void
   let retry: () -> Void
+  let retrySave: () -> Void
   let confirmAndNext: () -> Void
 }
 
@@ -229,7 +234,7 @@ struct ReceiptReviewView: View {
           keyboard: .default
         ) { actions.edit(.merchant($0)) }
         FieldRow(
-          label: "날짜(예: 2026-11-03)", text: content.review.date, problem: problem(.date), id: "review-date",
+          label: "날짜(예: 2026-11-03 또는 20261103)", text: content.review.date, problem: problem(.date), id: "review-date",
           keyboard: .numbersAndPunctuation
         ) { actions.edit(.date($0)) }
         FieldRow(
@@ -276,6 +281,20 @@ struct ReceiptReviewView: View {
 
   private var confirmBar: some View {
     VStack(spacing: Spacing.s) {
+      if content.confirmFailed {
+        Text("확인을 저장하지 못했어요. 아직 확인되지 않았고 입력은 그대로예요. 다시 눌러 주세요.")
+          .textRole(.caption).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading)
+          .accessibilityIdentifier("review-confirm-error")
+      }
+      if content.saveFailed {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
+          Text("입력을 기기에 저장하지 못했어요. 화면의 입력은 그대로예요.")
+            .textRole(.caption).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("review-save-error")
+          Button("다시 저장", action: actions.retrySave).buttonStyle(.bordered)
+            .accessibilityIdentifier("review-save-retry")
+        }
+      }
       Group {
         if !content.problems.isEmpty {
           Text("확인하려면 위에서 표시한 값을 고쳐 주세요.").foregroundStyle(.red)

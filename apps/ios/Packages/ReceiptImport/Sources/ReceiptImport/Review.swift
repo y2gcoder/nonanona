@@ -121,30 +121,65 @@ public enum ReviewForm {
     init(_ fields: Set<FieldProblem>) { self.fields = fields }
   }
 
-  /// yyyy-MM-dd이고 달력에 있는 날짜만.
-  static func validDate(_ raw: String) -> String? {
-    let text = raw.trimmingCharacters(in: .whitespaces)
-    guard text.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil else { return nil }
-    let parts = text.split(separator: "-").compactMap { Int($0) }
-    var calendar = Calendar(identifier: .gregorian)
-    calendar.timeZone = TimeZone(identifier: "UTC")!
-    let components = DateComponents(year: parts[0], month: parts[1], day: parts[2])
-    guard (2000...2100).contains(parts[0]), components.isValidDate(in: calendar) else { return nil }
-    return text
+  /// 붙여넣은 글자의 숫자·구분자를 일부러 ASCII로 맞춘다. 모든 유니코드 10진 숫자(전각 "２", 아랍-인도 "٢" 등)를
+  /// 0–9로, 여러 가지 줄표·전각 빗금·마침표를 그대로 두지 않고 정해진 구분자로 바꾼다. 그 밖의 글자는 그대로 두어 검사에서 걸린다.
+  static func asciiDigits(_ raw: String, separators: [Character: Character]) -> String {
+    var out = ""
+    for character in raw {
+      if let mapped = separators[character] {
+        out.append(mapped)
+      } else if character.unicodeScalars.count == 1, let scalar = character.unicodeScalars.first,
+        scalar.properties.numericType == .decimal, let value = scalar.properties.numericValue,
+        value >= 0, value <= 9, value == value.rounded()
+      {
+        out.append(Character(String(Int(value))))
+      } else {
+        out.append(character)
+      }
+    }
+    return out.trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: "\u{3000}")))
   }
 
-  /// "1,408" → 1408, USD "12.5" → 1250. 쉼표·공백은 무시한다. 소수 자릿수가 통화보다 많거나 0 이하면 nil.
+  static let dateSeparators: [Character: Character] = [
+    "/": "-", ".": "-", "\u{2010}": "-", "\u{2011}": "-", "\u{2012}": "-", "\u{2013}": "-", "\u{2014}": "-",
+    "\u{2212}": "-", "\u{FF0D}": "-", "\u{FF0F}": "-", "\u{FF0E}": "-",
+  ]
+
+  /// yyyy-MM-dd(또는 yyyy-M-d, 숫자 8자리 yyyyMMdd)이고 달력에 있는 날짜만. 결과는 항상 ASCII yyyy-MM-dd다.
+  /// 세 부분을 모두 숫자로 읽은 뒤에만 쓴다(읽지 못하면 nil, 색인으로 꺼내지 않는다).
+  static func validDate(_ raw: String) -> String? {
+    var text = asciiDigits(raw, separators: dateSeparators)
+    if text.count == 8, text.allSatisfy({ $0.isASCII && $0.isNumber }) {
+      text = "\(text.prefix(4))-\(text.dropFirst(4).prefix(2))-\(text.suffix(2))"
+    }
+    guard text.range(of: #"^[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}$"#, options: .regularExpression) != nil else { return nil }
+    let parts = text.split(separator: "-", omittingEmptySubsequences: false)
+    guard parts.count == 3, let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]) else {
+      return nil
+    }
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = TimeZone(identifier: "UTC")!
+    guard (2000...2100).contains(year), DateComponents(year: year, month: month, day: day).isValidDate(in: calendar)
+    else { return nil }
+    return String(format: "%04d-%02d-%02d", year, month, day)
+  }
+
+  static let amountSeparators: [Character: Character] = ["\u{FF0E}": ".", "\u{FF0C}": ","]
+
+  /// "1,408" → 1408, USD "12.5" → 1250. 쉼표·공백은 무시한다(전각 숫자·쉼표·마침표는 ASCII로 맞춘다).
+  /// 소수 자릿수가 통화보다 많거나 0 이하면 nil.
   static func amountMinor(_ raw: String, minorDigits: Int) -> Int? {
-    let text = raw.filter { $0 != "," && $0 != " " }
-    let pattern = minorDigits == 0 ? #"^\d{1,9}$"# : #"^\d{1,9}(\.\d{1,\#(minorDigits)})?$"#
+    let text = asciiDigits(raw, separators: amountSeparators).filter { $0 != "," && $0 != " " && $0 != "\u{3000}" }
+    let pattern = minorDigits == 0 ? #"^[0-9]{1,9}$"# : #"^[0-9]{1,9}(\.[0-9]{1,\#(minorDigits)})?$"#
     guard text.range(of: pattern, options: .regularExpression) != nil else { return nil }
     let parts = text.split(separator: ".", omittingEmptySubsequences: false)
-    let whole = Int(parts[0]) ?? 0
+    guard let whole = parts.first.flatMap({ Int($0) }) else { return nil }
     var fraction = parts.count > 1 ? String(parts[1]) : ""
     while fraction.count < minorDigits { fraction += "0" }
     var scale = 1
     for _ in 0..<minorDigits { scale *= 10 }
-    let value = whole * scale + (Int(fraction) ?? 0)
+    guard let fractionValue = fraction.isEmpty ? 0 : Int(fraction) else { return nil }
+    let value = whole * scale + fractionValue
     guard value > 0, value < maxAmountMinor else { return nil }
     return value
   }

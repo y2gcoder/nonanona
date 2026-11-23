@@ -25,6 +25,8 @@ class Adapters(
     val debugReceiptConfirm: DebugReceiptConfirm? = null,
     /** 개발용 올리기 화면. release는 null이라 올리기 동작이 화면에 없다. */
     val debugUploadUi: DebugUploadUi? = null,
+    /** 검증용 저장 실패 주입. release는 null. */
+    val writeFault: ((File) -> Boolean)? = null,
 )
 
 /** 초안 화면이 개발용 올리기 화면에 넘기는 값. */
@@ -73,7 +75,7 @@ class AppGraph(
     private val appContext = context.applicationContext
     val adapters: Adapters = createAdapters(appContext)
     val contentResolver: ContentResolver = appContext.contentResolver
-    val drafts = ReceiptDraftStore(File(appContext.filesDir, "receipt-import"))
+    val drafts = ReceiptDraftStore(File(appContext.filesDir, "receipt-import"), writeFault = adapters.writeFault)
 
     /** ML Kit 번들 일본어 모델. 처음 쓸 때 만든다. */
     val recognizer: ReceiptRecognizer by lazy { MlKitReceiptRecognizer() }

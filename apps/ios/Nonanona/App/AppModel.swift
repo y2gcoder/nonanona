@@ -20,14 +20,32 @@ enum UploadState: Equatable {
   case uploading
   case done(created: Int, replayed: Int)
   case failed(ReceiptUploadFailure, uploadedBefore: Int)
+  /// 최종 확인 뒤 올릴 영수증(목록·사본·값)이 바뀌어 아무것도 보내지 않았다. 다시 확인해야 한다.
+  case contentChanged
+}
+
+/// 최종 확인 때 사용자가 동의한 영수증 한 장: 바뀌지 않는 사진 ID, 가린 사본 해시, 확인한 값.
+struct SharedReceipt: Equatable {
+  let itemID: String
+  let artifactSHA256: String
+  let fields: AllowedReceiptFields
+
+  init(_ outbound: OutboundReceipt) {
+    itemID = outbound.receipt.itemID
+    artifactSHA256 = outbound.artifactSHA256
+    fields = outbound.receipt.fields
+  }
 }
 
 /// 올리기 최종 확인 창이 묻고 있는 것. 창 크기·접기·회전으로 화면이 다시 그려져도 같은 초안·같은 올릴 곳을 묻는다.
+/// 동의한 시점의 여행방과 영수증(사진 ID·사본 해시·값)을 그대로 담아, 보내기 직전에 하나라도 다르면 보내지 않는다.
 struct UploadConfirmation: Equatable {
   let draftID: String
   let tripID: TripID
   let tripName: String
-  let count: Int
+  let receipts: [SharedReceipt]
+
+  var count: Int { receipts.count }
 }
 
 /// 검토 화면에 열린 영수증(초안 ID + 사진 ID). 안정 ID라 창 크기·접기·회전이 바뀌어도 같은 사진이 남는다.
@@ -80,6 +98,12 @@ final class AppModel {
   var showsMaskedPreview = false
   /// "확인하고 다음"을 처리하는 중인 사진(두 번 누르기 막기).
   private(set) var confirming: ReviewTarget?
+  /// 검토 입력을 디스크에 쓰지 못한 사진(입력은 메모리에 남아 있다). 다음 저장이 성공하면 지운다.
+  private(set) var draftSaveFailed: Set<ReviewTarget> = []
+  /// "확인하고 다음"이 디스크에 확인을 남기지 못한 사진. 확인되지 않았고 입력·선택은 그대로다.
+  private(set) var confirmFailed: Set<ReviewTarget> = []
+  private var reviewRevision = 0
+  private var settledRevision: [ReviewTarget: Int] = [:]
   /// 목록 행의 한 줄 요약(가게 · 날짜 · 금액 · 가림). 확인 필요한 사진만, 제안과 저장된 입력으로 만든다.
   private(set) var rowSummaries: [ReviewTarget: String] = [:]
   /// 확인할 사진을 다 보고 목록으로 돌아온 초안. 목록이 남은 상태를 알린다.
@@ -238,8 +262,32 @@ final class AppModel {
     {
       previews[target] = nil
     }
-    let saved = draft
-    Task { try? await processor.saveReview(target.itemID, saved) }
+    save(target, draft, with: processor)
+  }
+
+  /// 메모리의 입력을 다시 디스크에 쓴다(저장 실패 안내의 "다시 저장").
+  func retrySave(_ target: ReviewTarget) {
+    guard let processor = processors[target.draftID], let draft = reviewDrafts[target] else { return }
+    save(target, draft, with: processor)
+  }
+
+  /// 순번을 붙여 쓴다. 처리기는 이미 쓴 것보다 오래된 순번을 쓰지 않고, 실패하면 디스크에는 마지막으로 쓴 입력이 남는다.
+  /// 실패 안내는 가장 최근 순번의 결과로만 바꾼다(늦게 끝난 오래된 저장이 안내를 덮지 않게).
+  private func save(_ target: ReviewTarget, _ draft: ReviewDraft, with processor: ReceiptProcessor) {
+    reviewRevision += 1
+    let revision = reviewRevision
+    Task {
+      let ok: Bool
+      do {
+        try await processor.saveReview(target.itemID, draft, revision: revision)
+        ok = true
+      } catch {
+        ok = false
+      }
+      guard revision >= settledRevision[target] ?? 0 else { return }
+      settledRevision[target] = revision
+      if ok { draftSaveFailed.remove(target) } else { draftSaveFailed.insert(target) }
+    }
   }
 
   /// 지금 가림으로 만든 가린 사본 미리보기. 확인과 같은 굽기 함수를 쓰고 디스크에 쓰지 않는다.
@@ -267,6 +315,7 @@ final class AppModel {
     else { return }
     confirming = target
     defer { confirming = nil }
+    confirmFailed.remove(target)
     do {
       switch item.state {
       case .ready:
@@ -278,8 +327,12 @@ final class AppModel {
         return
       }
     } catch {
+      // 확인이 디스크에 남지 않았다. 확인 전 상태·입력·선택을 그대로 두고 알린다.
+      confirmFailed.insert(target)
       return
     }
+    // 여기부터는 처리기가 확인을 디스크에 쓴 뒤다.
+    draftSaveFailed.remove(target)
     reviewDrafts[target] = nil
     previews[target] = nil
     let manifest = await processor.snapshot()
@@ -293,10 +346,14 @@ final class AppModel {
   }
 
   /// 올릴 곳과 장수를 묻는 최종 확인을 연다. 참여한 여행방, 로그인, 확인한 영수증이 있을 때만 연다.
-  func requestUpload(draftID: String) {
-    let count = confirmedCount(draftID: draftID)
-    guard let room, session != nil, count > 0, uploads[draftID] != .uploading else { return }
-    uploadConfirmation = UploadConfirmation(draftID: draftID, tripID: room.id, tripName: room.name, count: count)
+  /// 확인 창에는 기기 경계를 지난 영수증(사진 ID·사본 해시·값)을 그대로 담는다.
+  func requestUpload(draftID: String) async {
+    guard let room, session != nil, uploads[draftID] != .uploading, let processor = processors[draftID],
+      let outbound = try? await processor.outboundReceipts(), !outbound.isEmpty
+    else { return }
+    guard self.room?.id == room.id else { return }
+    uploadConfirmation = UploadConfirmation(
+      draftID: draftID, tripID: room.id, tripName: room.name, receipts: outbound.map(SharedReceipt.init))
   }
 
   func cancelUploadConfirmation() { uploadConfirmation = nil }
@@ -306,7 +363,7 @@ final class AppModel {
   func confirmUpload(_ confirmation: UploadConfirmation) {
     uploadConfirmation = nil
     guard let room, room.id == confirmation.tripID else { return }
-    Task { await uploadConfirmedReceipts(draftID: confirmation.draftID, to: room) }
+    Task { await uploadConfirmedReceipts(confirmation, to: room) }
   }
 
   /// 올릴 수 있는 영수증: 확인했고 가린 사본이 있는 것. 직접 입력(사본 없음)은 이번 단계에서 올리지 않는다.
@@ -319,15 +376,22 @@ final class AppModel {
   }
 
   /// 확인한 영수증을 참여한 여행방에 올린다. 사용자가 올릴 곳과 장수를 보고 최종 확인한 뒤에만 부른다.
-  /// 기기 경계(`outboundReceipts`)를 지난 가림 사본과 허용 필드만 보낸다. 한 장이라도 실패하면 거기서 멈춘다.
-  func uploadConfirmedReceipts(draftID: String, to room: TripRoom) async {
-    guard let processor = processors[draftID], uploads[draftID] != .uploading else { return }
+  /// 기기 경계(`outboundReceipts`)를 지난 가림 사본과 허용 필드만 보낸다. 동의한 영수증(사진 ID·사본 해시·값)과
+  /// 지금 보낼 것이 하나라도 다르면 아무것도 보내지 않는다. 한 장이라도 실패하면 거기서 멈춘다.
+  func uploadConfirmedReceipts(_ confirmation: UploadConfirmation, to room: TripRoom) async {
+    let draftID = confirmation.draftID
+    guard let processor = processors[draftID], uploads[draftID] != .uploading, room.id == confirmation.tripID
+    else { return }
     uploads[draftID] = .uploading
     let outbound: [OutboundReceipt]
     do {
       outbound = try await processor.outboundReceipts()
     } catch {
       uploads[draftID] = .failed(.unknown, uploadedBefore: 0)
+      return
+    }
+    guard outbound.map(SharedReceipt.init) == confirmation.receipts else {
+      uploads[draftID] = .contentChanged
       return
     }
     var created = 0

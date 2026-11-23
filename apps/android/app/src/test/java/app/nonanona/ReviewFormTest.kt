@@ -37,7 +37,7 @@ class ReviewFormTest {
             ReviewForm.validate("2026-11-03", "12.5", "USD", ""),
         )
         assertEquals(setOf(FieldProblem.Date), problems("2026-02-30", "100", "JPY"))
-        assertEquals(setOf(FieldProblem.Date), problems("2026/11/03", "100", "JPY"))
+        assertEquals(setOf(FieldProblem.Date), problems("2026_11_03", "100", "JPY"))
         assertEquals(setOf(FieldProblem.Amount), problems("2026-11-03", "0", "JPY"))
         assertEquals("엔은 소수가 없다", setOf(FieldProblem.Amount), problems("2026-11-03", "1.5", "JPY"))
         assertEquals(setOf(FieldProblem.Amount), problems("2026-11-03", "100000000", "JPY"))
@@ -82,5 +82,26 @@ class ReviewFormTest {
         assertEquals("뒤에 없으면 앞쪽", "p1", manifest.nextToReview("p7")?.id)
         assertEquals("p1", manifest.nextToReview(null)?.id)
         assertNull("남은 ready가 없으면 목록으로", m(ItemState.Confirmed, ItemState.Ready).nextToReview("p2"))
+    }
+
+    /** 일본어·아랍어 자판에서 붙여넣은 날짜·금액: 숫자와 구분자를 ASCII로 맞추고, 읽지 못하면 거절한다(iOS와 같은 경우). */
+    @Test
+    fun pastedLocalizedDigitsAreNormalizedOrRejectedSafely() {
+        assertEquals("2026-11-08", ReviewForm.validDate("２０２６－１１－０８"))
+        assertEquals("2026-11-08", ReviewForm.validDate("٢٠٢٦-١١-٠٨"))
+        assertEquals("2026-11-08", ReviewForm.validDate(" 2026/11/8 "))
+        assertEquals("2026-11-08", ReviewForm.validDate("20261108"))
+        assertEquals("2026-11-08", ReviewForm.validDate("2026‐11‐08"))
+        for (bad in listOf("２０２６-１１", "2026-11-", "-2026-11-08", "2026--08", "２０２６年１１月８日", "2026-1１-0x", "", "----", "2026-02-30")) {
+            assertNull(bad, ReviewForm.validDate(bad))
+        }
+        assertEquals(1760L, ReviewForm.amountMinor("１，７６０", 0))
+        assertEquals(1760L, ReviewForm.amountMinor("١٧٦٠", 0))
+        assertEquals(1250L, ReviewForm.amountMinor("１２．５", 2))
+        assertNull(ReviewForm.amountMinor("1760円", 0))
+        assertEquals(
+            Validation.Valid(AllowedReceiptFields("2026-11-08", 1760, "JPY", "ゆきみ茶屋")),
+            ReviewForm.validate("２０２６－１１－０８", "１７６０", "JPY", "ゆきみ茶屋"),
+        )
     }
 }

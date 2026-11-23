@@ -24,12 +24,19 @@ class IncomingPhoto(
 
 class DraftLimitException : IOException("too many photos")
 
+/** 기기 저장소에 쓰지 못했다(공간 부족 등). 화면은 "저장하지 못했어요"로 알리고 이전 상태를 지킨다. */
+class ReceiptStorageException(
+    cause: Throwable? = null,
+) : IOException("write failed", cause)
+
 /**
  * 초안 폴더를 다룬다. 사진과 목록 파일을 숨긴 임시 폴더에 다 쓴 뒤 이름을 바꿔서,
  * 쓰는 도중 프로세스가 끝나도 반쯤 쓴 초안이 목록에 보이지 않게 한다.
  */
 class ReceiptDraftStore(
     root: File,
+    /** 검증용 쓰기 실패 주입(테스트와 debug 빌드만 넘긴다). true를 돌려주면 그 파일 쓰기가 실패한다. */
+    private val writeFault: ((File) -> Boolean)? = null,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val draftsDir = File(root, "drafts")
@@ -130,10 +137,15 @@ class ReceiptDraftStore(
         file: File,
         bytes: ByteArray,
     ) {
-        file.parentFile?.mkdirs()
-        val staging = File(file.parentFile, ".${file.name}.partial")
-        staging.writeBytes(bytes)
-        if (!staging.renameTo(file)) throw IOException("cannot write ${file.name}")
+        if (writeFault?.invoke(file) == true) throw ReceiptStorageException()
+        try {
+            file.parentFile?.mkdirs()
+            val staging = File(file.parentFile, ".${file.name}.partial")
+            staging.writeBytes(bytes)
+            if (!staging.renameTo(file)) throw IOException("cannot write ${file.name}")
+        } catch (e: IOException) {
+            throw ReceiptStorageException(e)
+        }
     }
 
     private fun safeExtension(raw: String): String = raw.lowercase().filter { it in 'a'..'z' || it in '0'..'9' }.ifEmpty { "img" }

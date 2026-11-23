@@ -62,6 +62,9 @@
       case .done(let created, let replayed):
         Text("올림 \(created + replayed)장(이미 올린 \(replayed)장 포함)")
           .textRole(.supporting).accessibilityIdentifier("upload-status")
+      case .contentChanged:
+        Text("최종 확인 뒤 올릴 영수증이 바뀌어 아무것도 올리지 않았어요. 다시 확인해 주세요.")
+          .textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("upload-status")
       case .failed(let failure, _):
         Text(message(failure)).textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("upload-status")
       }

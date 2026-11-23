@@ -16,6 +16,7 @@ import app.nonanona.feature.receiptimport.ReceiptDraftStore
 import app.nonanona.feature.receiptimport.ReceiptFlattener
 import app.nonanona.feature.receiptimport.ReceiptProcessor
 import app.nonanona.feature.receiptimport.ReceiptRecognizer
+import app.nonanona.feature.receiptimport.ReceiptStorageException
 import app.nonanona.feature.receiptimport.ReviewDraft
 import app.nonanona.feature.receiptimport.ReviewForm
 import app.nonanona.feature.receiptimport.Validation
@@ -412,5 +413,99 @@ class ReceiptProcessorTest {
             } catch (e: ProcessorException) {
                 assertEquals(ProcessorError.WrongState, e.error)
             }
+        }
+
+    /** 경로 조각(processing.json, reviews/)으로 쓰기 실패를 켜고 끈다. */
+    private class WriteFaults {
+        @Volatile var failing: Set<String> = emptySet()
+
+        fun shouldFail(file: File) = failing.any { file.path.contains(it) }
+    }
+
+    private fun expectStorageFailure(block: suspend () -> Unit) =
+        runBlocking {
+            try {
+                block()
+                fail("expected storage failure")
+            } catch (e: ReceiptStorageException) {
+                // 기대한 실패
+            }
+        }
+
+    /**
+     * 확인 상태를 디스크에 쓰지 못하면 확인되지 않은 것으로 남는다: 알림도 없고, 검토 입력은 그대로(사본은 지움),
+     * 처리기를 다시 만들어도(앱 재시작) 확인 전이다. 쓰기가 돌아오면 같은 입력으로 확인된다(iOS와 같은 경우).
+     */
+    @Test
+    fun confirmThatCannotBeWrittenLeavesReceiptUnconfirmedAcrossRestart() =
+        runBlocking {
+            val faults = WriteFaults()
+            val store = ReceiptDraftStore(tmp.newFolder(), writeFault = faults::shouldFail)
+            val draft = store.create(DraftSource.Share, listOf(fixture(0), fixture(9)))
+            var changes = 0
+            val processor = ReceiptProcessor(store, draft, TruthRecognizer(), flattener, onChange = { changes++ })
+            processor.run()
+            val ready =
+                processor
+                    .snapshot()
+                    .items
+                    .single { it.state == ItemState.Ready }
+                    .id
+            val failed =
+                processor
+                    .snapshot()
+                    .items
+                    .single { it.state == ItemState.Failed }
+                    .id
+            val proposal = processor.proposal(ready)
+            processor.saveReview(ready, ReviewDraft(amount = "1500"))
+            processor.saveReview(failed, ReviewDraft(date = "2026-11-08", amount = "1760"))
+
+            faults.failing = setOf("processing.json")
+            val fields = AllowedReceiptFields("2026-11-03", 1500, "JPY", "さくら食堂")
+            val manual = AllowedReceiptFields("2026-11-08", 1760, "JPY", null)
+            val before = changes
+            expectStorageFailure { processor.confirm(ready, fields, proposal.suggestedMaskLineIds.toSet()) }
+            expectStorageFailure { processor.confirmManual(failed, manual) }
+            assertEquals("확인 상태를 알리지 않는다", before, changes)
+            assertEquals(listOf(ItemState.Ready, ItemState.Failed), processor.snapshot().items.map { it.state })
+            assertEquals("1500", processor.review(ready)?.amount)
+            assertEquals("1760", processor.review(failed)?.amount)
+            assertFalse("사본을 남기지 않는다", store.artifactFile(draft.id, "$ready.png").exists())
+            assertTrue(processor.outboundReceipts().isEmpty())
+
+            faults.failing = emptySet()
+            val reopened = ReceiptProcessor(store, draft, TruthRecognizer(), flattener)
+            assertEquals(listOf(ItemState.Ready, ItemState.Failed), reopened.snapshot().items.map { it.state })
+            assertEquals("1500", reopened.review(ready)?.amount)
+            reopened.confirm(ready, fields, proposal.suggestedMaskLineIds.toSet())
+            reopened.confirmManual(failed, manual)
+            assertEquals(listOf(ItemState.Confirmed, ItemState.Confirmed), reopened.snapshot().items.map { it.state })
+            assertFalse("확인이 남은 뒤에 지운다", store.reviewFile(draft.id, ready).exists())
+        }
+
+    /** 검토 입력을 쓰지 못하면 던지고, 디스크에는 마지막으로 쓴 입력이 남는다. 늦게 도착한 오래된 입력은 쓰지 않는다. */
+    @Test
+    fun draftSaveFailureKeepsLastDurableDraftAndOrderIsByRevision() =
+        runBlocking {
+            val faults = WriteFaults()
+            val store = ReceiptDraftStore(tmp.newFolder(), writeFault = faults::shouldFail)
+            val draft = store.create(DraftSource.Share, listOf(fixture(0)))
+            val processor = ReceiptProcessor(store, draft, TruthRecognizer(), flattener)
+            processor.run()
+            val id =
+                processor
+                    .snapshot()
+                    .items
+                    .single()
+                    .id
+            processor.saveReview(id, ReviewDraft(amount = "100"), revision = 1)
+            faults.failing = setOf("reviews/")
+            expectStorageFailure { processor.saveReview(id, ReviewDraft(amount = "200"), revision = 2) }
+            assertEquals("100", processor.review(id)?.amount)
+            faults.failing = emptySet()
+            processor.saveReview(id, ReviewDraft(amount = "300"), revision = 4)
+            processor.saveReview(id, ReviewDraft(amount = "250"), revision = 3)
+            assertEquals("오래된 입력이 새 입력을 덮지 않는다", "300", processor.review(id)?.amount)
         }
 }

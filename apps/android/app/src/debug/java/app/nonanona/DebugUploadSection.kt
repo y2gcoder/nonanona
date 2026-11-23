@@ -118,6 +118,10 @@ object DebugUploadSection : DebugUploadUi {
                 stringResource(R.string.debug_upload_done, state.created + state.replayed, state.replayed) to false
             }
 
+            UploadState.ContentChanged -> {
+                stringResource(R.string.debug_upload_content_changed) to true
+            }
+
             is UploadState.Failed -> {
                 stringResource(
                     when (state.failure) {

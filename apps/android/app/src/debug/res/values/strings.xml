@@ -19,6 +19,7 @@
     <string name="debug_upload_session_expired">로그인이 만료됐어요. 다시 로그인한 뒤 다시 올려 주세요.</string>
     <string name="debug_upload_destination_unavailable">이 여행방에 올릴 수 없어요. 여행방 구성원인지 확인해 주세요.</string>
     <string name="debug_upload_unavailable">지금은 올릴 수 없어요. 잠시 후 다시 시도해 주세요.</string>
+    <string name="debug_upload_content_changed">최종 확인 뒤 올릴 영수증이 바뀌어 아무것도 올리지 않았어요. 다시 확인해 주세요.</string>
     <string name="debug_upload_unknown">올리지 못했어요. 다시 시도해 주세요.</string>
     <string name="local_login_notice">로컬 테스트 계정 · 실제 소셜 로그인이 아니에요</string>
 </resources>

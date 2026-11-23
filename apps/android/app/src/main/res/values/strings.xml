@@ -101,7 +101,7 @@
     <string name="review_fields_title">읽어 낸 값</string>
     <string name="review_manual_title">직접 입력</string>
     <string name="review_merchant">가게</string>
-    <string name="review_date">날짜(예: 2026-11-03)</string>
+    <string name="review_date">날짜(예: 2026-11-03 또는 20261103)</string>
     <string name="review_amount">금액</string>
     <string name="review_currency">통화</string>
     <string name="review_merchant_none">없음</string>
@@ -114,6 +114,9 @@
     <string name="review_hint_manual">확인하면 직접 입력한 값만 저장해요.</string>
     <string name="review_hint_ready">확인하면 가린 사본을 만들어요. 원본은 이 기기에만 남아요.</string>
     <string name="review_confirm_next">확인하고 다음</string>
+    <string name="review_confirm_error">확인을 저장하지 못했어요. 아직 확인되지 않았고 입력은 그대로예요. 다시 눌러 주세요.</string>
+    <string name="review_save_error">입력을 기기에 저장하지 못했어요. 화면의 입력은 그대로예요.</string>
+    <string name="review_save_retry">다시 저장</string>
 
     <string name="invite_card_title">초대받은 여행방이 있어요</string>
     <string name="invite_card_body">로그인하면 바로 참여할 수 있어요.</string>

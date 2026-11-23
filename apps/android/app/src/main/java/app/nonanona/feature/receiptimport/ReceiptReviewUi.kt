@@ -129,12 +129,17 @@ class ReceiptReviewContent(
     val totalCount: Int,
     val busy: Boolean,
     val showsMaskedPreview: Boolean,
+    /** 고친 입력을 디스크에 쓰지 못했다(입력은 화면·메모리에 남아 있다). */
+    val saveFailed: Boolean = false,
+    /** 확인을 디스크에 남기지 못했다(확인되지 않았다). */
+    val confirmFailed: Boolean = false,
 )
 
 class ReceiptReviewActions(
     val edit: (ReviewEdit) -> Unit,
     val requestPreview: () -> Unit,
     val retry: () -> Unit,
+    val retrySave: () -> Unit,
     val confirmAndNext: () -> Unit,
     val setShowsMaskedPreview: (Boolean) -> Unit,
 )
@@ -545,6 +550,27 @@ private fun ConfirmBar(
                 .padding(horizontal = Spacing.m, vertical = Spacing.s),
             verticalArrangement = Arrangement.spacedBy(Spacing.s),
         ) {
+            if (content.confirmFailed) {
+                Text(
+                    stringResource(R.string.review_confirm_error),
+                    style = TextRoles.caption,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.testTag("review_confirm_error"),
+                )
+            }
+            if (content.saveFailed) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                    Text(
+                        stringResource(R.string.review_save_error),
+                        style = TextRoles.caption,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.weight(1f).testTag("review_save_error"),
+                    )
+                    OutlinedButton(onClick = actions.retrySave, modifier = Modifier.heightIn(min = 48.dp).testTag("review_save_retry")) {
+                        Text(stringResource(R.string.review_save_retry))
+                    }
+                }
+            }
             val hint =
                 when {
                     content.problems.isNotEmpty() -> R.string.review_hint_problems
@@ -601,8 +627,9 @@ private fun OriginalPhoto(
             .fillMaxWidth()
             .aspectRatio(aspect)
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            .clearAndSetSemantics { contentDescription = description }
-            .testTag("review_original"),
+            // testTag는 clearAndSetSemantics보다 앞에 둔다(뒤에 두면 함께 지워진다).
+            .testTag("review_original")
+            .clearAndSetSemantics { contentDescription = description },
     ) {
         if (image !=
             null
@@ -642,16 +669,11 @@ private fun bands(
     return lines + masked.regions.map { it.topPercent / 100.0 to it.bottomPercent / 100.0 }
 }
 
+/** 화면용으로 줄여 읽되 OCR·굽기와 같은 디코딩(EXIF 방향 적용)을 쓴다. 읽지 못하면 null(빈 칸). */
 internal fun decodeSampled(
     file: File,
     maxPx: Int,
-): ImageBitmap? {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeFile(file.path, bounds)
-    var sample = 1
-    while (bounds.outWidth / (sample * 2) >= maxPx || bounds.outHeight / (sample * 2) >= maxPx) sample *= 2
-    return BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })?.asImageBitmap()
-}
+): ImageBitmap? = runCatching { ReceiptImages.decode(file, maxPx).asImageBitmap() }.getOrNull()
 
 internal fun ProcessingItem.reviewStatusRes(): Int =
     when (state) {

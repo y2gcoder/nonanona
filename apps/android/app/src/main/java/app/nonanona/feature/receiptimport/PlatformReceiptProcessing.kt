@@ -15,14 +15,21 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.ExecutionException
 
-/** OCR과 가림 굽기가 같은 디코딩(방향 적용, 긴 변 3000px 이하)을 써서 OCR 좌표가 픽셀과 맞게 한다. */
-private object ReceiptImages {
-    fun decode(file: File): Bitmap {
+/**
+ * 영수증 사진 디코딩은 이것 하나다: OCR, 가림 굽기, 검토 화면의 원본·가림 표시, 목록 미리보기가 모두 쓴다.
+ * EXIF 방향(회전·뒤집기 8가지)을 적용한 똑바로 선 픽셀을 돌려주므로, OCR 좌표(0~1)가 화면과 구운 사본에 같은 자리로 맞는다.
+ * 긴 변이 [maxPx] 이하가 되도록 2의 거듭제곱으로 줄여 읽는다(가로세로 비율은 그대로).
+ */
+internal object ReceiptImages {
+    fun decode(
+        file: File,
+        maxPx: Int = 3000,
+    ): Bitmap {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.path, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw ProcessingException(ProcessingFailure.InvalidImage)
         var sample = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 3000) sample *= 2
+        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxPx) sample *= 2
         val decoded =
             BitmapFactory.decodeFile(
                 file.path,
@@ -31,16 +38,54 @@ private object ReceiptImages {
                     inPreferredConfig = Bitmap.Config.ARGB_8888
                 },
             ) ?: throw ProcessingException(ProcessingFailure.InvalidImage)
-        val degrees =
-            when (runCatching { ExifInterface(file.path).getAttributeInt(ExifInterface.TAG_ORIENTATION, 1) }.getOrDefault(1)) {
-                ExifInterface.ORIENTATION_ROTATE_90 -> 90f
-                ExifInterface.ORIENTATION_ROTATE_180 -> 180f
-                ExifInterface.ORIENTATION_ROTATE_270 -> 270f
-                else -> 0f
-            }
-        if (degrees == 0f) return decoded
-        return Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, Matrix().apply { postRotate(degrees) }, true)
+        val orientation =
+            runCatching { ExifInterface(file.path).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL) }
+                .getOrDefault(ExifInterface.ORIENTATION_NORMAL)
+        val matrix = orientationMatrix(orientation) ?: return decoded
+        return Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
     }
+
+    /** EXIF 방향 값 → 똑바로 세우는 변환. 1(그대로)이거나 모르는 값이면 null. */
+    private fun orientationMatrix(orientation: Int): Matrix? =
+        when (orientation) {
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> {
+                Matrix().apply { postScale(-1f, 1f) }
+            }
+
+            ExifInterface.ORIENTATION_ROTATE_180 -> {
+                Matrix().apply { postRotate(180f) }
+            }
+
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> {
+                Matrix().apply { postScale(1f, -1f) }
+            }
+
+            ExifInterface.ORIENTATION_TRANSPOSE -> {
+                Matrix().apply {
+                    postRotate(90f)
+                    postScale(-1f, 1f)
+                }
+            }
+
+            ExifInterface.ORIENTATION_ROTATE_90 -> {
+                Matrix().apply { postRotate(90f) }
+            }
+
+            ExifInterface.ORIENTATION_TRANSVERSE -> {
+                Matrix().apply {
+                    postRotate(-90f)
+                    postScale(-1f, 1f)
+                }
+            }
+
+            ExifInterface.ORIENTATION_ROTATE_270 -> {
+                Matrix().apply { postRotate(270f) }
+            }
+
+            else -> {
+                null
+            }
+        }
 }
 
 /** ML Kit 번들 일본어 모델. 기기 안에서만 동작한다(native-batch-import 실험에서 옮김). */

@@ -46,7 +46,7 @@ struct ReviewFormTests {
       return p.fields
     }
     #expect(problems("2026-02-30", "100", "JPY") == [.date])
-    #expect(problems("2026/11/03", "100", "JPY") == [.date])
+    #expect(problems("2026_11_03", "100", "JPY") == [.date])
     #expect(problems("2026-11-03", "0", "JPY") == [.amount])
     #expect(problems("2026-11-03", "1.5", "JPY") == [.amount], "엔은 소수가 없다")
     #expect(problems("2026-11-03", "100000000", "JPY") == [.amount])
@@ -184,4 +184,109 @@ private func blackRows(_ png: Data) throws -> Set<Int> {
     if black { rows.insert(y) }
   }
   return rows
+}
+
+/// 쓰기 실패를 켜고 끌 수 있는 주입기. 경로 조각(processing.json, reviews/, confirmed/)으로 고른다.
+private final class WriteFaults: @unchecked Sendable {
+  private let lock = NSLock()
+  private var failing: Set<String> = []
+  func set(_ parts: Set<String>) { lock.withLock { failing = parts } }
+  func shouldFail(_ url: URL) -> Bool { lock.withLock { failing.contains { url.path.contains($0) } } }
+}
+
+struct LocalizedInputTests {
+  /// 일본어·아랍어 자판에서 붙여넣은 날짜·금액: 숫자와 구분자를 ASCII로 맞추고, 읽지 못하면 거절한다(멈추지 않는다).
+  @Test func pastedLocalizedDigitsAreNormalizedOrRejectedSafely() throws {
+    #expect(ReviewForm.validDate("２０２６－１１－０８") == "2026-11-08")
+    #expect(ReviewForm.validDate("٢٠٢٦-١١-٠٨") == "2026-11-08")
+    #expect(ReviewForm.validDate(" 2026/11/8 ") == "2026-11-08")
+    #expect(ReviewForm.validDate("20261108") == "2026-11-08")
+    #expect(ReviewForm.validDate("2026‐11‐08") == "2026-11-08")
+    // 예전에는 \d가 유니코드 숫자를 통과시키고 Int()가 nil이라 parts[2]에서 멈출 수 있었다.
+    for bad in [
+      "２０２６-１１", "2026-11-", "-2026-11-08", "2026--08", "２０２６年１１月８日", "2026-1１-0x", "", "----", "𝟐𝟎𝟐𝟔-𝟏𝟏-𝟎𝟖x",
+    ] {
+      #expect(ReviewForm.validDate(bad) == nil, "\(bad)")
+    }
+    #expect(ReviewForm.amountMinor("１，７６０", minorDigits: 0) == 1760)
+    #expect(ReviewForm.amountMinor("١٧٦٠", minorDigits: 0) == 1760)
+    #expect(ReviewForm.amountMinor("１２．５", minorDigits: 2) == 1250)
+    #expect(ReviewForm.amountMinor("1760円", minorDigits: 0) == nil)
+    #expect(
+      try ReviewForm.validate(date: "２０２６－１１－０８", amount: "１７６０", currency: "JPY", merchant: "ゆきみ茶屋").get()
+        == AllowedReceiptFields(date: "2026-11-08", amountMinor: 1760, currency: "JPY", merchant: "ゆきみ茶屋"))
+  }
+}
+
+struct DurableCommitTests {
+  /// 확인 상태를 디스크에 쓰지 못하면 확인되지 않은 것으로 남는다: 알림도 없고, 사본·검토 입력도 그대로(사본은 지움),
+  /// 처리기를 다시 만들어도(앱 재시작) 확인 전이다. 쓰기가 돌아오면 같은 입력으로 확인된다.
+  @Test func confirmThatCannotBeWrittenLeavesReceiptUnconfirmedAcrossRestart() async throws {
+    let faults = WriteFaults()
+    let root = tempRoot()
+    let store = ReceiptDraftStore(root: root, writeFault: { faults.shouldFail($0) })
+    let draft = try store.create(
+      source: .share, photos: [try fixture("receipt-r01.png"), try fixture("receipt-r10.png")])
+    let changes = ChangeLog()
+    let processor = try ReceiptProcessor(
+      store: store, draft: draft, recognizer: VisionReceiptRecognizer(), onChange: { changes.add($0) })
+    await processor.run()
+    let ready = item(await processor.snapshot(), .ready).id
+    let failed = item(await processor.snapshot(), .failed).id
+    let proposal = try await processor.proposal(ready)
+    try await processor.saveReview(ready, ReviewDraft(amount: "1500"))
+    try await processor.saveReview(failed, ReviewDraft(date: "2026-11-08", amount: "1760"))
+
+    faults.set(["processing.json"])
+    let fields = AllowedReceiptFields(date: "2026-11-03", amountMinor: 1500, currency: "JPY", merchant: "さくら食堂")
+    let before = changes.count
+    await #expect(throws: ReceiptStorageError.writeFailed) {
+      try await processor.confirm(ready, fields: fields, maskLineIDs: Set(proposal.suggestedMaskLineIDs))
+    }
+    let manual = AllowedReceiptFields(date: "2026-11-08", amountMinor: 1760, currency: "JPY", merchant: nil)
+    await #expect(throws: ReceiptStorageError.writeFailed) { try await processor.confirmManual(failed, fields: manual) }
+    #expect(changes.count == before, "확인 상태를 알리지 않는다")
+    #expect(await processor.snapshot().items.map(\.state) == [.ready, .failed])
+    #expect(try await processor.review(ready)?.amount == "1500", "검토 입력이 남는다")
+    #expect(try await processor.review(failed)?.amount == "1760")
+    #expect(!FileManager.default.fileExists(atPath: store.artifactURL(draft.id, ready + ".png").path), "사본을 남기지 않는다")
+    #expect(try await processor.outboundReceipts().isEmpty)
+
+    // 앱 재시작과 같다.
+    faults.set([])
+    let reopened = try ReceiptProcessor(store: store, draft: draft, recognizer: VisionReceiptRecognizer())
+    #expect(await reopened.snapshot().items.map(\.state) == [.ready, .failed])
+    #expect(try await reopened.review(ready)?.amount == "1500")
+    try await reopened.confirm(ready, fields: fields, maskLineIDs: Set(proposal.suggestedMaskLineIDs))
+    try await reopened.confirmManual(failed, fields: manual)
+    #expect(await reopened.snapshot().items.map(\.state) == [.confirmed, .confirmed])
+    #expect(!FileManager.default.fileExists(atPath: store.reviewURL(draft.id, ready).path), "확인이 남은 뒤에 지운다")
+  }
+
+  /// 검토 입력을 쓰지 못하면 던지고, 디스크에는 마지막으로 쓴 입력이 남는다. 늦게 도착한 오래된 입력은 쓰지 않는다.
+  @Test func draftSaveFailureKeepsLastDurableDraftAndOrderIsByRevision() async throws {
+    let faults = WriteFaults()
+    let store = ReceiptDraftStore(root: tempRoot(), writeFault: { faults.shouldFail($0) })
+    let draft = try store.create(source: .share, photos: [try fixture("receipt-r01.png")])
+    let processor = try ReceiptProcessor(store: store, draft: draft, recognizer: VisionReceiptRecognizer())
+    await processor.run()
+    let id = item(await processor.snapshot(), .ready).id
+    try await processor.saveReview(id, ReviewDraft(amount: "100"), revision: 1)
+    faults.set(["reviews/"])
+    await #expect(throws: ReceiptStorageError.writeFailed) {
+      try await processor.saveReview(id, ReviewDraft(amount: "200"), revision: 2)
+    }
+    #expect(try await processor.review(id)?.amount == "100")
+    faults.set([])
+    try await processor.saveReview(id, ReviewDraft(amount: "300"), revision: 4)
+    try await processor.saveReview(id, ReviewDraft(amount: "250"), revision: 3)
+    #expect(try await processor.review(id)?.amount == "300", "오래된 입력이 새 입력을 덮지 않는다")
+  }
+}
+
+private final class ChangeLog: @unchecked Sendable {
+  private let lock = NSLock()
+  private var n = 0
+  func add(_: ProcessingManifest) { lock.withLock { n += 1 } }
+  var count: Int { lock.withLock { n } }
 }

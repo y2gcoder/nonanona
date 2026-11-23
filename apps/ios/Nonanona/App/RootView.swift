@@ -78,7 +78,7 @@ struct RootView: View {
             confirmedCount: model.confirmedCount(draftID: draft.id),
             state: model.uploads[draft.id] ?? .idle,
             signedIn: model.session != nil,
-            onRequest: { model.requestUpload(draftID: draft.id) },
+            onRequest: { Task { await model.requestUpload(draftID: draft.id) } },
             onLogin: model.showLogin))
       } else {
         DetailPlaceholder()
@@ -121,12 +121,15 @@ private struct ReviewDestination: View {
           confirmedCount: manifest.count(.confirmed),
           totalCount: manifest.items.count,
           readyCount: manifest.count(.ready),
-          busy: model.confirming != nil),
+          busy: model.confirming != nil,
+          saveFailed: model.draftSaveFailed.contains(target),
+          confirmFailed: model.confirmFailed.contains(target)),
         showsMaskedPreview: $model.showsMaskedPreview,
         actions: ReceiptReviewActions(
           edit: { model.edit(target, $0) },
           requestPreview: { model.requestPreview(target) },
           retry: { model.retryPhoto(draftID: target.draftID, itemID: target.itemID) },
+          retrySave: { model.retrySave(target) },
           confirmAndNext: { Task { await model.confirmAndNext(target) } }))
     }
   }

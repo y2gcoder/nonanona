@@ -156,12 +156,15 @@ fun NonanonaApp(viewModel: AppViewModel) {
                                     totalCount = manifest.items.size,
                                     busy = state.confirming != null,
                                     showsMaskedPreview = state.showsMaskedPreview,
+                                    saveFailed = route in state.draftSaveFailed,
+                                    confirmFailed = route in state.confirmFailed,
                                 ),
                             actions =
                                 ReceiptReviewActions(
                                     edit = { viewModel.edit(route, it) },
                                     requestPreview = { viewModel.requestPreview(route) },
                                     retry = { viewModel.retryPhoto(route.draftId, route.itemId) },
+                                    retrySave = { viewModel.retrySave(route) },
                                     confirmAndNext = { viewModel.confirmAndNext(route) },
                                     setShowsMaskedPreview = viewModel::setShowsMaskedPreview,
                                 ),

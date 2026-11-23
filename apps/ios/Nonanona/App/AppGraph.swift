@@ -36,9 +36,14 @@ struct AppGraph: Sendable {
       let trips: any TripGateway = UnavailableTripGateway()
     #endif
     // App Group은 공유 확장과 초안을 주고받는 데 필요하다. 없으면(서명 설정 누락) 앱 폴더로 대신한다.
+    #if DEBUG
+      let writeFault = Self.debugWriteFault()
+    #else
+      let writeFault: (@Sendable (URL) -> Bool)? = nil
+    #endif
     let drafts =
-      (try? ReceiptDraftStore.inAppGroup(appGroup))
-      ?? ReceiptDraftStore(root: support.appending(path: "receipt-import"))
+      (try? ReceiptDraftStore.inAppGroup(appGroup, writeFault: writeFault))
+      ?? ReceiptDraftStore(root: support.appending(path: "receipt-import"), writeFault: writeFault)
     let pending = PendingInviteStore(file: support.appending(path: "account/pending-invite.json"))
     #if DEBUG
       let hooks = Self.debugProcessingHooks()
@@ -51,6 +56,21 @@ struct AppGraph: Sendable {
   }
 
   #if DEBUG
+    /// 검증용 저장 실패 주입: 초안 저장소 폴더의 `debug-fail-writes` 파일에 적힌 경로 조각(줄마다, 예: `processing.json`,
+    /// `reviews/`)이 들어간 파일 쓰기를 실패시킨다. 파일을 지우면 바로 돌아온다. E2E가 호스트에서 만들고 지운다(debug 빌드만).
+    static func debugWriteFault() -> @Sendable (URL) -> Bool {
+      { url in
+        var root = url.deletingLastPathComponent()
+        while root.lastPathComponent != "receipt-import", root.pathComponents.count > 1 {
+          root = root.deletingLastPathComponent()
+        }
+        guard let text = try? String(contentsOf: root.appending(path: "debug-fail-writes"), encoding: .utf8) else {
+          return false
+        }
+        return text.split(whereSeparator: \.isNewline).contains { !$0.isEmpty && url.path.contains($0) }
+      }
+    }
+
     /// 검증용: 실행 환경 변수로 처리를 늦추거나, 한 위치의 첫 시도를 실패시키거나, 한 위치의 가림 제안을 비운다(debug 빌드만).
     static func debugProcessingHooks(_ env: [String: String] = ProcessInfo.processInfo.environment) -> ProcessingHooks {
       ProcessingHooks(

@@ -11,6 +11,7 @@ import app.nonanona.feature.account.AccountSession
 import app.nonanona.feature.account.LoginState
 import app.nonanona.feature.account.SignInFailure
 import app.nonanona.feature.account.SignInProvider
+import app.nonanona.feature.receiptimport.AllowedReceiptFields
 import app.nonanona.feature.receiptimport.BoundaryViolation
 import app.nonanona.feature.receiptimport.DraftSource
 import app.nonanona.feature.receiptimport.FieldProblem
@@ -18,6 +19,7 @@ import app.nonanona.feature.receiptimport.ItemState
 import app.nonanona.feature.receiptimport.MaskPreview
 import app.nonanona.feature.receiptimport.MaskRegion
 import app.nonanona.feature.receiptimport.OcrProposal
+import app.nonanona.feature.receiptimport.OutboundReceipt
 import app.nonanona.feature.receiptimport.ProcessingItem
 import app.nonanona.feature.receiptimport.ProcessingManifest
 import app.nonanona.feature.receiptimport.ReceiptDraft
@@ -80,6 +82,9 @@ sealed interface UploadState {
         val failure: ReceiptUploadFailure,
         val uploadedBefore: Int,
     ) : UploadState
+
+    /** 최종 확인 뒤 올릴 영수증(목록·사본·값)이 바뀌어 아무것도 보내지 않았다. 다시 확인해야 한다. */
+    data object ContentChanged : UploadState
 }
 
 /** 올리기 최종 확인 창이 묻고 있는 것. 창 크기·접기·회전으로 화면이 다시 그려져도 같은 초안·같은 올릴 곳을 묻는다. */
@@ -87,8 +92,25 @@ data class UploadConfirmation(
     val draftId: String,
     val tripId: TripId,
     val tripName: String,
-    val count: Int,
-)
+    /** 동의한 시점의 영수증(바뀌지 않는 사진 ID·가린 사본 해시·확인한 값). 보내기 직전에 하나라도 다르면 보내지 않는다. */
+    val receipts: List<SharedReceipt>,
+) {
+    val count: Int get() = receipts.size
+
+    /** 지금 경계를 지난 영수증이 동의한 것과 정확히 같을 때만 그 목록을 돌려준다. 다르면 null(아무것도 보내지 않는다). */
+    fun approved(outbound: List<OutboundReceipt>): List<OutboundReceipt>? = outbound.takeIf { o -> o.map(SharedReceipt::of) == receipts }
+}
+
+/** 최종 확인 때 사용자가 동의한 영수증 한 장. */
+data class SharedReceipt(
+    val itemId: String,
+    val artifactSha256: String,
+    val fields: AllowedReceiptFields,
+) {
+    companion object {
+        fun of(outbound: OutboundReceipt) = SharedReceipt(outbound.receipt.itemId, outbound.artifactSha256, outbound.receipt.fields)
+    }
+}
 
 sealed interface Notice {
     data class DraftSaved(
@@ -128,6 +150,10 @@ data class AppUiState(
     val confirming: Route.Receipt? = null,
     /** 확인할 사진을 다 보고 목록으로 돌아온 초안. 목록이 남은 상태를 알린다. */
     val reviewFinished: Set<String> = emptySet(),
+    /** 검토 입력을 디스크에 쓰지 못한 사진(입력은 메모리에 남아 있다). 다음 저장이 성공하면 지운다. */
+    val draftSaveFailed: Set<Route.Receipt> = emptySet(),
+    /** "확인하고 다음"이 디스크에 확인을 남기지 못한 사진. 확인되지 않았고 입력·선택은 그대로다. */
+    val confirmFailed: Set<Route.Receipt> = emptySet(),
 ) {
     /** 올릴 수 있는 영수증: 확인했고 가린 사본이 있는 것. 직접 입력(사본 없음)은 이번 단계에서 올리지 않는다. */
     fun confirmedCount(draftId: String): Int =
@@ -401,7 +427,37 @@ class AppViewModel(
             )
         }
         val draft = saved ?: return
-        viewModelScope.launch { runCatching { processor.saveReview(target.itemId, draft) } }
+        save(target, draft, processor)
+    }
+
+    /** 메모리의 입력을 다시 디스크에 쓴다(저장 실패 안내의 "다시 저장"). */
+    fun retrySave(target: Route.Receipt) {
+        val processor = processors[target.draftId] ?: return
+        val draft = state.value.reviewDrafts[target] ?: return
+        save(target, draft, processor)
+    }
+
+    private var reviewRevision = 0L
+    private val settledRevision = mutableMapOf<Route.Receipt, Long>()
+
+    /**
+     * 순번을 붙여 쓴다. 처리기는 이미 쓴 것보다 오래된 순번을 쓰지 않고, 실패하면 디스크에는 마지막으로 쓴 입력이 남는다.
+     * 실패 안내는 가장 최근 순번의 결과로만 바꾼다.
+     */
+    private fun save(
+        target: Route.Receipt,
+        draft: ReviewDraft,
+        processor: ReceiptProcessor,
+    ) {
+        val revision = ++reviewRevision
+        viewModelScope.launch {
+            val ok = runCatching { processor.saveReview(target.itemId, draft, revision) }.isSuccess
+            if (revision < (settledRevision[target] ?: 0)) return@launch
+            settledRevision[target] = revision
+            mutableState.update {
+                it.copy(draftSaveFailed = if (ok) it.draftSaveFailed - target else it.draftSaveFailed + target)
+            }
+        }
     }
 
     /** 지금 가림으로 만든 가린 사본 미리보기. 확인과 같은 굽기 함수를 쓰고 디스크에 쓰지 않는다. */
@@ -438,7 +494,7 @@ class AppViewModel(
         val fields =
             (ReviewForm.validate(resolved.date, resolved.amount, resolved.currency, resolved.merchant) as? Validation.Valid)?.fields
                 ?: return
-        mutableState.update { it.copy(confirming = target) }
+        mutableState.update { it.copy(confirming = target, confirmFailed = it.confirmFailed - target) }
         viewModelScope.launch {
             val ok =
                 runCatching {
@@ -449,9 +505,11 @@ class AppViewModel(
                     }
                 }.isSuccess
             if (!ok) {
-                mutableState.update { it.copy(confirming = null) }
+                // 확인이 디스크에 남지 않았다. 확인 전 상태·입력·선택을 그대로 두고 알린다.
+                mutableState.update { it.copy(confirming = null, confirmFailed = it.confirmFailed + target) }
                 return@launch
             }
+            // 여기부터는 처리기가 확인을 디스크에 쓴 뒤다.
             val manifest = processor.snapshot()
             val next = manifest.nextToReview(target.itemId)
             mutableState.update {
@@ -459,6 +517,7 @@ class AppViewModel(
                     confirming = null,
                     processing = it.processing + (manifest.draftId to manifest),
                     reviewDrafts = it.reviewDrafts - target,
+                    draftSaveFailed = it.draftSaveFailed - target,
                     previews = it.previews - target,
                     reviewFinished = if (next == null) it.reviewFinished + target.draftId else it.reviewFinished,
                 )
@@ -470,13 +529,19 @@ class AppViewModel(
 
     /** 올릴 곳과 장수를 묻는 최종 확인을 연다. 참여한 여행방, 로그인, 확인한 영수증이 있을 때만 연다. */
     fun requestUpload(draftId: String) {
-        mutableState.update {
-            val room = it.room
-            val count = it.confirmedCount(draftId)
-            if (room == null || it.session == null || count == 0 || it.uploads[draftId] == UploadState.Uploading) {
-                it
-            } else {
-                it.copy(uploadConfirmation = UploadConfirmation(draftId, room.id, room.name, count))
+        val processor = processors[draftId] ?: return
+        val now = state.value
+        val room = now.room ?: return
+        if (now.session == null || now.uploads[draftId] == UploadState.Uploading) return
+        viewModelScope.launch {
+            // 확인 창에는 기기 경계를 지난 영수증(사진 ID·사본 해시·값)을 그대로 담는다.
+            val outbound = runCatching { processor.outboundReceipts() }.getOrNull()?.takeIf { it.isNotEmpty() } ?: return@launch
+            mutableState.update {
+                if (it.room?.id != room.id) {
+                    it
+                } else {
+                    it.copy(uploadConfirmation = UploadConfirmation(draftId, room.id, room.name, outbound.map(SharedReceipt::of)))
+                }
             }
         }
     }
@@ -488,7 +553,7 @@ class AppViewModel(
         mutableState.update { it.copy(uploadConfirmation = null) }
         val room = state.value.room ?: return
         if (room.id != confirmation.tripId) return
-        uploadConfirmedReceipts(confirmation.draftId, room)
+        uploadConfirmedReceipts(confirmation, room)
     }
 
     /**
@@ -496,9 +561,11 @@ class AppViewModel(
      * 기기 경계(outboundReceipts)를 지난 가림 사본과 허용 필드만 보낸다. 한 장이라도 실패하면 거기서 멈춘다.
      */
     fun uploadConfirmedReceipts(
-        draftId: String,
+        confirmation: UploadConfirmation,
         room: TripRoom,
     ) {
+        val draftId = confirmation.draftId
+        if (room.id != confirmation.tripId) return
         val processor = processors[draftId] ?: return
         if (state.value.uploads[draftId] == UploadState.Uploading) return
         setUpload(draftId, UploadState.Uploading)
@@ -510,6 +577,11 @@ class AppViewModel(
                     setUpload(draftId, UploadState.Failed(ReceiptUploadFailure.Unknown, 0))
                     return@launch
                 }
+            // 동의한 영수증과 지금 보낼 것이 하나라도 다르면 아무것도 보내지 않는다.
+            if (confirmation.approved(outbound) == null) {
+                setUpload(draftId, UploadState.ContentChanged)
+                return@launch
+            }
             var created = 0
             var replayed = 0
             for (item in outbound) {

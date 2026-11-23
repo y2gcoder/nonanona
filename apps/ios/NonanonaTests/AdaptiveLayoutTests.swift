@@ -104,12 +104,14 @@ struct AdaptiveStateTests {
   private let recognizer = CountingRecognizer()
   private let trips = RecordingTrips()
 
-  private func model() throws -> (AppModel, ReceiptDraft) {
-    let drafts = ReceiptDraftStore(root: root.appending(path: "receipt-import"))
+  private func model(faults: WriteFaults? = nil) throws -> (AppModel, ReceiptDraft) {
+    var fault: (@Sendable (URL) -> Bool)?
+    if let faults { fault = { url in faults.shouldFail(url) } }
+    let drafts = ReceiptDraftStore(root: root.appending(path: "receipt-import"), writeFault: fault)
     let photos = try ["receipt-r01.png", "receipt-r02.png"].map {
       IncomingPhoto(fileExtension: "png", content: .data(try Data(contentsOf: fixtures.appending(path: $0))))
     }
-    let draft = try drafts.create(source: .share, photos: photos)
+    let draft = try drafts.list().first ?? drafts.create(source: .share, photos: photos)
     let auth = SignedInAuth()
     let graph = AppGraph(
       auth: auth, trips: trips, drafts: drafts,
@@ -147,18 +149,17 @@ struct AdaptiveStateTests {
     model.debugConfirmWithSuggestions(draftID: draft.id, itemID: ready.id)
     try await until("확인이") { model.confirmedCount(draftID: draft.id) == 1 }
 
-    model.requestUpload(draftID: draft.id)
+    await model.requestUpload(draftID: draft.id)
     #expect(model.uploadConfirmation == nil, "참여한 여행방이 없으면 확인을 열지 않는다")
 
     model.handle(url: URL(string: "nonanona://invite/SYNTHTRIPA01")!)
     await model.joinPendingInvite()
     model.selection = .draft(draft.id)
-    model.requestUpload(draftID: draft.id)
+    await model.requestUpload(draftID: draft.id)
     let asked = try #require(model.uploadConfirmation)
-    #expect(
-      asked
-        == UploadConfirmation(
-          draftID: draft.id, tripID: TripID(value: "trip-SYNTHTRIPA01"), tripName: "가상 SYNTHTRIPA01", count: 1))
+    #expect(asked.draftID == draft.id && asked.tripID == TripID(value: "trip-SYNTHTRIPA01"))
+    #expect(asked.tripName == "가상 SYNTHTRIPA01" && asked.count == 1)
+    #expect(asked.receipts.map(\.itemID) == [ready.id], "동의한 영수증의 사진 ID·사본 해시·값을 담는다")
 
     // 화면 배치가 바뀌는 동안 모델 값은 그대로다(같은 확인을 다시 그린다).
     model.reloadDrafts()
@@ -180,7 +181,7 @@ struct AdaptiveStateTests {
     try await until("확인이") { model.confirmedCount(draftID: draft.id) == 1 }
     model.handle(url: URL(string: "nonanona://invite/SYNTHTRIPA01")!)
     await model.joinPendingInvite()
-    model.requestUpload(draftID: draft.id)
+    await model.requestUpload(draftID: draft.id)
     let asked = try #require(model.uploadConfirmation)
 
     model.handle(url: URL(string: "nonanona://invite/SYNTHTRIPB01")!)
@@ -238,6 +239,79 @@ struct AdaptiveStateTests {
     #expect(recognizer.calls == 2, "검토와 배치 변경이 OCR을 다시 돌리지 않는다")
   }
 
+  /// 최종 확인 뒤 올릴 영수증이 바뀌면(다른 영수증을 더 확인) 동의한 것과 달라 아무것도 보내지 않는다.
+  @Test func shareConsentSnapshotRejectsChangedContentAndSendsNothing() async throws {
+    let (model, draft) = try model()
+    await model.load()
+    try await until("처리가") { model.processing[draft.id]?.processedCount == 2 }
+    let items = try #require(model.processing[draft.id]?.items.sorted { $0.position < $1.position })
+    model.debugConfirmWithSuggestions(draftID: draft.id, itemID: items[0].id)
+    try await until("확인이") { model.confirmedCount(draftID: draft.id) == 1 }
+    model.handle(url: URL(string: "nonanona://invite/SYNTHTRIPA01")!)
+    await model.joinPendingInvite()
+    await model.requestUpload(draftID: draft.id)
+    let asked = try #require(model.uploadConfirmation)
+    #expect(asked.count == 1)
+
+    model.debugConfirmWithSuggestions(draftID: draft.id, itemID: items[1].id)
+    try await until("두 번째 확인이") { model.confirmedCount(draftID: draft.id) == 2 }
+    model.confirmUpload(asked)
+    try await until("거절이") { model.uploads[draft.id] == .contentChanged }
+    #expect(trips.submissions.isEmpty, "동의하지 않은 내용은 하나도 보내지 않는다")
+
+    // 다시 확인하면 지금 내용(2장)으로 묻고, 그대로 보낸다.
+    await model.requestUpload(draftID: draft.id)
+    let again = try #require(model.uploadConfirmation)
+    #expect(again.count == 2)
+    model.confirmUpload(again)
+    try await until("올리기가") { model.uploads[draft.id] == .done(created: 2, replayed: 0) }
+  }
+
+  /// 저장 실패: 입력 저장이 실패하면 알리고 메모리 입력은 남는다. 확인을 디스크에 쓰지 못하면 확인되지 않고,
+  /// 선택·입력이 그대로이며 다음 사진으로 가지 않는다. 앱을 다시 열면 마지막으로 쓴 입력과 확인 전 상태다.
+  @Test func storageFailuresAreSurfacedAndNothingIsExposedUntilDurable() async throws {
+    let faults = WriteFaults()
+    let (model, draft) = try model(faults: faults)
+    await model.load()
+    try await until("처리가") { model.processing[draft.id]?.processedCount == 2 }
+    model.selection = .draft(draft.id)
+    model.startReview(draftID: draft.id)
+    let first = try #require(model.reviewing)
+    try await until("제안이") { model.proposals[first] != nil }
+    model.edit(first, .amount("1500"))
+    try await Task.sleep(for: .milliseconds(200))
+
+    faults.set(["reviews/"])
+    model.edit(first, .amount("1600"))
+    try await until("저장 실패 안내가") { model.draftSaveFailed.contains(first) }
+    #expect(model.resolvedReview(first).amount == "1600", "메모리 입력은 남는다")
+
+    faults.set(["processing.json"])
+    await model.confirmAndNext(first)
+    #expect(model.confirmFailed.contains(first))
+    #expect(model.reviewing == first, "다음 사진으로 가지 않는다")
+    #expect(model.item(first)?.state == .ready)
+    #expect(model.resolvedReview(first).amount == "1600")
+    #expect(model.reviewFinished.isEmpty)
+
+    // 앱을 다시 연다: 디스크에는 확인 전 상태와 마지막으로 쓴 입력(1500)이 있다.
+    faults.set([])
+    let (reopened, _) = try self.model(faults: faults)
+    await reopened.load()
+    try await until("다시 연 처리 상태가") { reopened.processing[draft.id] != nil }
+    #expect(reopened.item(first)?.state == .ready)
+    reopened.openReview(first)
+    try await until("저장된 입력이") { reopened.reviewDrafts[first] != nil && reopened.proposals[first] != nil }
+    #expect(reopened.resolvedReview(first).amount == "1500")
+
+    // 쓰기가 돌아오면 다시 저장·확인이 된다.
+    model.retrySave(first)
+    try await until("저장 안내가 사라지기가") { !model.draftSaveFailed.contains(first) }
+    await model.confirmAndNext(first)
+    #expect(!model.confirmFailed.contains(first))
+    #expect(model.item(first)?.confirmed?.fields.amountMinor == 1600)
+  }
+
   /// 시스템 분할 보기를 실제 창에 띄워 좁은 창(compact) ↔ 넓은 창(regular)을 오가게 한다(접기·펴기·분할 화면과 같은 신호).
   /// 넓으면 목록과 고른 화면이 나란히, 좁으면 고른 화면이 위에 쌓이고, 고른 초안은 그대로다.
   @Test func splitViewFollowsWidthClassAndKeepsSelection() async throws {
@@ -276,4 +350,11 @@ private func splitViewController(in window: UIWindow) -> UISplitViewController? 
     stack.append(contentsOf: next.children)
   }
   return nil
+}
+
+final class WriteFaults: @unchecked Sendable {
+  private let lock = NSLock()
+  private var failing: Set<String> = []
+  func set(_ parts: Set<String>) { lock.withLock { failing = parts } }
+  func shouldFail(_ url: URL) -> Bool { lock.withLock { failing.contains { url.path.contains($0) } } }
 }

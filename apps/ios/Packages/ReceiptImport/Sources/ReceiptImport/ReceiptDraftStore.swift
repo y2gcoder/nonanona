@@ -29,6 +29,11 @@ public struct IncomingPhoto: Sendable {
   }
 }
 
+/// 기기 저장소에 쓰지 못했다(공간 부족, 보호된 파일 등). 화면은 "저장하지 못했어요"로 알리고 이전 상태를 지킨다.
+public enum ReceiptStorageError: Error, Equatable {
+  case writeFailed
+}
+
 public enum ReceiptDraftError: Error, Equatable {
   case photoCount
   case noContainer
@@ -43,19 +48,27 @@ public struct ReceiptDraftStore: Sendable {
 
   public let root: URL
   private let now: @Sendable () -> Date
+  /// 검증용 쓰기 실패 주입(테스트와 debug 빌드만 넘긴다). true를 돌려주면 그 파일 쓰기가 실패한다.
+  private let writeFault: (@Sendable (URL) -> Bool)?
 
-  public init(root: URL, now: @escaping @Sendable () -> Date = { Date() }) {
+  public init(
+    root: URL, now: @escaping @Sendable () -> Date = { Date() }, writeFault: (@Sendable (URL) -> Bool)? = nil
+  ) {
     self.root = root
     self.now = now
+    self.writeFault = writeFault
   }
 
   /// App Group 컨테이너 안의 저장소.
-  public static func inAppGroup(_ identifier: String) throws -> ReceiptDraftStore {
+  public static func inAppGroup(_ identifier: String, writeFault: (@Sendable (URL) -> Bool)? = nil) throws
+    -> ReceiptDraftStore
+  {
     guard
       let container = FileManager.default.containerURL(
         forSecurityApplicationGroupIdentifier: identifier)
     else { throw ReceiptDraftError.noContainer }
-    return ReceiptDraftStore(root: container.appending(path: "receipt-import", directoryHint: .isDirectory))
+    return ReceiptDraftStore(
+      root: container.appending(path: "receipt-import", directoryHint: .isDirectory), writeFault: writeFault)
   }
 
   private var draftsDirectory: URL { root.appending(path: "drafts", directoryHint: .isDirectory) }
@@ -137,6 +150,7 @@ public struct ReceiptDraftStore: Sendable {
 
   /// 원자적으로 쓰고, iOS에서는 기기 잠금 해제 전에는 읽을 수 없게 보호한다.
   func writeProtected(_ data: Data, to url: URL) throws {
+    if let writeFault, writeFault(url) { throw ReceiptStorageError.writeFailed }
     try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
     #if os(iOS)
       try data.write(to: url, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])

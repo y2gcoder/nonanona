@@ -12,6 +12,7 @@ public actor ReceiptProcessor {
   private let onChange: @Sendable (ProcessingManifest) -> Void
   private var manifest: ProcessingManifest
   private var running = false
+  private var savedRevisions: [String: Int] = [:]
   private var inFlight = 0
   public private(set) var peakInFlight = 0
 
@@ -88,9 +89,13 @@ public actor ReceiptProcessor {
   }
 
   /// 고칠 때마다 원자적으로 쓴다. 다시 읽는 중에도(직접 입력하던 값) 쓸 수 있고, 확인한 사진은 고칠 수 없다.
-  public func saveReview(_ id: String, _ review: ReviewDraft) throws {
+  /// `revision`을 주면 이미 쓴 것보다 오래된 입력은 쓰지 않는다(여러 저장이 순서를 바꿔 도착해도 마지막 입력이 남는다).
+  /// 쓰지 못하면 던지고, 디스크에는 마지막으로 쓴 입력이 그대로 남는다.
+  public func saveReview(_ id: String, _ review: ReviewDraft, revision: Int? = nil) throws {
     _ = try indexOf(id, in: [.queued, .processing, .ready, .failed])
+    if let revision, let saved = savedRevisions[id], revision <= saved { return }
     try store.writeProtected(JSONEncoder().encode(review), to: store.reviewURL(draftID, id))
+    if let revision { savedRevisions[id] = revision }
   }
 
   /// 확인하면 만들어질 가린 사본을 보여 주기 위한 미리보기. 같은 굽기 함수를 쓰지만 디스크에 쓰지 않는다.
@@ -110,12 +115,21 @@ public actor ReceiptProcessor {
     try Self.check(fields)
     let artifact = try flatten(index, proposal: proposal(id), maskLineIDs: maskLineIDs, regions: regions)
     let fileName = id + ".png"
-    try store.writeProtected(artifact.pngData, to: store.artifactURL(draftID, fileName))
+    let artifactURL = store.artifactURL(draftID, fileName)
+    try store.writeProtected(artifact.pngData, to: artifactURL)
     let receipt = ConfirmedReceipt(
       itemID: id, fields: fields, artifactFileName: fileName, artifactSHA256: artifact.sha256)
-    manifest.items[index].state = .confirmed
-    manifest.items[index].confirmed = receipt
-    persist()
+    var next = manifest
+    next.items[index].state = .confirmed
+    next.items[index].confirmed = receipt
+    do {
+      try commit(next)
+    } catch {
+      // 확인 상태를 디스크에 쓰지 못했다. 사본을 지우고 확인 전 상태(검토 입력 포함)를 그대로 둔다.
+      try? FileManager.default.removeItem(at: artifactURL)
+      throw error
+    }
+    // 확인이 디스크에 남은 뒤에만 검토 입력을 지운다.
     try? FileManager.default.removeItem(at: store.reviewURL(draftID, id))
     return receipt
   }
@@ -126,10 +140,11 @@ public actor ReceiptProcessor {
     let index = try indexOf(id, in: [.failed])
     try Self.check(fields)
     let receipt = ConfirmedReceipt(itemID: id, fields: fields, artifactFileName: nil, artifactSHA256: nil)
-    manifest.items[index].state = .confirmed
-    manifest.items[index].failure = nil
-    manifest.items[index].confirmed = receipt
-    persist()
+    var next = manifest
+    next.items[index].state = .confirmed
+    next.items[index].failure = nil
+    next.items[index].confirmed = receipt
+    try commit(next)
     try? FileManager.default.removeItem(at: store.reviewURL(draftID, id))
     return receipt
   }
@@ -240,6 +255,13 @@ public actor ReceiptProcessor {
     guard let index = manifest.items.firstIndex(where: { $0.id == id }) else { throw ProcessorError.itemNotFound }
     guard states.contains(manifest.items[index].state) else { throw ProcessorError.wrongState }
     return index
+  }
+
+  /// 확인처럼 되돌릴 수 없는 변화: 디스크에 먼저 쓰고, 성공했을 때만 메모리 상태를 바꾸고 알린다.
+  private func commit(_ next: ProcessingManifest) throws {
+    try store.saveProcessing(next)
+    manifest = next
+    onChange(manifest)
   }
 
   private func persist() {

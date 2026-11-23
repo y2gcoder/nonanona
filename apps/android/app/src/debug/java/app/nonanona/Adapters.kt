@@ -32,6 +32,7 @@ internal fun createAdapters(context: Context): Adapters {
             processingHooks = processingHooks(context),
             debugUploadUi = DebugUploadSection,
             debugReceiptConfirm = confirmWithSuggestions(context),
+            writeFault = writeFault(context),
         )
     }
     val auth =
@@ -45,7 +46,19 @@ internal fun createAdapters(context: Context): Adapters {
         processingHooks = processingHooks(context),
         debugReceiptConfirm = confirmWithSuggestions(context),
         debugUploadUi = DebugUploadSection,
+        writeFault = writeFault(context),
     )
+}
+
+/**
+ * 검증용 저장 실패 주입: files/receipt-import/debug-fail-writes에 적힌 경로 조각(줄마다, 예: processing.json, reviews/)이
+ * 들어간 파일 쓰기를 실패시킨다. 파일을 지우면 바로 돌아온다(iOS와 같은 규칙, E2E가 run-as로 만들고 지운다).
+ */
+private fun writeFault(context: Context): (File) -> Boolean {
+    val flag = File(context.filesDir, "receipt-import/debug-fail-writes")
+    return { file ->
+        flag.isFile && flag.readLines().any { it.isNotBlank() && file.path.contains(it.trim()) }
+    }
 }
 
 /** 검증용: files/debug-processing.properties의 참/거짓 설정을 읽는다. */

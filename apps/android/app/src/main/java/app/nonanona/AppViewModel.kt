@@ -185,12 +185,32 @@ class AppViewModel(
     val signInProviders: List<SignInProvider> get() = graph.adapters.auth.providers
     val testOnlyNotice: String? get() = graph.adapters.auth.testOnlyNotice
 
+    /** 초안마다 처리기 하나(유일한 processing.json 쓰기 주체)와, 순서를 지키는 초안 목록 읽기. */
+    private val draftProcessors =
+        DraftProcessors(
+            listDrafts = { io { graph.drafts.list() } },
+            create = { draft ->
+                io {
+                    ReceiptProcessor(
+                        store = graph.drafts,
+                        draft = draft,
+                        recognizer = graph.recognizer,
+                        flattener = graph.flattener,
+                        hooks = graph.adapters.processingHooks,
+                        onChange = ::publish,
+                    )
+                }
+            },
+        )
+
     private val loading =
         viewModelScope.launch {
-            val drafts = io { graph.drafts.list() }
             val pending = io { graph.joinFlow.pendingInvite() }
             val session = graph.joinFlow.restoreSession()
-            mutableState.update { it.copy(loaded = true, drafts = drafts, pendingInvite = pending, session = session) }
+            val drafts =
+                draftProcessors.refresh { drafts ->
+                    mutableState.update { it.copy(loaded = true, drafts = drafts, pendingInvite = pending, session = session) }
+                }
             startProcessing(drafts)
             // 로그인 도중 앱이 종료됐다면 다시 열 때 그 초대 화면으로 돌아간다.
             if (pending != null && Route.Invite !in backStack) backStack.add(Route.Invite)
@@ -219,45 +239,58 @@ class AppViewModel(
                 runCatching {
                     io { graph.drafts.create(source, uris.map(graph.contentResolver::incomingPhoto)) }
                 }
-            val drafts = io { graph.drafts.list() }
+            val drafts =
+                draftProcessors.refresh { drafts ->
+                    mutableState.update {
+                        it.copy(
+                            drafts = drafts,
+                            notice = saved.fold({ draft -> Notice.DraftSaved(draft.photos.size) }, { Notice.DraftFailed }),
+                        )
+                    }
+                }
             startProcessing(drafts)
-            mutableState.update {
-                it.copy(
-                    drafts = drafts,
-                    notice = saved.fold({ draft -> Notice.DraftSaved(draft.photos.size) }, { Notice.DraftFailed }),
-                )
-            }
             if (source == DraftSource.Share) showOnly(Route.Home)
         }
     }
 
     fun noticeShown() = mutableState.update { it.copy(notice = null) }
 
-    private val processors = mutableMapOf<String, ReceiptProcessor>()
+    private val processors get() = draftProcessors
 
     /** debug 빌드에서만 값이 있다(개발용 확인 버튼 문구). */
     val debugConfirmLabel: String? get() = graph.adapters.debugReceiptConfirm?.label
     val debugUploadUi: DebugUploadUi? get() = graph.adapters.debugUploadUi
 
-    /** 처리할 사진이 남은 초안마다 처리기를 만들어 돌린다. 처리기를 만들 때 끝나지 않은 사진을 대기열로 되돌린다. */
+    /**
+     * 처리할 사진이 남은 초안마다 처리기를 확보해 돌린다. 처리기는 초안마다 하나라 겹쳐 불려도 OCR·기록이 겹치지 않는다
+     * (처리기를 처음 만들 때만 끝나지 않은 사진을 대기열로 되돌린다).
+     */
     private fun startProcessing(drafts: List<ReceiptDraft>) {
         for (draft in drafts) {
             viewModelScope.launch {
-                val processor =
-                    processors[draft.id] ?: io {
-                        ReceiptProcessor(
-                            store = graph.drafts,
-                            draft = draft,
-                            recognizer = graph.recognizer,
-                            flattener = graph.flattener,
-                            hooks = graph.adapters.processingHooks,
-                            onChange = ::publish,
-                        )
-                    }.also { processors[draft.id] = it }
-                publish(processor.snapshot())
+                val processor = draftProcessors.acquire(draft)
+                publishInitial(processor.snapshot())
                 processor.run()
             }
         }
+    }
+
+    /**
+     * 처리기를 확보한 뒤의 첫 상태. 그사이 처리기가 더 새 상태를 알렸으면(onChange) 그것을 덮지 않는다.
+     * 그 뒤의 변화는 처리기의 onChange가 처리기 잠금 안에서 차례대로 알린다.
+     */
+    private fun publishInitial(manifest: ProcessingManifest) {
+        if (state.value.processing.containsKey(manifest.draftId)) return
+        var published = false
+        mutableState.update {
+            if (it.processing.containsKey(manifest.draftId)) {
+                it
+            } else {
+                published = true
+                it.copy(processing = it.processing + (manifest.draftId to manifest))
+            }
+        }
+        if (published) loadRowSummaries(manifest)
     }
 
     private fun publish(manifest: ProcessingManifest) {
@@ -577,44 +610,14 @@ class AppViewModel(
                     setUpload(draftId, UploadState.Failed(ReceiptUploadFailure.Unknown, 0))
                     return@launch
                 }
-            // 동의한 영수증과 지금 보낼 것이 하나라도 다르면 아무것도 보내지 않는다.
-            if (confirmation.approved(outbound) == null) {
-                setUpload(draftId, UploadState.ContentChanged)
-                return@launch
+            // 동의한 영수증과 지금 보낼 것이 하나라도 다르면 아무것도 보내지 않는다(ConsentedUpload).
+            val result = ConsentedUpload(graph.adapters.trips).send(confirmation, room, outbound)
+            if (ConsentedUpload.endsSession(result)) {
+                // 세션만 지운다. 초안·확인한 사본은 그대로이고, 다시 로그인한 뒤 같은 요청 키로 다시 올린다.
+                graph.adapters.auth.endSession()
+                mutableState.update { it.copy(session = null) }
             }
-            var created = 0
-            var replayed = 0
-            for (item in outbound) {
-                val fields = item.receipt.fields
-                val upload =
-                    ReceiptExpenseUpload(
-                        requestId = ReceiptExpenseUpload.requestId(room.id, item.artifactSha256),
-                        date = fields.date,
-                        amountMinor = fields.amountMinor,
-                        currency = fields.currency,
-                        merchant = fields.merchant,
-                        artifactPng = item.artifactPng,
-                        artifactSha256 = item.artifactSha256,
-                    )
-                val failure =
-                    try {
-                        val result = graph.adapters.trips.submitReceipt(upload, room.id)
-                        if (result.replayed) replayed++ else created++
-                        null
-                    } catch (e: ReceiptUploadException) {
-                        e.failure
-                    }
-                if (failure != null) {
-                    if (failure == ReceiptUploadFailure.SessionExpired) {
-                        // 세션만 지운다. 초안·확인한 사본은 그대로이고, 다시 로그인한 뒤 같은 요청 키로 다시 올린다.
-                        graph.adapters.auth.endSession()
-                        mutableState.update { it.copy(session = null) }
-                    }
-                    setUpload(draftId, UploadState.Failed(failure, created + replayed))
-                    return@launch
-                }
-            }
-            setUpload(draftId, UploadState.Done(created, replayed))
+            setUpload(draftId, result)
         }
     }
 

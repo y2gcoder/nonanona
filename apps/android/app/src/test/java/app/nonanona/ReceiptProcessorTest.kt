@@ -20,9 +20,13 @@ import app.nonanona.feature.receiptimport.ReceiptStorageException
 import app.nonanona.feature.receiptimport.ReviewDraft
 import app.nonanona.feature.receiptimport.ReviewForm
 import app.nonanona.feature.receiptimport.Validation
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.json.JSONArray
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -507,5 +511,158 @@ class ReceiptProcessorTest {
             processor.saveReview(id, ReviewDraft(amount = "300"), revision = 4)
             processor.saveReview(id, ReviewDraft(amount = "250"), revision = 3)
             assertEquals("오래된 입력이 새 입력을 덮지 않는다", "300", processor.review(id)?.amount)
+        }
+
+    // 초안마다 처리기 하나(DraftProcessors). 시작 읽기와 공유로 받은 초안 읽기가 겹치는 순서를 게이트로 정해 재현한다.
+
+    /** 처리기 만들기를 게이트로 붙잡을 수 있는 공장. 몇 번 만들었는지 센다. */
+    private inner class GatedFactory(
+        private val store: ReceiptDraftStore,
+        private val recognizer: ReceiptRecognizer,
+    ) {
+        val creations = AtomicInteger()
+        var entered = CompletableDeferred<Unit>()
+        var gate: CompletableDeferred<Unit>? = null
+        var failNext = false
+
+        suspend fun create(draft: app.nonanona.feature.receiptimport.ReceiptDraft): ReceiptProcessor {
+            creations.incrementAndGet()
+            entered.complete(Unit)
+            gate?.await()
+            if (failNext) {
+                failNext = false
+                throw java.io.IOException("synthetic create failure")
+            }
+            return ReceiptProcessor(store, draft, recognizer, flattener)
+        }
+    }
+
+    /**
+     * 시작과 공유 가져오기가 같은 초안의 처리기를 동시에 요청한다: 첫 요청이 만들기 중간(디스크 읽기)에 멈춘 사이 둘째 요청이
+     * 와도 처리기는 하나이고, 둘 다 같은 처리기를 받는다. 두 쪽이 모두 run()을 불러도 사진마다 OCR은 한 번이다.
+     */
+    @Test
+    fun overlappingAcquisitionsShareOneProcessorAndOneOcrPass() =
+        runBlocking(Dispatchers.Default) {
+            val store = ReceiptDraftStore(tmp.newFolder())
+            val draft = store.create(DraftSource.Share, listOf(fixture(0), fixture(9)))
+            val recognizer = TruthRecognizer()
+            val factory = GatedFactory(store, recognizer).apply { gate = CompletableDeferred() }
+            val registry = DraftProcessors({ store.list() }, factory::create)
+
+            val startup = async { registry.acquire(draft).also { it.run() } }
+            factory.entered.await()
+            val import = async { registry.acquire(draft).also { it.run() } }
+            repeat(20) { yield() } // 둘째 요청이 잠금 앞에서 기다리게 한다
+            assertEquals("만들기 중에는 아직 넣지 않는다", null, registry[draft.id])
+            factory.gate!!.complete(Unit)
+            val a = startup.await()
+            val b = import.await()
+            assertTrue("같은 처리기", a === b)
+            assertEquals("처리기는 하나만 만든다", 1, factory.creations.get())
+            a.run()
+            assertEquals("사진마다 OCR 한 번", 2, recognizer.calls.get())
+            assertEquals(listOf(1, 1), a.snapshot().items.map { it.attempts })
+        }
+
+    /** 만들다 취소되거나 실패해도 다음 요청은 새로 만든다(실패가 남지 않는다). */
+    @Test
+    fun cancelledOrFailedCreationDoesNotPoisonTheNextAcquisition() =
+        runBlocking(Dispatchers.Default) {
+            val store = ReceiptDraftStore(tmp.newFolder())
+            val draft = store.create(DraftSource.Share, listOf(fixture(0)))
+            val factory = GatedFactory(store, TruthRecognizer()).apply { gate = CompletableDeferred() }
+            val registry = DraftProcessors({ store.list() }, factory::create)
+
+            val cancelled = launch { registry.acquire(draft) }
+            factory.entered.await()
+            cancelled.cancel()
+            cancelled.join()
+            assertEquals(null, registry[draft.id])
+
+            factory.gate = null
+            factory.failNext = true
+            try {
+                registry.acquire(draft)
+                fail("expected synthetic failure")
+            } catch (e: java.io.IOException) {
+                assertEquals(null, registry[draft.id])
+            }
+            val processor = registry.acquire(draft)
+            assertTrue(registry[draft.id] === processor)
+            assertEquals(3, factory.creations.get())
+        }
+
+    /** 시작 읽기가 오래 걸리는 사이 공유로 초안이 더해져도, 게시는 읽은 순서라 마지막 화면 목록이 새 목록이다. */
+    @Test
+    fun overlappingDraftListRefreshesPublishInReadOrder() =
+        runBlocking(Dispatchers.Default) {
+            val store = ReceiptDraftStore(tmp.newFolder())
+            val first = store.create(DraftSource.Share, listOf(fixture(0)))
+            val slowRead = CompletableDeferred<Unit>()
+            val entered = CompletableDeferred<Unit>()
+            var reads = 0
+            val published = mutableListOf<List<String>>()
+            val registry =
+                DraftProcessors(
+                    listDrafts = {
+                        val snapshot = store.list()
+                        if (++reads == 1) {
+                            entered.complete(Unit)
+                            slowRead.await() // 시작 읽기: 새 초안이 생기기 전에 읽은 목록을 들고 멈춘다
+                        }
+                        snapshot
+                    },
+                    create = { error("not used") },
+                )
+            val startup = launch { registry.refresh { synchronized(published) { published += it.map { d -> d.id } } } }
+            entered.await()
+            val second = store.create(DraftSource.Share, listOf(fixture(1)))
+            val import = launch { registry.refresh { synchronized(published) { published += it.map { d -> d.id } } } }
+            repeat(20) { yield() }
+            slowRead.complete(Unit)
+            startup.join()
+            import.join()
+            assertEquals(listOf(listOf(first.id), listOf(second.id, first.id)), published)
+        }
+
+    /** 한 처리기로 확인·직접 입력을 남긴 뒤 앱을 다시 연 것처럼 새 레지스트리·새 처리기로 읽어도 같은 확인이 남아 있다. */
+    @Test
+    fun confirmAndManualEntryAreDurableAcrossRestartWithOneWriter() =
+        runBlocking(Dispatchers.Default) {
+            val store = ReceiptDraftStore(tmp.newFolder())
+            val draft = store.create(DraftSource.Share, listOf(fixture(0), fixture(9)))
+            val factory = GatedFactory(store, TruthRecognizer())
+            val registry = DraftProcessors({ store.list() }, factory::create)
+            val processors = listOf(async { registry.acquire(draft) }, async { registry.acquire(draft) }).map { it.await() }
+            val processor = processors.first()
+            assertTrue(processors.all { it === processor })
+            processor.run()
+            val ready =
+                processor
+                    .snapshot()
+                    .items
+                    .single { it.state == ItemState.Ready }
+                    .id
+            val failed =
+                processor
+                    .snapshot()
+                    .items
+                    .single { it.state == ItemState.Failed }
+                    .id
+            val proposal = processor.proposal(ready)
+            processor.confirm(ready, proposal.fields, proposal.suggestedMaskLineIds.toSet())
+            val manual = AllowedReceiptFields("2026-11-08", 1760, "JPY", "ゆきみ茶屋")
+            processor.confirmManual(failed, manual)
+
+            val restarted = DraftProcessors({ store.list() }, GatedFactory(store, TruthRecognizer())::create)
+            val reopened = restarted.acquire(restarted.refresh { }.single())
+            val items = reopened.snapshot().items.associateBy { it.id }
+            assertEquals(ItemState.Confirmed, items.getValue(ready).state)
+            assertEquals(proposal.fields, items.getValue(ready).confirmed?.fields)
+            assertEquals(ItemState.Confirmed, items.getValue(failed).state)
+            assertEquals(manual, items.getValue(failed).confirmed?.fields)
+            assertEquals(store.loadProcessing(draft.id), reopened.snapshot())
+            assertEquals(listOf(ready), reopened.outboundReceipts().map { it.receipt.itemId })
         }
 }

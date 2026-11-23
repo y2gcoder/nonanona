@@ -39,6 +39,16 @@ final class RoomModel {
   private(set) var reviewState: [ExpenseTarget: ReviewSaveState] = [:]
   /// 보낸 검토(응답을 못 받았을 수 있다). 같은 내용으로 다시 보내면 같은 요청 키를 쓴다.
   private var sentReviews: [ExpenseTarget: ExpenseReview] = [:]
+  /// 응답을 기다리는 검토(지출마다 하나). 보낸 요청은 바뀌지 않고, 응답이 올 때까지 뒤로 가기·새로고침·다시 열기를 지나도
+  /// 남는다. 응답은 `attempt`가 같을 때만 반영한다(다른 작업의 화면·입력을 지우지 않는다).
+  private var inFlight: [ExpenseTarget: InFlightReview] = [:]
+
+  private struct InFlightReview {
+    let attempt: UUID
+    let review: ExpenseReview
+  }
+
+  func isSaving(_ target: ExpenseTarget) -> Bool { inFlight[target] != nil }
   /// 검토 중 다른 변경이 먼저 저장돼 최신 값으로 다시 연 지출.
   private(set) var reviewRefreshed: Set<ExpenseTarget> = []
 
@@ -86,7 +96,7 @@ final class RoomModel {
   /// 새 장부에서 버전이 바뀐 지출의 검토 입력은 최신 값으로 다시 채우고 알린다(옛 버전 입력을 새 버전에 보내지 않는다).
   /// 저장 중인 입력은 건드리지 않는다(그 결과가 같은 처리를 한다).
   private func rebaseForms(in ledger: RoomLedger) {
-    for (target, form) in forms where target.tripID == ledger.tripID && reviewState[target] != .saving {
+    for (target, form) in forms where target.tripID == ledger.tripID && inFlight[target] == nil {
       guard let expense = ledger.expenses.first(where: { $0.id == target.expenseID }),
         expense.version != form.baseVersion
       else { continue }
@@ -108,6 +118,11 @@ final class RoomModel {
     guard let ledger = ledgers[target.tripID], ledger.isHost, !ledger.isFinalized,
       let expense = ledger.expenses.first(where: { $0.id == target.expenseID })
     else { return }
+    // 저장 중이면 같은 작업에 다시 붙는다: 저장 중 상태·보낸 요청·입력을 그대로 두고 화면만 연다.
+    if inFlight[target] != nil {
+      reviewing = target
+      return
+    }
     reviewState[target] = nil
     if let form = forms[target], form.baseVersion != expense.version {
       // 전에 열었던 입력이 옛 버전이다. 최신 값으로 다시 채우고 알린다.
@@ -127,7 +142,7 @@ final class RoomModel {
   }
 
   func editForm(_ target: ExpenseTarget, _ change: (inout ShareForm) -> Void) {
-    guard var form = forms[target], reviewState[target] != .saving else { return }
+    guard var form = forms[target], inFlight[target] == nil else { return }
     change(&form)
     forms[target] = form
     if case .failed = reviewState[target] { reviewState[target] = nil }
@@ -147,23 +162,36 @@ final class RoomModel {
   }
 
   private func send(_ target: ExpenseTarget, version: Int, _ decision: ExpenseReview.Decision) async {
-    guard reviewState[target] != .saving else { return }
+    guard inFlight[target] == nil else { return }
     // 응답을 못 받은 같은 검토를 다시 보내면 같은 요청 키를 쓴다(서버가 같은 결과를 돌려준다).
     let previous = sentReviews[target]
     let review =
       previous.flatMap { $0.expectedVersion == version && $0.decision == decision ? $0 : nil }
       ?? ExpenseReview(expenseID: target.expenseID, expectedVersion: version, requestID: UUID(), decision: decision)
     sentReviews[target] = review
+    let attempt = UUID()
+    inFlight[target] = InFlightReview(attempt: attempt, review: review)
     reviewState[target] = .saving
+    let result: Result<ReviewedExpense, Error>
     do {
-      _ = try await settlement.review(review, in: target.tripID)
+      result = .success(try await settlement.review(review, in: target.tripID))
+    } catch {
+      result = .failure(error)
+    }
+    // 이 작업이 아직 그 지출의 저장 중 작업일 때만 반영한다.
+    guard inFlight[target]?.attempt == attempt else { return }
+    inFlight[target] = nil
+    switch result {
+    case .success:
       sentReviews[target] = nil
       reviewState[target] = nil
-      forms[target] = nil
+      // 저장한 입력(보낸 버전에서 연 것)만 지운다.
+      if forms[target]?.baseVersion == review.expectedVersion { forms[target] = nil }
       previews[target.tripID] = nil
       await loadLedger(target.tripID)
+      // 이 지출의 검토 화면만 닫는다(그사이 다른 지출을 열었으면 그대로 둔다).
       if reviewing == target { reviewing = nil }
-    } catch {
+    case .failure(let error):
       let failure = error as? SettlementFailure ?? .unknown
       reviewState[target] = .failed(failure)
       switch failure {

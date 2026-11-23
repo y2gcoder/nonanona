@@ -74,6 +74,20 @@ class RoomController(
     private val mutable = MutableStateFlow(RoomUiState())
     val state: StateFlow<RoomUiState> = mutable.asStateFlow()
     private val sentReviews = mutableMapOf<ExpenseTarget, ExpenseReview>()
+
+    /**
+     * 응답을 기다리는 검토(지출마다 하나). 보낸 요청은 바뀌지 않고, 응답이 올 때까지 뒤로 가기·새로고침·다시 열기를 지나도 남는다.
+     * 응답은 attempt가 같을 때만 반영한다(다른 작업의 화면·입력을 지우지 않는다).
+     */
+    private val inFlight = mutableMapOf<ExpenseTarget, InFlightReview>()
+
+    private class InFlightReview(
+        val attempt: UUID,
+        val review: ExpenseReview,
+    )
+
+    fun isSaving(target: ExpenseTarget): Boolean = target in inFlight
+
     private val sentFinalize = mutableMapOf<TripId, Pair<Long, UUID>>()
 
     fun refreshTrips() {
@@ -120,7 +134,7 @@ class RoomController(
         val stale =
             state.forms.filter { (target, form) ->
                 target.tripId == ledger.tripId &&
-                    state.reviewState[target] != ReviewSaveState.Saving &&
+                    target !in inFlight &&
                     ledger.expenses.firstOrNull { it.id == target.expenseId }?.let { it.version != form.baseVersion } == true
             }
         if (stale.isEmpty()) return state
@@ -137,6 +151,8 @@ class RoomController(
         val ledger = now.ledgers[target.tripId] ?: return false
         if (!ledger.isHost || ledger.isFinalized) return false
         val expense = now.expense(target) ?: return false
+        // 저장 중이면 같은 작업에 다시 붙는다: 저장 중 상태·보낸 요청·입력을 그대로 두고 화면만 연다.
+        if (target in inFlight) return true
         mutable.update {
             val kept = it.forms[target]
             if (kept != null && kept.baseVersion != expense.version) {
@@ -166,7 +182,7 @@ class RoomController(
         change: (ShareForm) -> ShareForm,
     ) = mutable.update {
         val form = it.forms[target] ?: return@update it
-        if (it.reviewState[target] == ReviewSaveState.Saving) return@update it
+        if (target in inFlight) return@update it
         val failed = it.reviewState[target] is ReviewSaveState.Failed
         it.copy(forms = it.forms + (target to change(form)), reviewState = if (failed) it.reviewState - target else it.reviewState)
     }
@@ -195,25 +211,43 @@ class RoomController(
         version: Int,
         decision: ExpenseReview.Decision,
     ) {
-        if (state.value.reviewState[target] == ReviewSaveState.Saving) return
+        if (target in inFlight) return
         // 응답을 못 받은 같은 검토를 다시 보내면 같은 요청 키를 쓴다(서버가 같은 결과를 돌려준다).
         val review =
             sentReviews[target]?.takeIf { it.expectedVersion == version && it.decision == decision }
                 ?: ExpenseReview(target.expenseId, version, UUID.randomUUID(), decision)
         sentReviews[target] = review
+        val attempt = UUID.randomUUID()
+        inFlight[target] = InFlightReview(attempt, review)
         mutable.update { it.copy(reviewState = it.reviewState + (target to ReviewSaveState.Saving)) }
         scope.launch {
-            try {
-                settlement.review(review, target.tripId)
+            val failure =
+                try {
+                    settlement.review(review, target.tripId)
+                    null
+                } catch (e: SettlementException) {
+                    e.failure
+                }
+            // 이 작업이 아직 그 지출의 저장 중 작업일 때만 반영한다.
+            if (inFlight[target]?.attempt != attempt) return@launch
+            inFlight.remove(target)
+            if (failure == null) {
                 sentReviews.remove(target)
                 mutable.update {
-                    it.copy(reviewState = it.reviewState - target, forms = it.forms - target, previews = it.previews - target.tripId)
+                    // 저장한 입력(보낸 버전에서 연 것)만 지운다.
+                    val saved = it.forms[target]?.baseVersion == review.expectedVersion
+                    it.copy(
+                        reviewState = it.reviewState - target,
+                        forms = if (saved) it.forms - target else it.forms,
+                        previews = it.previews - target.tripId,
+                    )
                 }
                 loadLedger(target.tripId)
+                // 이 지출의 검토 화면만 닫는다(앱이 맨 위 화면이 이 지출일 때만 닫는다).
                 onReviewSaved(target)
-            } catch (e: SettlementException) {
-                mutable.update { it.copy(reviewState = it.reviewState + (target to ReviewSaveState.Failed(e.failure))) }
-                when (e.failure) {
+            } else {
+                mutable.update { it.copy(reviewState = it.reviewState + (target to ReviewSaveState.Failed(failure))) }
+                when (failure) {
                     SettlementFailure.Stale -> {
                         // 다른 변경이 먼저 저장됐다. 최신 값을 불러와 입력을 그 값으로 다시 채운다(덮어쓰지 않는다).
                         sentReviews.remove(target)

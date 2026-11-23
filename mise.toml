@@ -145,6 +145,10 @@ run = "python3 -I scripts/local-backend.py up"
 description = "로컬 DB를 초기 상태(가상 계정·여행방·초대)로 되돌리고 앱 설정 파일을 새로 쓴다"
 run = "python3 -I scripts/local-backend.py reset"
 
+[tasks."local:contract"]
+description = "정산 서버 계약 시험(실제 HTTP: 권한·재시도·동시성·오래된 버전·확정 불변). local:up 또는 local:reset 뒤. 실행마다 새 가상 여행방을 만든다. 인자: [결과 JSON]"
+run = "python3 -I scripts/settlement-contract.py"
+
 [tasks."local:down"]
 description = "로컬 Supabase 정지, 앱 설정 파일 삭제(debug 앱은 테스트 모드로 돌아간다)"
 run = "python3 -I scripts/local-backend.py down"

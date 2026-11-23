@@ -1,0 +1,31 @@
+{
+  "_comment": "정산 공통 예제(가상 값). 서버 계약 시험(scripts/settlement-contract.py)과 두 앱의 몫 제안 단위 테스트가 같은 파일을 읽는다. 금액은 원(KRW) 정수다.",
+  "share_proposals": [
+    { "krw": 38000, "people": 2, "even": [19000, 19000] },
+    { "krw": 13377, "people": 2, "even": null },
+    { "krw": 2, "people": 2, "even": [1, 1] },
+    { "krw": 1, "people": 2, "even": null },
+    { "krw": 13377, "people": 1, "even": [13377] },
+    { "krw": 99999999998, "people": 2, "even": [49999999999, 49999999999] }
+  ],
+  "settlement": {
+    "_comment": "host=다라(결제), member=가나. r01은 외화라 확인한 원화 청구액 13,377원(홀수)을 직접 나눈다. r02는 원화 청구액을 몰라 보류한다. 입장권은 증빙 없는 직접 입력(KRW). 기념품은 가나 혼자 내고 혼자 부담한 개인 지출이다.",
+    "expenses": [
+      { "key": "r01", "entry": "receipt", "date": "2026-11-03", "amount_minor": 1408, "currency": "JPY", "merchant": "さくら食堂",
+        "review": { "decision": "include", "payer": "host", "krw_amount": 13377, "shares": { "host": 6688, "member": 6689 } } },
+      { "key": "r02", "entry": "receipt", "date": "2026-11-03", "amount_minor": 1276, "currency": "JPY", "merchant": "みなと珈琲",
+        "review": { "decision": "hold", "hold_reason": "원화 청구액 확인 대기" } },
+      { "key": "ticket", "entry": "manual", "date": "2026-11-08", "amount_minor": 38000, "currency": "KRW", "merchant": "입장권",
+        "review": { "decision": "include", "payer": "host", "shares": { "host": 19000, "member": 19000 } } },
+      { "key": "souvenir", "entry": "manual", "date": "2026-11-08", "amount_minor": 12000, "currency": "KRW", "merchant": "기념품",
+        "review": { "decision": "include", "payer": "member", "shares": { "member": 12000 } } }
+    ],
+    "expected": {
+      "included_total_krw": 51377,
+      "balances": { "host": 25689, "member": -25689 },
+      "transfers": [ { "from": "member", "to": "host", "krw": 25689 } ],
+      "excluded": [ { "key": "r02", "kind": "held", "reason": "원화 청구액 확인 대기" }, { "key": "souvenir", "kind": "personal", "reason": null } ],
+      "if_r02_included_at_12122_even": { "transfers": [ { "from": "member", "to": "host", "krw": 31750 } ] }
+    }
+  }
+}

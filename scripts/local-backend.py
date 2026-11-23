@@ -3,7 +3,7 @@
 
 사용(저장소 루트, mise 환경에서):
   python3 -I scripts/local-backend.py up            스택 시작 + reset
-  python3 -I scripts/local-backend.py reset         DB 초기화 → 가상 계정 → 가상 여행방·초대 → 앱 설정 파일
+  python3 -I scripts/local-backend.py reset         DB 초기화 → 가상 계정 → 가상 여행방·초대·정산 여행방 → 앱 설정 파일
   python3 -I scripts/local-backend.py down          스택 정지 + 앱 설정 파일 삭제(앱은 테스트 모드로 돌아간다)
   python3 -I scripts/local-backend.py api-stop|api-start   API 게이트웨이만 멈추고 다시 띄운다(연결 실패 재현)
   python3 -I scripts/local-backend.py revoke-sessions      가상 회원 계정의 서버 세션을 지운다(세션 만료 재현)
@@ -33,6 +33,7 @@ RUN = ROOT / "supabase" / ".run"
 ANDROID_CONFIG = ROOT / "apps" / "android" / "local-backend.properties"
 IOS_CONFIG = ROOT / "apps" / "ios" / "Config" / "Local.xcconfig"
 FIXTURE = ROOT / "supabase" / "fixtures" / "local-trip-invites.sql"
+SETTLEMENT_FIXTURE = ROOT / "supabase" / "fixtures" / "local-settlement-trip.sql"
 PROJECT_ID = "nonanona-local"
 # 가상 계정. example.com은 예약된 도메인이라 실제 주소가 아니다.
 HOST = ("host.local@example.com", "다라")
@@ -94,7 +95,9 @@ def write_private(path, text):
     os.chmod(path, 0o600)
 
 
-def write_app_configs(env, password):
+def write_app_configs(env, password, host_password):
+    """회원 계정이 기본이다. 방장 계정은 앱의 debug 설정(iOS 실행 환경 NONANONA_LOCAL_ACCOUNT=host,
+    Android files/debug-processing.properties의 localAccount=host)으로 고른다."""
     key = env["PUBLISHABLE_KEY"]
     write_private(ANDROID_CONFIG, "\n".join([
         "# scripts/local-backend.py가 만든 로컬 debug 설정(gitignore). 지우면 debug 앱은 테스트 모드로 돌아간다.",
@@ -103,6 +106,8 @@ def write_app_configs(env, password):
         f"publishableKey={key}",
         f"testEmail={MEMBER[0]}",
         f"testPassword={password}",
+        f"hostEmail={HOST[0]}",
+        f"hostPassword={host_password}",
         "",
     ]))
     # xcconfig에서 //는 주석이라 URL의 //를 $()로 끊는다.
@@ -114,6 +119,8 @@ def write_app_configs(env, password):
         f"NONANONA_LOCAL_PUBLISHABLE_KEY = {key}",
         f"NONANONA_LOCAL_TEST_EMAIL = {MEMBER[0]}",
         f"NONANONA_LOCAL_TEST_PASSWORD = {password}",
+        f"NONANONA_LOCAL_HOST_EMAIL = {HOST[0]}",
+        f"NONANONA_LOCAL_HOST_PASSWORD = {host_password}",
         "",
     ]))
 
@@ -128,12 +135,15 @@ def reset():
     env = status()
     log("migrations applied")
     member_password = secrets.token_urlsafe(24)
-    admin_create_user(env, HOST[0], HOST[1], secrets.token_urlsafe(24))  # 방장은 로그인하지 않는다
+    host_password = secrets.token_urlsafe(24)
+    admin_create_user(env, HOST[0], HOST[1], host_password)
     admin_create_user(env, MEMBER[0], MEMBER[1], member_password)
     log("synthetic accounts created (host, member)")
     supabase("db", "query", "--file", str(FIXTURE), log_name="fixture")
-    log("synthetic trips (3) and invites (5) inserted")
-    write_app_configs(env, member_password)
+    supabase("db", "query", "--file", str(SETTLEMENT_FIXTURE), log_name="fixture-settlement")
+    log("synthetic trips (4, one settlement trip with both accounts) and invites (5) inserted")
+    write_app_configs(env, member_password, host_password)
+    write_private(RUN / "accounts.json", json.dumps({"host": [HOST[0], host_password], "member": [MEMBER[0], member_password]}))
     log("app configs written (gitignored): apps/android/local-backend.properties, apps/ios/Config/Local.xcconfig")
 
 
@@ -206,7 +216,7 @@ def upload_report():
     r = rows(f"""select
         (select count(*) from storage.objects where bucket_id = 'receipts') as objects,
         (select count(*) from public.expenses) as expenses,
-        (select count(*) from public.expenses e where not exists (
+        (select count(*) from public.expenses e where e.entry = 'receipt' and not exists (
            select 1 from storage.objects o where o.bucket_id = 'receipts' and o.name = e.artifact_path)) as expenses_without_object,
         (select count(*) from storage.objects o where o.bucket_id = 'receipts' and not exists (
            select 1 from public.expenses e where e.artifact_path = o.name)) as objects_without_expense,
@@ -295,7 +305,7 @@ def main():
         upload_report()
     elif cmd == "fetch-artifact":
         env = status()
-        path = rows("select artifact_path as p from public.expenses order by created_at limit 1", "fetch-path")[0]["p"]
+        path = rows("select artifact_path as p from public.expenses where entry = 'receipt' order by created_at limit 1", "fetch-path")[0]["p"]
         st, raw = http(env, "GET", "/storage/v1/object/receipts/" + path, key=env["SECRET_KEY"], token=env["SECRET_KEY"])
         if st != 200:
             sys.exit(f"[local-backend] fetch failed: HTTP {st}")
@@ -306,7 +316,7 @@ def main():
         env = status()
         out = Path(sys.argv[2])
         out.mkdir(parents=True, exist_ok=True)
-        for row in rows("select artifact_path as p, artifact_sha256 as h from public.expenses order by created_at", "fetch-paths"):
+        for row in rows("select artifact_path as p, artifact_sha256 as h from public.expenses where entry = 'receipt' order by created_at", "fetch-paths"):
             st, raw = http(env, "GET", "/storage/v1/object/receipts/" + row["p"], key=env["SECRET_KEY"], token=env["SECRET_KEY"])
             if st != 200:
                 sys.exit(f"[local-backend] fetch failed: HTTP {st}")

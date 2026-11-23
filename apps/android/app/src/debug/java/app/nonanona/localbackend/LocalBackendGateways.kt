@@ -349,8 +349,9 @@ class LocalSettlementGateway(
                 body.put("p_decision", "hold").put("p_hold_reason", d.reason)
             }
         }
-        val json = JSONObject(call("review_expense", body))
-        return parse { ReviewedExpense(json.getInt("version"), json.getLong("revision"), json.getBoolean("replayed")) }
+        val raw = call("review_expense", body)
+        // 응답 글자를 객체로 읽는 일도 형식 검사 안에서 한다(깨진 본문·객체가 아닌 성공 응답 → Unknown).
+        return parse { JSONObject(raw).let { ReviewedExpense(it.getInt("version"), it.getLong("revision"), it.getBoolean("replayed")) } }
     }
 
     override suspend fun preview(trip: TripId): SettlementPreview {

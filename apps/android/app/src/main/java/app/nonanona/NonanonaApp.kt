@@ -313,7 +313,7 @@ fun NonanonaApp(viewModel: AppViewModel) {
                         proposal =
                             ItemProposalPanel(
                                 basis = basis,
-                                remainderChoice = state.proposalRemainder[route]?.value,
+                                remainderChoice = viewModel.proposalRemainder(route, state, rooms)?.value,
                                 request = viewModel.proposalRequest(route, state, rooms),
                                 sent = expense?.shareProposal,
                                 sendState = rooms.proposalState[route.target],
@@ -350,7 +350,7 @@ fun NonanonaApp(viewModel: AppViewModel) {
             ProposalConsentDialog(
                 request = request,
                 ledger = rooms.ledgers[route.target.tripId],
-                onConfirm = { viewModel.confirmProposalSend(request) },
+                onConfirm = { viewModel.confirmProposalSend(route, request) },
                 onCancel = viewModel::cancelProposalSend,
             )
         }

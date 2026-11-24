@@ -170,8 +170,15 @@ final class AppModel {
   private var itemPlanSettled: [ReviewTarget: Int] = [:]
   /// 올린 사람(회원)의 품목 나누기 제안 화면. 장부 위에 쌓인다.
   var proposalSplit: ItemSplitTarget?
-  /// 나눠떨어지지 않을 때 남은 원을 낼 사람(올린 사람이 직접 고른다). 저절로 정하지 않는다.
-  private(set) var proposalRemainder: [ItemSplitTarget: MemberID] = [:]
+  /// 나눠떨어지지 않을 때 남은 원을 낼 사람(올린 사람이 직접 고른다)과 그때의 원화 합계. 저절로 정하지 않고, 원화 기준이
+  /// 바뀌면(기준환율 정정 등) 예전 선택을 새 금액에 쓰지 않는다(다시 고른다).
+  private var proposalRemainderChoice: [ItemSplitTarget: (member: MemberID, krw: Int)] = [:]
+  func proposalRemainder(_ split: ItemSplitTarget) -> MemberID? {
+    guard let choice = proposalRemainderChoice[split], case .ready(_, let krw, _) = proposalBasis(split),
+      choice.krw == krw
+    else { return nil }
+    return choice.member
+  }
   /// 보내기 전 확인 창(보낼 값을 그대로 보이고 동의를 받는다).
   var proposalConfirmation: ItemSplitTarget?
 
@@ -821,13 +828,16 @@ final class AppModel {
     return ProposalBasis.of(expense, finalized: ledger.isFinalized)
   }
 
-  func chooseProposalRemainder(_ split: ItemSplitTarget, _ member: MemberID) { proposalRemainder[split] = member }
+  func chooseProposalRemainder(_ split: ItemSplitTarget, _ member: MemberID) {
+    guard case .ready(_, let krw, _) = proposalBasis(split) else { return }
+    proposalRemainderChoice[split] = (member, krw)
+  }
 
   /// 보낼 몫. 정확히 나눠떨어지면 그대로, 남은 원이 있으면 올린 사람이 고른 사람에게 더한다(고르기 전에는 nil).
   /// 몫은 모두 양수여야 한다(0원 몫을 보내지 않고 막는다).
   func proposalShares(_ split: ItemSplitTarget) -> [ShareLine]? {
     guard case .success(let allocation)? = itemAllocation(split) else { return nil }
-    return ProposalShares.from(allocation, remainderTo: proposalRemainder[split])
+    return ProposalShares.from(allocation, remainderTo: proposalRemainder(split))
   }
 
   /// 서버로 갈 요청 전부. 품목 정보는 들어갈 자리가 없다.
@@ -846,8 +856,8 @@ final class AppModel {
   }
 
   /// 확인 창에서 "보내기"를 누른 뒤에만 보낸다. 창을 연 뒤 값이 바뀌었으면(장부 새로고침 등) 보내지 않고 다시 확인하게 한다.
-  func confirmProposalSend(_ shown: ShareProposalRequest) async {
-    guard let split = proposalConfirmation else { return }
+  /// 확인 창은 버튼 동작보다 먼저 닫히며 `proposalConfirmation`을 지우므로, 창이 보인 대상과 요청을 그대로 받는다.
+  func confirmProposalSend(_ split: ItemSplitTarget, _ shown: ShareProposalRequest) async {
     proposalConfirmation = nil
     guard let request = proposalRequest(split), request == shown else { return }
     await rooms.propose(request, target: split.expense)

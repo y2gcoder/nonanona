@@ -66,13 +66,13 @@ struct RootView: View {
       "방장에게 제안을 보낼까요?",
       isPresented: Binding(
         get: { model.proposalConfirmation != nil }, set: { if !$0 { model.proposalConfirmation = nil } }),
-      presenting: model.proposalConfirmation.flatMap(model.proposalRequest)
-    ) { request in
-      Button("보내기") { Task { await model.confirmProposalSend(request) } }
+      presenting: model.proposalConfirmation.flatMap { split in model.proposalRequest(split).map { (split, $0) } }
+    ) { shown in
+      Button("보내기") { Task { await model.confirmProposalSend(shown.0, shown.1) } }
         .accessibilityIdentifier("proposal-send-confirm")
       Button("취소", role: .cancel) { model.proposalConfirmation = nil }
-    } message: { request in
-      Text(proposalConsentText(request))
+    } message: { shown in
+      Text(proposalConsentText(shown.1, trip: shown.0.expense.tripID))
     }
     .sheet(
       isPresented: Binding(
@@ -87,8 +87,8 @@ struct RootView: View {
   }
 
   /// 보낼 값을 그대로 보인다: 사람마다 원, 원화 기준과 합계. 품목 정보는 보내지 않는다는 것을 함께 알린다.
-  private func proposalConsentText(_ request: ShareProposalRequest) -> String {
-    let ledger = model.proposalConfirmation.flatMap { model.rooms.ledgers[$0.expense.tripID] }
+  private func proposalConsentText(_ request: ShareProposalRequest, trip: TripID) -> String {
+    let ledger = model.rooms.ledgers[trip]
     let lines = request.shares.map { "\(ledger?.name(of: $0.member) ?? "") \(Won.text($0.krw))" }.joined(
       separator: ", ")
     let basis: String =
@@ -258,7 +258,7 @@ private struct ItemSplitDestination: View {
         loadFailure: model.itemPlanLoadFailed[split.receipt],
         proposal: isProposal
           ? ItemProposalPanel(
-            basis: basis, remainderChoice: model.proposalRemainder[split]?.value,
+            basis: basis, remainderChoice: model.proposalRemainder(split)?.value,
             request: model.proposalRequest(split), sent: expense?.shareProposal,
             sendState: rooms.proposalState[split.expense]) : nil),
       actions: ItemSplitActions(

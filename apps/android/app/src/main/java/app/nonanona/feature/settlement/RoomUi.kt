@@ -508,7 +508,12 @@ fun ExpenseReviewScreen(
                         expense = expense,
                         ledger = ledger,
                         form = form,
-                        entered = (result as? ShareResult.Valid)?.shares,
+                        // 지금 입력한 몫(결제자를 아직 고르지 않았어도). 제안과 나란히 비교할 때만 쓴다.
+                        entered =
+                            (
+                                form.copy(payer = form.payer ?: ledger.members.firstOrNull()?.id).shares(expense, ledger.members)
+                                    as? ShareResult.Valid
+                            )?.shares,
                         saving = saving,
                         onFill = onFillProposal,
                     )

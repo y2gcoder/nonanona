@@ -348,6 +348,12 @@ struct ExpenseReviewView: View {
   private var krw: Int? { form.krw(for: expense) }
   private var result: Result<[ShareLine], ShareProblem> { form.shares(for: expense, members: ledger.members) }
   private var saving: Bool { state == .saving }
+  /// 지금 입력한 몫(결제자를 아직 고르지 않았어도). 제안과 나란히 비교할 때만 쓴다.
+  private var enteredShares: [ShareLine]? {
+    var probe = form
+    if probe.payer == nil { probe.payer = ledger.members.first?.id }
+    return try? probe.shares(for: expense, members: ledger.members).get()
+  }
   /// 새 예상 금액 적용으로 보낼 몫(기준을 기준환율 예상으로 둔 입력). 직접 나눈 몫은 고치지 않으므로 맞지 않으면 실패다.
   private var applyResult: Result<[ShareLine], ShareProblem> {
     var applied = form
@@ -378,7 +384,7 @@ struct ExpenseReviewView: View {
 
       if ledger.isHost, let proposal = expense.shareProposal {
         ShareProposalSection(
-          proposal: proposal, expense: expense, ledger: ledger, form: form, entered: try? result.get(), saving: saving,
+          proposal: proposal, expense: expense, ledger: ledger, form: form, entered: enteredShares, saving: saving,
           onFill: onFillProposal)
       }
 

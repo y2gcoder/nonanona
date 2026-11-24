@@ -239,8 +239,11 @@ data class AppUiState(
     val itemPlanSaveFailed: Set<Route.Receipt> = emptySet(),
     /** 저장한 품목 계획을 열지 못했다. 이때는 계획이 없으므로 편집·저장도 없다(디스크의 계획을 덮지 않는다). */
     val itemPlanLoadFailed: Map<Route.Receipt, ItemPlanLoadFailure> = emptyMap(),
-    /** 제안에서 나눠떨어지지 않을 때 남은 원을 낼 사람(올린 사람이 직접 고른다). 저절로 정하지 않는다. */
-    val proposalRemainder: Map<Route.ItemProposal, MemberId> = emptyMap(),
+    /**
+     * 제안에서 나눠떨어지지 않을 때 남은 원을 낼 사람(올린 사람이 직접 고른다)과 그때의 원화 합계. 저절로 정하지 않고, 원화 기준이
+     * 바뀌면(기준환율 정정 등) 예전 선택을 새 금액에 쓰지 않는다(다시 고른다).
+     */
+    val proposalRemainder: Map<Route.ItemProposal, Pair<MemberId, Long>> = emptyMap(),
     /** 보내기 전 확인 창(보낼 값을 그대로 보이고 동의를 받는다). */
     val proposalConfirmation: Route.ItemProposal? = null,
     val itemTranslation: Map<Route.Receipt, ItemTranslationState> = emptyMap(),
@@ -1097,7 +1100,20 @@ class AppViewModel(
     fun chooseProposalRemainder(
         route: Route.ItemProposal,
         member: MemberId,
-    ) = mutableState.update { it.copy(proposalRemainder = it.proposalRemainder + (route to member)) }
+    ) {
+        val krw = (proposalBasis(route) as? ProposalBasis.Ready)?.krw ?: return
+        mutableState.update { it.copy(proposalRemainder = it.proposalRemainder + (route to (member to krw))) }
+    }
+
+    /** 지금 원화 합계에서 고른 남은 원의 사람. 기준이 바뀌었으면 null(다시 고른다). */
+    fun proposalRemainder(
+        route: Route.ItemProposal,
+        app: AppUiState = state.value,
+        room: RoomUiState = rooms.state.value,
+    ): MemberId? {
+        val (member, krw) = app.proposalRemainder[route] ?: return null
+        return member.takeIf { (proposalBasis(route, room) as? ProposalBasis.Ready)?.krw == krw }
+    }
 
     /** 서버로 갈 요청 전부. 품목 정보는 들어갈 자리가 없다. 남은 원을 고르지 않았거나 0원 몫이 있으면 null. */
     fun proposalRequest(
@@ -1108,7 +1124,7 @@ class AppViewModel(
         val basis = proposalBasis(route, room) as? ProposalBasis.Ready ?: return null
         val expense = room.expense(route.target) ?: return null
         val allocation = proposalAllocation(route, app, room)?.allocation ?: return null
-        val shares = ProposalShares.from(allocation, app.proposalRemainder[route]) ?: return null
+        val shares = ProposalShares.from(allocation, proposalRemainder(route, app, room)) ?: return null
         if (shares.sumOf { it.krw } != basis.krw) return null
         return ShareProposalRequest(expense.id, expense.version, basis.basis, basis.krw, basis.quote?.quoteId, shares)
     }
@@ -1121,8 +1137,10 @@ class AppViewModel(
     fun cancelProposalSend() = mutableState.update { it.copy(proposalConfirmation = null) }
 
     /** 확인 창에서 "보내기"를 누른 뒤에만 보낸다. 창을 연 뒤 값이 바뀌었으면(장부 새로고침 등) 보내지 않는다. */
-    fun confirmProposalSend(shown: ShareProposalRequest) {
-        val route = state.value.proposalConfirmation ?: return
+    fun confirmProposalSend(
+        route: Route.ItemProposal,
+        shown: ShareProposalRequest,
+    ) {
         mutableState.update { it.copy(proposalConfirmation = null) }
         val request = proposalRequest(route) ?: return
         if (request != shown) return

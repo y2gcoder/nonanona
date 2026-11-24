@@ -189,6 +189,10 @@ run = "python3 -I scripts/e2e-settlement.py"
 description = "품목별 나누기 E2E(로컬 Supabase 모드, 방장 기기 하나, ADR-0010): 가상 품목 영수증 2장 공유·확인·올리기 → 실제 기기 번역 상태 기록 → 미리보기 대역 번역(첫 실패 뒤 다시) → 공유·한 사람 품목, 나눠떨어지지 않는 1원은 방장이 직접 → 외세·할인은 조정 줄로 정확히 → 앱 종료 뒤 계획 유지 → 서버 몫 확인, 서버 DB 전체에 품목 글자 없음. local:up 뒤. 인자: ios <시뮬레이터 UDID> [증거 폴더] | android [증거 폴더]"
 run = "python3 -I scripts/e2e-items.py"
 
+[tasks."e2e:proposals"]
+description = "두 기기 품목 나누기 제안 E2E(ADR-0011, 로컬 Supabase 모드): 올린 회원이 품목 계획으로 몫을 계산해 남은 원을 직접 고르고 동의해 제안 → 방장이 제안·입력 몫을 보고 채운 뒤 포함 → 기준환율 정정 뒤 stale·다시 보내기 → 확정. 오간 REST/RPC 본문과 서버 DB 전체에 품목 글자 없음. 새 가상 여행방을 만든다(DB를 지우지 않는다). local:up 뒤. 인자: <시뮬레이터 UDID> <올린 회원 기기 ios|android> [증거 폴더]. Android 기기가 여럿이면 ANDROID_SERIAL"
+run = "python3 -I scripts/e2e-proposals.py"
+
 [tasks."local:down"]
 description = "로컬 Supabase 정지, 앱 설정 파일 삭제(debug 앱은 테스트 모드로 돌아간다)"
 run = "python3 -I scripts/local-backend.py down"

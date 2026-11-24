@@ -181,6 +181,10 @@ run = "python3 -I scripts/ecos-fx.py ingest"
 description = "두 기기 정산 E2E(로컬 Supabase 모드): 부팅한 iOS 시뮬레이터 하나 + 실행 중인 Android 에뮬레이터 하나. 한쪽이 가상 방장, 다른 쪽이 가상 회원으로 올리기·직접 입력 → 검토·보류 → 미리보기 → 오래된 revision 확정 거절 → 확정 → 다시 열어도 같은 확정본. local:up 뒤. 인자: <시뮬레이터 UDID> <방장 기기 ios|android> [증거 폴더]"
 run = "python3 -I scripts/e2e-settlement.py"
 
+[tasks."e2e:items"]
+description = "품목별 나누기 E2E(로컬 Supabase 모드, 방장 기기 하나, ADR-0010): 가상 품목 영수증 2장 공유·확인·올리기 → 실제 기기 번역 상태 기록 → 미리보기 대역 번역(첫 실패 뒤 다시) → 공유·한 사람 품목, 나눠떨어지지 않는 1원은 방장이 직접 → 외세·할인은 조정 줄로 정확히 → 앱 종료 뒤 계획 유지 → 서버 몫 확인, 서버 DB 전체에 품목 글자 없음. local:up 뒤. 인자: ios <시뮬레이터 UDID> [증거 폴더] | android [증거 폴더]"
+run = "python3 -I scripts/e2e-items.py"
+
 [tasks."local:down"]
 description = "로컬 Supabase 정지, 앱 설정 파일 삭제(debug 앱은 테스트 모드로 돌아간다)"
 run = "python3 -I scripts/local-backend.py down"

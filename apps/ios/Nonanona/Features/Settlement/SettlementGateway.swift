@@ -18,12 +18,52 @@ struct ShareLine: Hashable, Sendable {
   let krw: Int
 }
 
-/// 지출의 원화 기준. 기준환율 자동 환산은 없다(ADR-0001의 제공처·반올림이 정해지기 전까지).
+/// 지출의 원화 기준(ADR-0001 우선순위, ADR-0008). 앱은 모르는 값을 받으면 장부를 그리지 않는다(예상액을 실제처럼 보이지 않게).
 enum KRWBasis: String, Sendable {
   /// 원화로 결제한 금액 그대로.
   case krwOriginal = "krw_original"
-  /// 방장이 확인한 실제 원화 청구액(외화 지출).
+  /// 방장이 확인한 실제 원화 청구액(외화 지출, 우선순위 1).
   case verifiedCharge = "verified_krw_charge"
+  /// 증빙으로 확인한 외화 취득 원가(엔화, 우선순위 2). 방장이 환전에 쓴 원화와 받은 엔을 적었다.
+  case acquisitionCost = "acquisition_cost"
+  /// 한국은행 ECOS 기준환율로 계산한 예상액(엔화, 우선순위 3). 실제 청구액이 아니고 언제나 "예상"으로 보인다.
+  case referenceEstimate = "reference_rate_estimate"
+}
+
+/// 서버가 받아 둔 기준환율 고시값 하나(ECOS 731Y001/0000002 원/일본엔, `quoteUnit`엔당 원).
+/// `rate`는 고시 글자 그대로다(부동소수로 바꾸지 않는다).
+struct ReferenceQuote: Hashable, Sendable {
+  let quoteID: String
+  let rate: String
+  let quoteUnit: Int
+  /// 값을 고시한 날(지출일이거나, 그날 고시가 없으면 그 전 가장 최근 고시일).
+  let rateDate: String
+  let itemName: String
+  /// 가상 시험값(data_origin=fixture). 시장 환율이 아니므로 언제나 따로 표시한다.
+  let isSynthetic: Bool
+}
+
+/// 열린 방의 엔화 지출에 서버가 지금 붙이는 기준환율 제안.
+enum FXProposal: Hashable, Sendable {
+  /// 쓸 수 있는 고시값과 그 값으로 서버가 계산한 원화.
+  case proposed(ReferenceQuote, krw: Int)
+  /// 그 날짜의 고시 여부를 아직 확인하지 못했다(받은 기록이 덮지 않는다). 예상액을 만들지 않는다.
+  case undetermined
+  /// 지출일 앞 31일 안에 고시값이 없다. 예상액을 만들지 않는다.
+  case unavailable
+}
+
+/// 외화 취득 원가: 환전에 쓴 원화와 받은 외화(엔). 지출 원화 = 엔 × 원화 ÷ 받은 엔(원 단위 반올림).
+struct AcquisitionBasis: Hashable, Sendable {
+  let krwPaid: Int
+  let foreignMinor: Int
+}
+
+/// 외화 지출의 원화가 실제 청구액이 아닐 때 방장이 고른 근거. 서버가 같은 계산으로 다시 확인한다.
+enum KRWConversion: Equatable, Sendable {
+  case acquisitionCost(AcquisitionBasis)
+  /// 방장이 본 고시값. 그사이 그 지출일 값이 바뀌었으면 서버가 거절한다(`quoteChanged`).
+  case referenceEstimate(quoteID: String)
 }
 
 enum ExpenseStatus: Hashable, Sendable {
@@ -78,6 +118,14 @@ struct LedgerExpense: Hashable, Identifiable, Sendable {
   let shares: [ShareLine]
   /// 공유한 가림 사본(사본으로 올린 지출만). 직접 입력은 nil.
   var artifact: ReceiptArtifactRef? = nil
+  /// 포함한 기준환율 예상액이 고정한 고시값(`krwBasis == .referenceEstimate`일 때만).
+  var fx: ReferenceQuote? = nil
+  /// 포함한 취득 원가(`krwBasis == .acquisitionCost`일 때만).
+  var acquisition: AcquisitionBasis? = nil
+  /// 지금의 기준환율 제안(열린 방의 엔화 지출만).
+  var fxProposal: FXProposal? = nil
+  /// 포함한 예상액 뒤에 더 새 고시값이 들어왔다. 포함 금액은 바뀌지 않는다(다시 검토할 수 있다).
+  var fxSuperseded = false
 }
 
 /// 여행방 장부. `revision`은 방의 입력이 바뀔 때마다 서버가 올리고, 확정은 방장이 본 revision으로만 한다.
@@ -106,8 +154,9 @@ struct RoomLedger: Equatable, Sendable {
 /// 방장 검토 한 건. `requestID`는 같은 검토를 다시 보낼 때 그대로 쓴다.
 struct ExpenseReview: Equatable, Sendable {
   enum Decision: Equatable, Sendable {
-    /// 포함: 결제자, 확인한 원화(KRW 지출은 nil), 원 단위 몫(합이 원화와 같아야 한다).
-    case include(payer: MemberID, verifiedKRW: Int?, shares: [ShareLine])
+    /// 포함: 결제자, 원화(KRW 지출은 nil), 원 단위 몫(합이 원화와 같아야 한다). 외화의 원화가 실제 청구액이 아니면
+    /// `conversion`에 근거를 담는다(취득 원가·기준환율 예상액). 원화는 방장이 본 값이고 서버가 다시 계산해 맞춰 본다.
+    case include(payer: MemberID, verifiedKRW: Int?, shares: [ShareLine], conversion: KRWConversion? = nil)
     case hold(reason: String)
   }
 
@@ -150,6 +199,8 @@ struct SettlementPreview: Equatable, Sendable {
   let includedTotalKRW: Int
   let transfers: [Transfer]
   let excluded: [ExcludedExpense]
+  /// 함께 쓴 돈 가운데 기준환율 예상액의 합.
+  var estimatedTotalKRW = 0
 }
 
 /// 확정한 정산. 서버가 확정 순간의 입력(구성원·지출·몫)과 결과(송금)를 고정한 스냅숏을 그대로 그린다.
@@ -163,6 +214,9 @@ struct FinalSettlement: Equatable, Sendable {
     let currency: String
     let krwAmount: Int?
     let kind: String
+    var krwBasis: KRWBasis? = nil
+    var fx: ReferenceQuote? = nil
+    var acquisition: AcquisitionBasis? = nil
   }
 
   let id: String
@@ -176,6 +230,8 @@ struct FinalSettlement: Equatable, Sendable {
   let includedTotalKRW: Int
   let transfers: [Transfer]
   let excluded: [ExcludedExpense]
+  /// 함께 쓴 돈 가운데 기준환율 예상액의 합(v1 확정본은 0 — 예상액이 없던 규칙).
+  var estimatedTotalKRW = 0
 
   func name(of id: MemberID) -> String { members.first { $0.id == id }?.displayName ?? "알 수 없는 구성원" }
   func expense(_ id: String) -> Expense? { expenses.first { $0.id == id } }
@@ -201,6 +257,8 @@ enum SettlementFailure: Error, Equatable, Sendable {
   case finalized
   /// 서버가 값을 받지 않았다(결제자·원화·몫·사유).
   case rejected
+  /// 방장이 본 기준환율 고시값이 바뀌었다(새로 받은 값). 장부를 다시 불러와 새 예상액을 확인한다.
+  case quoteChanged
   case network
   case unavailable
   case unknown

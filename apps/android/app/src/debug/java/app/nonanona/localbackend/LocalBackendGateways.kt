@@ -6,12 +6,15 @@ import app.nonanona.feature.account.AuthGateway
 import app.nonanona.feature.account.SignInException
 import app.nonanona.feature.account.SignInFailure
 import app.nonanona.feature.account.SignInProvider
+import app.nonanona.feature.settlement.AcquisitionBasis
 import app.nonanona.feature.settlement.ExcludedExpense
 import app.nonanona.feature.settlement.ExpenseReview
 import app.nonanona.feature.settlement.ExpenseStatus
 import app.nonanona.feature.settlement.FinalSettlement
 import app.nonanona.feature.settlement.FinalizeResult
+import app.nonanona.feature.settlement.FxProposal
 import app.nonanona.feature.settlement.KrwBasis
+import app.nonanona.feature.settlement.KrwConversion
 import app.nonanona.feature.settlement.LedgerExpense
 import app.nonanona.feature.settlement.LedgerMember
 import app.nonanona.feature.settlement.MaskedReceiptImage
@@ -19,6 +22,7 @@ import app.nonanona.feature.settlement.MemberId
 import app.nonanona.feature.settlement.ReceiptArtifactRef
 import app.nonanona.feature.settlement.ReceiptViewException
 import app.nonanona.feature.settlement.ReceiptViewFailure
+import app.nonanona.feature.settlement.ReferenceQuote
 import app.nonanona.feature.settlement.ReviewedExpense
 import app.nonanona.feature.settlement.RoomLedger
 import app.nonanona.feature.settlement.SettlementException
@@ -26,6 +30,7 @@ import app.nonanona.feature.settlement.SettlementFailure
 import app.nonanona.feature.settlement.SettlementGateway
 import app.nonanona.feature.settlement.SettlementPreview
 import app.nonanona.feature.settlement.ShareLine
+import app.nonanona.feature.settlement.SharePlan
 import app.nonanona.feature.settlement.Transfer
 import app.nonanona.feature.trip.InviteAcceptException
 import app.nonanona.feature.trip.InviteAcceptFailure
@@ -417,6 +422,21 @@ class LocalSettlementGateway(
                     .put("p_payer", d.payer.value)
                     .put("p_krw_amount", d.verifiedKrw ?: JSONObject.NULL)
                     .put("p_shares", JSONArray(d.shares.map { JSONObject().put("user_id", it.member.value).put("krw", it.krw) }))
+                // 실제 청구액은 예전 요청 모양 그대로 보낸다(서버의 요청 지문도 같다). 다른 기준만 근거를 더한다.
+                when (val c = d.conversion) {
+                    null -> {}
+
+                    is KrwConversion.AcquisitionCost -> {
+                        body
+                            .put("p_krw_basis", KrwBasis.AcquisitionCost.wire)
+                            .put("p_acq_krw", c.basis.krwPaid)
+                            .put("p_acq_foreign_minor", c.basis.foreignMinor)
+                    }
+
+                    is KrwConversion.ReferenceEstimate -> {
+                        body.put("p_krw_basis", KrwBasis.ReferenceEstimate.wire).put("p_fx_quote_id", c.quoteId)
+                    }
+                }
             }
 
             is ExpenseReview.Decision.Hold -> {
@@ -440,6 +460,7 @@ class LocalSettlementGateway(
                 includedTotalKrw = json.getLong("included_total_krw"),
                 transfers = LocalJson.transfers(json.getJSONArray("transfers")),
                 excluded = LocalJson.excluded(json.getJSONArray("excluded")) ?: throw JSONException("excluded"),
+                estimatedTotalKrw = if (json.has("estimated_total_krw")) json.getLong("estimated_total_krw") else 0,
             )
         }
     }
@@ -495,6 +516,8 @@ class LocalSettlementGateway(
                 "hold_reason_required",
                 "decision_invalid",
                 "invalid_fields",
+                "krw_mismatch",
+                "basis_invalid",
             )
 
         /** 서버가 정한 코드와 정확히 같을 때만 기능 실패로 옮긴다. idempotency_conflict(같은 키, 다른 내용)는 Unknown이다. */
@@ -520,6 +543,10 @@ class LocalSettlementGateway(
 
                 http.code == "trip_finalized" -> {
                     SettlementFailure.Finalized
+                }
+
+                http.code == "stale_quote" -> {
+                    SettlementFailure.QuoteChanged
                 }
 
                 http.code in rejectedCodes -> {
@@ -551,6 +578,96 @@ internal object LocalJson {
     /** 없는 키와 null을 같게 본다(장부에만 있는 필드). */
     private fun JSONObject.optStringOrNull(name: String): String? = if (!has(name) || isNull(name)) null else getString(name)
 
+    /** 값이 실제로 JSON 문자열일 때만(org.json은 숫자도 글자로 돌려주므로 형을 본다). */
+    private fun JSONObject.strict(name: String): String? = opt(name) as? String
+
+    /** 값이 실제로 JSON 정수일 때만. */
+    private fun JSONObject.wholeNumber(name: String): Long? =
+        when (val v = opt(name)) {
+            is Int -> v.toLong()
+            is Long -> v
+            else -> null
+        }
+
+    private fun JSONObject.present(name: String): Boolean = has(name) && !isNull(name)
+
+    private val isoDate = Regex("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+
+    /** 고정했거나 제안한 기준환율 고시값. 출처·항목·단위·형식이 하나라도 다르면 null(→ 장부 전체 Unknown). */
+    fun quote(json: JSONObject?): ReferenceQuote? {
+        json ?: return null
+        val origin = json.strict("data_origin")
+        if (json.strict("source") != "bok_ecos" || json.strict("stat_code") != "731Y001" || json.strict("item_code") != "0000002" ||
+            json.strict("currency") != "JPY" || json.wholeNumber("quote_unit") != 100L || (origin != "ecos_live" && origin != "fixture")
+        ) {
+            return null
+        }
+        val rate = json.strict("rate")?.takeIf { SharePlan.scaledRate(it) != null } ?: return null
+        val rateDate = json.strict("rate_date")?.takeIf { isoDate.matches(it) } ?: return null
+        return ReferenceQuote(
+            quoteId = json.strict("quote_id") ?: return null,
+            rate = rate,
+            quoteUnit = 100,
+            rateDate = rateDate,
+            itemName = json.strict("item_name") ?: return null,
+            isSynthetic = origin == "fixture",
+        )
+    }
+
+    fun proposal(json: JSONObject?): FxProposal? =
+        when (json?.strict("status")) {
+            "undetermined" -> FxProposal.Undetermined
+            "unavailable" -> FxProposal.Unavailable
+            "proposed" -> quote(json)?.let { q -> json.wholeNumber("krw")?.let { FxProposal.Proposed(q, it) } }
+            else -> null
+        }
+
+    private class Basis(
+        val basis: KrwBasis?,
+        val fx: ReferenceQuote?,
+        val acquisition: AcquisitionBasis?,
+    )
+
+    /**
+     * 원화 기준과 그 근거가 서로 맞을 때만 값. 모르는 기준, 근거 없는 예상액·취득 원가, 예상 표시가 기준과 다른 값은
+     * null이다(예상액을 실제 청구액처럼 그리지 않는다).
+     */
+    private fun basis(json: JSONObject): Basis? {
+        val hasFx = json.present("fx")
+        val hasAcq = json.present("acquisition")
+        val isEstimate =
+            if (json.present("is_estimate")) {
+                json.opt("is_estimate") as? Boolean ?: return null
+            } else {
+                null
+            }
+        val wire = json.stringOrNull("krw_basis") ?: return if (isEstimate == true || hasFx || hasAcq) null else Basis(null, null, null)
+        val basis = KrwBasis.of(wire) ?: return null
+        if (isEstimate != null && isEstimate != (basis == KrwBasis.ReferenceEstimate)) return null
+        val jpy = json.getString("currency") == "JPY"
+        return when (basis) {
+            KrwBasis.ReferenceEstimate -> {
+                if (isEstimate != true || hasAcq || !jpy) return null
+                val q = quote(json.optJSONObject("fx")) ?: return null
+                val date = json.getString("expense_date")
+                if (!isoDate.matches(date) || q.rateDate > date) return null
+                Basis(basis, q, null)
+            }
+
+            KrwBasis.AcquisitionCost -> {
+                if (hasFx || !jpy) return null
+                val a = json.optJSONObject("acquisition") ?: return null
+                val paid = a.wholeNumber("krw_paid")?.takeIf { it > 0 } ?: return null
+                val foreign = a.wholeNumber("foreign_minor")?.takeIf { it > 0 } ?: return null
+                Basis(basis, null, AcquisitionBasis(paid, foreign))
+            }
+
+            KrwBasis.KrwOriginal, KrwBasis.VerifiedCharge -> {
+                if (hasFx || hasAcq) null else Basis(basis, null, null)
+            }
+        }
+    }
+
     fun members(array: JSONArray): List<LedgerMember> =
         (0 until array.length()).map { i ->
             array.getJSONObject(i).let {
@@ -572,6 +689,8 @@ internal object LocalJson {
             }
         val entry = json.getString("entry")
         if (entry != "receipt" && entry != "manual") return null
+        val basis = basis(json) ?: return null
+        val proposal = if (json.present("fx_proposal")) proposal(json.optJSONObject("fx_proposal")) ?: return null else null
         val shares = json.getJSONArray("shares")
         return LedgerExpense(
             id = json.getString("expense_id"),
@@ -585,7 +704,7 @@ internal object LocalJson {
             status = status,
             payer = json.stringOrNull("payer_id")?.let(::MemberId),
             krwAmount = json.longOrNull("krw_amount"),
-            krwBasis = json.stringOrNull("krw_basis")?.let { b -> KrwBasis.entries.firstOrNull { it.wire == b } },
+            krwBasis = basis.basis,
             shares =
                 (0 until shares.length()).map { i ->
                     shares.getJSONObject(i).let { ShareLine(MemberId(it.getString("user_id")), it.getLong("krw")) }
@@ -594,6 +713,10 @@ internal object LocalJson {
                 json.optStringOrNull("artifact_path")?.let { path ->
                     json.optStringOrNull("artifact_sha256")?.let { ReceiptArtifactRef(path, it) }
                 },
+            fx = basis.fx,
+            acquisition = basis.acquisition,
+            fxProposal = proposal,
+            fxSuperseded = json.optBoolean("fx_superseded", false),
         )
     }
 
@@ -629,11 +752,38 @@ internal object LocalJson {
             ExcludedExpense(x.getString("expense_id"), held, x.stringOrNull("reason"))
         }
 
+    /** 아는 규칙 판만 그린다. v1(예상액 없음)은 그대로, v2는 지출마다 원화 기준과 근거, 예상액 합계가 있어야 한다. */
+    private val knownRules = setOf("explicit-krw-shares-v1", "explicit-krw-shares-v2")
+
     fun final(json: JSONObject): FinalSettlement? {
         val snapshot = json.getJSONObject("snapshot")
         val inputs = snapshot.getJSONObject("inputs")
         val outputs = snapshot.getJSONObject("outputs")
         val rawExpenses = inputs.getJSONArray("expenses")
+        val rule = snapshot.getString("rule_version")
+        if (rule !in knownRules) return null
+        val v2 = rule == "explicit-krw-shares-v2"
+        if (v2 && !outputs.present("estimated_total_krw")) return null
+        val expenses =
+            (0 until rawExpenses.length()).map { i ->
+                val it = rawExpenses.getJSONObject(i)
+                val basis = basis(it) ?: return null
+                if (v2 && !it.present("is_estimate")) return null
+                if (!v2 && (basis.basis == KrwBasis.ReferenceEstimate || basis.basis == KrwBasis.AcquisitionCost)) return null
+                FinalSettlement.Expense(
+                    id = it.getString("expense_id"),
+                    merchant = it.stringOrNull("merchant"),
+                    isManual = it.getString("entry") == "manual",
+                    date = it.getString("expense_date"),
+                    amountMinor = it.getLong("amount_minor"),
+                    currency = it.getString("currency"),
+                    krwAmount = it.longOrNull("krw_amount"),
+                    kind = it.optString("kind"),
+                    krwBasis = basis.basis,
+                    fx = basis.fx,
+                    acquisition = basis.acquisition,
+                )
+            }
         return FinalSettlement(
             id = json.getString("finalization_id"),
             version = json.getInt("version"),
@@ -642,24 +792,11 @@ internal object LocalJson {
             ruleVersion = snapshot.getString("rule_version"),
             snapshotSha256 = json.getString("snapshot_sha256"),
             members = members(inputs.getJSONArray("members")),
-            expenses =
-                (0 until rawExpenses.length()).map { i ->
-                    rawExpenses.getJSONObject(i).let {
-                        FinalSettlement.Expense(
-                            id = it.getString("expense_id"),
-                            merchant = it.stringOrNull("merchant"),
-                            isManual = it.getString("entry") == "manual",
-                            date = it.getString("expense_date"),
-                            amountMinor = it.getLong("amount_minor"),
-                            currency = it.getString("currency"),
-                            krwAmount = it.longOrNull("krw_amount"),
-                            kind = it.optString("kind"),
-                        )
-                    }
-                },
+            expenses = expenses,
             includedTotalKrw = outputs.getLong("included_total_krw"),
             transfers = transfers(outputs.getJSONArray("transfers")),
             excluded = excluded(outputs.getJSONArray("excluded")) ?: return null,
+            estimatedTotalKrw = if (v2) outputs.getLong("estimated_total_krw") else 0,
         )
     }
 }

@@ -84,6 +84,59 @@ fun originalAmount(
     return "${minor / 100}.${(minor % 100).toString().padStart(2, '0')} $currency"
 }
 
+/** 실제 청구액이 아닌 원화 기준의 이름(예상 금액·환전 원가). 그 밖에는 null. */
+@Composable
+fun basisLabel(basis: KrwBasis?): String? =
+    when (basis) {
+        KrwBasis.ReferenceEstimate -> stringResource(R.string.basis_estimate)
+        KrwBasis.AcquisitionCost -> stringResource(R.string.basis_acquisition)
+        else -> null
+    }
+
+/** "한국은행 ECOS 원/일본엔(100엔) · 2026-11-02 고시 · 100엔당 905.25원" */
+@Composable
+fun quoteText(q: ReferenceQuote): String = stringResource(R.string.fx_quote, q.itemName, q.rateDate, q.quoteUnit, q.rate)
+
+/**
+ * 포함한 지출 한 건의 원화 근거 줄(ADR-0008). 예상액은 "예상"·고시값·단위·출처·기준일, 가상 시험값이면 시장 환율이 아니라는
+ * 표시를 함께 보인다. 실제 청구액·원화 결제는 빈 목록.
+ */
+@Composable
+fun basisDetail(
+    basis: KrwBasis?,
+    fx: ReferenceQuote?,
+    acquisition: AcquisitionBasis?,
+    currency: String,
+): List<String> =
+    when (basis) {
+        KrwBasis.ReferenceEstimate -> {
+            if (fx == null) {
+                emptyList()
+            } else {
+                listOf(stringResource(R.string.fx_not_actual), quoteText(fx)) +
+                    if (fx.isSynthetic) listOf(stringResource(R.string.fx_synthetic)) else emptyList()
+            }
+        }
+
+        KrwBasis.AcquisitionCost -> {
+            if (acquisition == null) {
+                emptyList()
+            } else {
+                listOf(
+                    stringResource(
+                        R.string.fx_acquisition,
+                        wonText(acquisition.krwPaid),
+                        originalAmount(acquisition.foreignMinor, currency),
+                    ),
+                )
+            }
+        }
+
+        else -> {
+            emptyList()
+        }
+    }
+
 /** 서버의 UTC 시각(초 단위, Z)을 이 기기 시간대로 보인다. 읽지 못하면 받은 글자 그대로. */
 fun localTime(iso: String): String =
     runCatching {
@@ -267,15 +320,27 @@ private fun ExpenseRow(
                 )
                 val krw = expense.krwAmount
                 if (expense.status == ExpenseStatus.Included && krw != null) {
+                    // 실제 청구액이 아니면 기준 이름을 금액 옆에 붙인다(예: "예상 금액 12,746원").
+                    val amount = basisLabel(expense.krwBasis)?.let { "$it ${wonText(krw)}" } ?: wonText(krw)
                     Text(
                         stringResource(
                             R.string.expense_paid,
                             ledger.nameOf(expense.payer),
-                            wonText(krw),
+                            amount,
                             expense.shares.map { "${ledger.nameOf(it.member)} ${wonText(it.krw)}" }.joinToString(", "),
                         ),
                         style = TextRoles.caption,
                     )
+                    basisDetail(expense.krwBasis, expense.fx, expense.acquisition, expense.currency).forEach {
+                        Text(it, style = TextRoles.caption)
+                    }
+                    if (expense.fxSuperseded) {
+                        Text(
+                            stringResource(R.string.expense_fx_superseded),
+                            style = TextRoles.caption,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
                 }
                 (expense.status as? ExpenseStatus.Held)?.let {
                     Text(stringResource(R.string.expense_hold_reason, it.reason), style = TextRoles.caption)
@@ -284,9 +349,21 @@ private fun ExpenseRow(
         },
         trailingContent = {
             when (expense.status) {
-                ExpenseStatus.Pending -> StatusLabel(stringResource(R.string.expense_status_pending), StatusRole.Attention)
-                ExpenseStatus.Included -> StatusLabel(stringResource(R.string.expense_status_included), StatusRole.Positive)
-                is ExpenseStatus.Held -> StatusLabel(stringResource(R.string.expense_status_held), StatusRole.Neutral)
+                ExpenseStatus.Pending -> {
+                    StatusLabel(stringResource(R.string.expense_status_pending), StatusRole.Attention)
+                }
+
+                ExpenseStatus.Included -> {
+                    if (expense.krwBasis == KrwBasis.ReferenceEstimate) {
+                        StatusLabel(stringResource(R.string.expense_status_included_estimate), StatusRole.Attention)
+                    } else {
+                        StatusLabel(stringResource(R.string.expense_status_included), StatusRole.Positive)
+                    }
+                }
+
+                is ExpenseStatus.Held -> {
+                    StatusLabel(stringResource(R.string.expense_status_held), StatusRole.Neutral)
+                }
             }
         },
         modifier = modifier,
@@ -365,36 +442,7 @@ fun ExpenseReviewScreen(
                     }
                 }
             }
-            item {
-                Section(
-                    stringResource(R.string.review_krw),
-                    if (expense.currency !=
-                        "KRW"
-                    ) {
-                        stringResource(R.string.review_krw_hint)
-                    } else {
-                        null
-                    },
-                ) {
-                    if (expense.currency == "KRW") {
-                        Text(
-                            stringResource(R.string.review_krw_fixed, wonText(expense.amountMinor)),
-                            style = TextRoles.body,
-                            modifier = Modifier.testTag("review_krw_fixed"),
-                        )
-                    } else {
-                        OutlinedTextField(
-                            value = form.verifiedKrwText,
-                            onValueChange = { text -> edit { it.copy(verifiedKrwText = text) } },
-                            label = { Text(stringResource(R.string.review_krw_field)) },
-                            singleLine = true,
-                            enabled = !saving,
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, autoCorrectEnabled = false),
-                            modifier = Modifier.fillMaxWidth().testTag("review_krw"),
-                        )
-                    }
-                }
-            }
+            item { KrwSection(expense, form, saving, edit) }
             item {
                 Section(stringResource(R.string.review_share), null) {
                     val modes =
@@ -474,6 +522,14 @@ fun ExpenseReviewScreen(
             }
             item {
                 Column(Modifier.padding(Spacing.m), verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
+                    if (expense.fxSuperseded) {
+                        Text(
+                            stringResource(R.string.review_fx_superseded),
+                            style = TextRoles.supporting,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.testTag("review_fx_superseded"),
+                        )
+                    }
                     if (refreshed) {
                         Text(
                             stringResource(R.string.review_refreshed),
@@ -534,6 +590,159 @@ fun ExpenseReviewScreen(
             dismissButton = { TextButton(onClick = { askingReason = false }) { Text(stringResource(R.string.action_cancel)) } },
         )
     }
+}
+
+/**
+ * 검토 화면의 원화: KRW는 그대로, 엔화는 실제 청구액 → 환전 원가 → 기준환율 예상 순으로 고른다(ADR-0001·0008).
+ * 다른 외화는 실제 청구액만. 예상액은 서버 고시값으로만 만들고 "예상"과 근거를 함께 보인다.
+ */
+@Composable
+private fun KrwSection(
+    expense: LedgerExpense,
+    form: ShareForm,
+    saving: Boolean,
+    edit: ((ShareForm) -> ShareForm) -> Unit,
+) {
+    val hint =
+        when (expense.currency) {
+            "KRW" -> null
+            "JPY" -> stringResource(R.string.review_krw_hint_jpy)
+            else -> stringResource(R.string.review_krw_hint)
+        }
+    Section(stringResource(R.string.review_krw), hint) {
+        if (expense.currency == "KRW") {
+            Text(
+                stringResource(R.string.review_krw_fixed, wonText(expense.amountMinor)),
+                style = TextRoles.body,
+                modifier = Modifier.testTag("review_krw_fixed"),
+            )
+            return@Section
+        }
+        val sources = ShareForm.sources(expense)
+        val source = form.source(expense)
+        if (sources.size > 1) {
+            val labels =
+                mapOf(
+                    KrwSource.Actual to R.string.review_source_actual,
+                    KrwSource.Acquisition to R.string.review_source_acquisition,
+                    KrwSource.Estimate to R.string.review_source_estimate,
+                )
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().testTag("review_krw_source")) {
+                sources.forEachIndexed { i, s ->
+                    SegmentedButton(
+                        selected = source == s,
+                        onClick = { edit { it.copy(krwSource = s) } },
+                        enabled = !saving,
+                        shape = SegmentedButtonDefaults.itemShape(i, sources.size),
+                        modifier = Modifier.testTag("review_source_" + s.name.lowercase()),
+                    ) { Text(stringResource(labels.getValue(s))) }
+                }
+            }
+        }
+        when (source) {
+            KrwSource.Actual -> {
+                NumberField(form.verifiedKrwText, R.string.review_krw_field, "review_krw", !saving) { text ->
+                    edit { it.copy(verifiedKrwText = text) }
+                }
+            }
+
+            KrwSource.Acquisition -> {
+                NumberField(form.acquisitionKrwText, R.string.review_acq_krw_field, "review_acq_krw", !saving) { text ->
+                    edit { it.copy(acquisitionKrwText = text) }
+                }
+                NumberField(form.acquisitionForeignText, R.string.review_acq_foreign_field, "review_acq_foreign", !saving) { text ->
+                    edit { it.copy(acquisitionForeignText = text) }
+                }
+                val a = form.acquisitionInput
+                val krw = form.krw(expense)
+                if (a != null && krw != null) {
+                    Text(
+                        stringResource(
+                            R.string.review_acq_result,
+                            originalAmount(expense.amountMinor, expense.currency),
+                            wonText(a.krwPaid),
+                            originalAmount(a.foreignMinor, expense.currency),
+                            wonText(krw),
+                        ),
+                        style = TextRoles.supporting,
+                        modifier = Modifier.testTag("review_acq_result"),
+                    )
+                }
+            }
+
+            KrwSource.Estimate -> {
+                val usable = SharePlan.usableEstimate(expense.fxProposal, expense.amountMinor)
+                if (usable != null) {
+                    val q = usable.quote
+                    Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs), modifier = Modifier.testTag("review_estimate")) {
+                        Text(
+                            stringResource(R.string.review_estimate_krw, wonText(usable.krw)),
+                            style = TextRoles.body,
+                            modifier = Modifier.testTag("review_estimate_krw"),
+                        )
+                        Text(quoteText(q), style = TextRoles.supporting, modifier = Modifier.testTag("review_estimate_quote"))
+                        if (q.rateDate != expense.date) {
+                            Text(
+                                stringResource(R.string.fx_fallback, expense.date),
+                                style = TextRoles.supporting,
+                                modifier = Modifier.testTag("review_estimate_fallback"),
+                            )
+                        }
+                        Text(
+                            stringResource(
+                                R.string.review_estimate_formula,
+                                originalAmount(expense.amountMinor, expense.currency),
+                                q.rate,
+                                q.quoteUnit,
+                            ),
+                            style = TextRoles.caption,
+                        )
+                        Text(stringResource(R.string.fx_not_actual), style = TextRoles.caption)
+                        if (q.isSynthetic) {
+                            Text(
+                                stringResource(R.string.fx_synthetic),
+                                style = TextRoles.caption,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.testTag("review_estimate_synthetic"),
+                            )
+                        }
+                    }
+                } else {
+                    Text(
+                        stringResource(
+                            when (expense.fxProposal) {
+                                FxProposal.Undetermined -> R.string.review_estimate_undetermined
+                                FxProposal.Unavailable -> R.string.review_estimate_unavailable
+                                else -> R.string.review_estimate_none
+                            },
+                        ),
+                        style = TextRoles.supporting,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.testTag("review_estimate_none"),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NumberField(
+    value: String,
+    label: Int,
+    tag: String,
+    enabled: Boolean,
+    onChange: (String) -> Unit,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        label = { Text(stringResource(label)) },
+        singleLine = true,
+        enabled = enabled,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, autoCorrectEnabled = false),
+        modifier = Modifier.fillMaxWidth().testTag(tag),
+    )
 }
 
 /** 검토 화면의 증빙: 공유한 가림 사본을 눌러서 열고, 직접 입력은 증빙 없음. 실패해도 검토는 그대로 할 수 있다. */
@@ -659,6 +868,14 @@ private fun problemText(problem: ShareProblem): String =
             stringResource(R.string.review_problem_krw)
         }
 
+        ShareProblem.AcquisitionInvalid -> {
+            stringResource(R.string.review_problem_acquisition)
+        }
+
+        ShareProblem.EstimateUnavailable -> {
+            stringResource(R.string.review_problem_estimate)
+        }
+
         ShareProblem.PersonMissing -> {
             stringResource(R.string.review_problem_person)
         }
@@ -735,7 +952,12 @@ fun SettlementScreen(
                             )
                         }
                     }
-                    transfers(final.transfers, final.includedTotalKrw) { final.nameOf(it) }
+                    transfers(final.transfers, final.includedTotalKrw, final.estimatedTotalKrw) { final.nameOf(it) }
+                    converted(
+                        final.expenses.filter { it.kind == "shared" || it.kind == "personal" }.map {
+                            Converted(it.merchant, it.date, it.amountMinor, it.currency, it.krwAmount, it.krwBasis, it.fx, it.acquisition)
+                        },
+                    )
                     excluded(
                         final.excluded,
                     ) { id -> final.expense(id)?.let { Triple(it.merchant, it.date, originalAmount(it.amountMinor, it.currency)) } }
@@ -774,7 +996,12 @@ fun SettlementScreen(
                             }
                         }
                     }
-                    transfers(preview.transfers, preview.includedTotalKrw) { ledger.nameOf(it) }
+                    transfers(preview.transfers, preview.includedTotalKrw, preview.estimatedTotalKrw) { ledger.nameOf(it) }
+                    converted(
+                        ledger.expenses.filter { it.status == ExpenseStatus.Included }.map {
+                            Converted(it.merchant, it.date, it.amountMinor, it.currency, it.krwAmount, it.krwBasis, it.fx, it.acquisition)
+                        },
+                    )
                     excluded(preview.excluded) { id ->
                         ledger.expenses.firstOrNull { it.id == id }?.let {
                             Triple(
@@ -820,9 +1047,57 @@ fun SettlementScreen(
     }
 }
 
+/** 원화 기준 목록에 보일 지출(포함한 것만). */
+private class Converted(
+    val merchant: String?,
+    val date: String,
+    val amountMinor: Long,
+    val currency: String,
+    val krw: Long?,
+    val basis: KrwBasis?,
+    val fx: ReferenceQuote?,
+    val acquisition: AcquisitionBasis?,
+)
+
+/** 실제 청구액이 아닌 원화(환전 원가·기준환율 예상)로 넣은 지출과 그 근거. 없으면 그리지 않는다. */
+private fun LazyListScope.converted(all: List<Converted>) {
+    val converted = all.filter { it.basis == KrwBasis.ReferenceEstimate || it.basis == KrwBasis.AcquisitionCost }
+    if (converted.isEmpty()) return
+    item {
+        Text(
+            stringResource(R.string.settlement_converted),
+            style = TextRoles.sectionTitle,
+            modifier = Modifier.padding(start = Spacing.m, end = Spacing.m, top = Spacing.m, bottom = Spacing.xs),
+        )
+    }
+    itemsIndexed(converted) { i, x ->
+        ListItem(
+            headlineContent = { Text(x.merchant ?: stringResource(R.string.expense_no_merchant)) },
+            supportingContent = {
+                Column {
+                    Text("${x.date} · ${originalAmount(x.amountMinor, x.currency)}", style = TextRoles.caption)
+                    basisDetail(x.basis, x.fx, x.acquisition, x.currency).forEach { Text(it, style = TextRoles.caption) }
+                }
+            },
+            trailingContent = {
+                Text("${basisLabel(x.basis).orEmpty()} ${x.krw?.let { wonText(it) }.orEmpty()}", style = TextRoles.body)
+            },
+            modifier = Modifier.testTag("converted_${i + 1}"),
+        )
+    }
+    item {
+        Text(
+            stringResource(R.string.settlement_converted_hint),
+            style = TextRoles.supporting,
+            modifier = Modifier.padding(horizontal = Spacing.m),
+        )
+    }
+}
+
 private fun LazyListScope.transfers(
     transfers: List<Transfer>,
     total: Long,
+    estimated: Long,
     name: (MemberId) -> String,
 ) {
     item {
@@ -854,6 +1129,16 @@ private fun LazyListScope.transfers(
         ) {
             Text(stringResource(R.string.settlement_total), style = TextRoles.supporting)
             Text(wonText(total), style = TextRoles.supporting)
+        }
+        if (estimated > 0) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = Spacing.m, vertical = Spacing.xs).testTag("settlement_estimated"),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(stringResource(R.string.settlement_estimated), style = TextRoles.supporting)
+                Text(wonText(estimated), style = TextRoles.supporting)
+            }
         }
     }
 }
@@ -942,6 +1227,7 @@ fun SettlementFailure.messageRes(): Int =
         SettlementFailure.PendingReview -> R.string.settle_failure_pending
         SettlementFailure.Finalized -> R.string.settle_failure_finalized
         SettlementFailure.Rejected -> R.string.settle_failure_rejected
+        SettlementFailure.QuoteChanged -> R.string.settle_failure_quote_changed
         SettlementFailure.Network -> R.string.failure_network
         SettlementFailure.Unavailable -> R.string.settle_failure_unavailable
         SettlementFailure.Unknown -> R.string.settle_failure_unknown

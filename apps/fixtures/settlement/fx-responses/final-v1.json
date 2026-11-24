@@ -1,0 +1,106 @@
+{
+ "finalization_id": "5bb80e79-ec46-4442-a319-b65f056d7f73",
+ "finalized_at": "2026-11-24T05:13:05Z",
+ "finalized_by": "00000000-0000-4000-8000-00000000000a",
+ "reviewed_revision": 5,
+ "rule_version": "explicit-krw-shares-v1",
+ "snapshot": {
+  "inputs": {
+   "expenses": [
+    {
+     "amount_minor": 1408,
+     "currency": "JPY",
+     "entry": "manual",
+     "expense_date": "2026-11-03",
+     "expense_id": "c75736f4-70ca-4796-b6bd-8b96d3594764",
+     "has_artifact": false,
+     "hold_reason": null,
+     "kind": "shared",
+     "krw_amount": 13377,
+     "krw_basis": "verified_krw_charge",
+     "merchant": "さくら食堂",
+     "payer_id": "00000000-0000-4000-8000-00000000000a",
+     "shares": [
+      {
+       "krw": 6688,
+       "user_id": "00000000-0000-4000-8000-00000000000b"
+      },
+      {
+       "krw": 6689,
+       "user_id": "00000000-0000-4000-8000-00000000000a"
+      }
+     ],
+     "status": "included",
+     "uploaded_by": "00000000-0000-4000-8000-00000000000b",
+     "version": 2
+    },
+    {
+     "amount_minor": 38000,
+     "currency": "KRW",
+     "entry": "manual",
+     "expense_date": "2026-11-08",
+     "expense_id": "6ff1d5be-399f-44c0-8e8e-2bf4884195f3",
+     "has_artifact": false,
+     "hold_reason": null,
+     "kind": "shared",
+     "krw_amount": 38000,
+     "krw_basis": "krw_original",
+     "merchant": "입장권",
+     "payer_id": "00000000-0000-4000-8000-00000000000a",
+     "shares": [
+      {
+       "krw": 19000,
+       "user_id": "00000000-0000-4000-8000-00000000000b"
+      },
+      {
+       "krw": 19000,
+       "user_id": "00000000-0000-4000-8000-00000000000a"
+      }
+     ],
+     "status": "included",
+     "uploaded_by": "00000000-0000-4000-8000-00000000000b",
+     "version": 2
+    }
+   ],
+   "members": [
+    {
+     "display_name": "다라",
+     "role": "host",
+     "user_id": "00000000-0000-4000-8000-00000000000a"
+    },
+    {
+     "display_name": "가나",
+     "role": "member",
+     "user_id": "00000000-0000-4000-8000-00000000000b"
+    }
+   ]
+  },
+  "outputs": {
+   "balances": [
+    {
+     "net_krw": -25688,
+     "user_id": "00000000-0000-4000-8000-00000000000b"
+    },
+    {
+     "net_krw": 25688,
+     "user_id": "00000000-0000-4000-8000-00000000000a"
+    }
+   ],
+   "excluded": [],
+   "included_total_krw": 51377,
+   "transfers": [
+    {
+     "from": "00000000-0000-4000-8000-00000000000b",
+     "krw": 25688,
+     "to": "00000000-0000-4000-8000-00000000000a"
+    }
+   ]
+  },
+  "reviewed_revision": 5,
+  "rule_version": "explicit-krw-shares-v1",
+  "trip_id": "749fbdc0-ac16-4d72-8516-b06becd86d61",
+  "trip_name": "가상 계약 시험 0c99f8"
+ },
+ "snapshot_sha256": "d58d92ed113e4eb05f55071fe2b3ae629cc55d0df641eb170ca46bace27d9a5a",
+ "version": 1
+}

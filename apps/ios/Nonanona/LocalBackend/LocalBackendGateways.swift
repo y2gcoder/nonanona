@@ -282,11 +282,22 @@
         "p_request_id": review.requestID.uuidString.lowercased(),
       ]
       switch review.decision {
-      case .include(let payer, let verifiedKRW, let shares):
+      case .include(let payer, let verifiedKRW, let shares, let conversion):
         body["p_decision"] = "include"
         body["p_payer"] = payer.value
         body["p_krw_amount"] = verifiedKRW.map { $0 as Any } ?? NSNull()
         body["p_shares"] = shares.map { ["user_id": $0.member.value, "krw": $0.krw] as [String: Any] }
+        // 실제 청구액은 예전 요청 모양 그대로 보낸다(서버의 요청 지문도 같다). 다른 기준만 근거를 더한다.
+        switch conversion {
+        case nil: break
+        case .acquisitionCost(let a):
+          body["p_krw_basis"] = KRWBasis.acquisitionCost.rawValue
+          body["p_acq_krw"] = a.krwPaid
+          body["p_acq_foreign_minor"] = a.foreignMinor
+        case .referenceEstimate(let quoteID):
+          body["p_krw_basis"] = KRWBasis.referenceEstimate.rawValue
+          body["p_fx_quote_id"] = quoteID
+        }
       case .hold(let reason):
         body["p_decision"] = "hold"
         body["p_hold_reason"] = reason
@@ -307,7 +318,7 @@
         revision: p.revision, isFinalized: p.status == "finalized", ready: p.ready,
         pendingCount: p.pendingExpenseIds.count,
         includedTotalKRW: p.includedTotalKrw, transfers: p.transfers.map(\.value),
-        excluded: p.excluded.compactMap(\.value))
+        excluded: p.excluded.compactMap(\.value), estimatedTotalKRW: p.estimatedTotalKrw ?? 0)
     }
 
     func finalize(_ trip: TripID, reviewedRevision: Int, requestID: UUID) async throws -> FinalizeResult {
@@ -355,6 +366,7 @@
       case .http(_, "stale_expense"), .http(_, "stale_revision"): return .stale
       case .http(_, "pending_review"): return .pendingReview
       case .http(_, "trip_finalized"): return .finalized
+      case .http(_, "stale_quote"): return .quoteChanged
       case .http(_, let code?) where rejectedCodes.contains(code): return .rejected
       case .http(_, "not_authenticated"): return .sessionExpired
       case .http(_, let code?) where LocalTripGateway.sessionEndedCodes.contains(code): return .sessionExpired
@@ -367,7 +379,7 @@
 
     static let rejectedCodes: Set<String> = [
       "payer_required", "krw_unverified", "shares_invalid", "shares_mismatch", "hold_reason_required",
-      "decision_invalid", "invalid_fields",
+      "decision_invalid", "invalid_fields", "krw_mismatch", "basis_invalid",
     ]
   }
 
@@ -405,6 +417,67 @@
       let krw: Int
     }
 
+    /// 고정했거나 제안한 기준환율 고시값. 출처·항목·단위·형식이 하나라도 다르면 nil(→ 장부 전체 `.unknown`).
+    struct Quote: Decodable {
+      let quoteId: String
+      let source: String
+      let statCode: String
+      let itemCode: String
+      let itemName: String
+      let currency: String
+      let quoteUnit: Int
+      let rate: String
+      let rateDate: String
+      let dataOrigin: String
+
+      var value: ReferenceQuote? {
+        guard source == "bok_ecos", statCode == "731Y001", itemCode == "0000002", currency == "JPY", quoteUnit == 100,
+          dataOrigin == "ecos_live" || dataOrigin == "fixture", SharePlan.scaledRate(rate) != nil
+        else { return nil }
+        return ReferenceQuote(
+          quoteID: quoteId, rate: rate, quoteUnit: quoteUnit, rateDate: rateDate, itemName: itemName,
+          isSynthetic: dataOrigin == "fixture")
+      }
+    }
+
+    struct Proposal: Decodable {
+      let status: String
+      let quoteId: String?
+      let source: String?
+      let statCode: String?
+      let itemCode: String?
+      let itemName: String?
+      let currency: String?
+      let quoteUnit: Int?
+      let rate: String?
+      let rateDate: String?
+      let dataOrigin: String?
+      let krw: Int?
+
+      var value: FXProposal? {
+        switch status {
+        case "undetermined": return .undetermined
+        case "unavailable": return .unavailable
+        case "proposed":
+          guard let quoteId, let source, let statCode, let itemCode, let itemName, let currency, let quoteUnit,
+            let rate,
+            let rateDate, let dataOrigin, let krw,
+            let quote = Quote(
+              quoteId: quoteId, source: source, statCode: statCode, itemCode: itemCode, itemName: itemName,
+              currency: currency, quoteUnit: quoteUnit, rate: rate, rateDate: rateDate, dataOrigin: dataOrigin
+            ).value
+          else { return nil }
+          return .proposed(quote, krw: krw)
+        default: return nil
+        }
+      }
+    }
+
+    struct Acquisition: Decodable {
+      let krwPaid: Int
+      let foreignMinor: Int
+    }
+
     struct Expense: Decodable {
       let expenseId: String
       let version: Int
@@ -423,6 +496,39 @@
       let kind: String?
       let artifactPath: String?
       let artifactSha256: String?
+      /// v1 확정본에는 없다(그때는 예상액이 없었다).
+      let isEstimate: Bool?
+      let fx: Quote?
+      let acquisition: Acquisition?
+      let fxProposal: Proposal?
+      let fxSuperseded: Bool?
+
+      /// 원화 기준과 그 근거가 서로 맞을 때만 값. 모르는 기준, 근거 없는 예상액·취득 원가, 예상 표시가 기준과 다른 값은
+      /// nil이다(예상액을 실제 청구액처럼 그리지 않는다).
+      var basis: (KRWBasis?, ReferenceQuote?, AcquisitionBasis?)? {
+        guard let krwBasis else { return isEstimate == true || fx != nil || acquisition != nil ? nil : (nil, nil, nil) }
+        guard let parsed = KRWBasis(rawValue: krwBasis) else { return nil }
+        if let isEstimate, isEstimate != (parsed == .referenceEstimate) { return nil }
+        switch parsed {
+        case .referenceEstimate:
+          guard isEstimate == true, acquisition == nil, let quote = fx?.value, currency == "JPY",
+            rateDateIsNotAfterExpense(quote.rateDate)
+          else { return nil }
+          return (parsed, quote, nil)
+        case .acquisitionCost:
+          guard fx == nil, let a = acquisition, a.krwPaid > 0, a.foreignMinor > 0, currency == "JPY" else { return nil }
+          return (parsed, nil, AcquisitionBasis(krwPaid: a.krwPaid, foreignMinor: a.foreignMinor))
+        case .krwOriginal, .verifiedCharge:
+          guard fx == nil, acquisition == nil else { return nil }
+          return (parsed, nil, nil)
+        }
+      }
+
+      private func rateDateIsNotAfterExpense(_ rateDate: String) -> Bool {
+        let iso = "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+        return rateDate.range(of: iso, options: .regularExpression) != nil
+          && expenseDate.range(of: iso, options: .regularExpression) != nil && rateDate <= expenseDate
+      }
 
       var value: LedgerExpense? {
         let state: ExpenseStatus
@@ -434,13 +540,21 @@
           state = .held(reason: holdReason)
         default: return nil
         }
-        guard entry == "receipt" || entry == "manual" else { return nil }
+        guard entry == "receipt" || entry == "manual", let basis else { return nil }
+        let proposal: FXProposal?
+        if let fxProposal {
+          guard let parsed = fxProposal.value else { return nil }
+          proposal = parsed
+        } else {
+          proposal = nil
+        }
         return LedgerExpense(
           id: expenseId, version: version, isManual: entry == "manual", uploadedBy: MemberID(value: uploadedBy),
           date: expenseDate, amountMinor: amountMinor, currency: currency, merchant: merchant, status: state,
-          payer: payerId.map(MemberID.init), krwAmount: krwAmount, krwBasis: krwBasis.flatMap(KRWBasis.init(rawValue:)),
+          payer: payerId.map(MemberID.init), krwAmount: krwAmount, krwBasis: basis.0,
           shares: shares.map { ShareLine(member: MemberID(value: $0.userId), krw: $0.krw) },
-          artifact: artifactPath.flatMap { path in artifactSha256.map { ReceiptArtifactRef(path: path, sha256: $0) } })
+          artifact: artifactPath.flatMap { path in artifactSha256.map { ReceiptArtifactRef(path: path, sha256: $0) } },
+          fx: basis.1, acquisition: basis.2, fxProposal: proposal, fxSuperseded: fxSuperseded ?? false)
       }
     }
 
@@ -493,6 +607,7 @@
       let includedTotalKrw: Int
       let transfers: [TransferRow]
       let excluded: [ExcludedRow]
+      let estimatedTotalKrw: Int?
     }
 
     struct Finalized: Decodable {
@@ -510,6 +625,7 @@
           let includedTotalKrw: Int
           let transfers: [TransferRow]
           let excluded: [ExcludedRow]
+          let estimatedTotalKrw: Int?
         }
         let ruleVersion: String
         let inputs: Inputs
@@ -522,20 +638,32 @@
       let snapshotSha256: String
       let snapshot: Snapshot
 
+      /// 아는 규칙 판만 그린다. v1(예상액 없음)은 그대로, v2는 지출마다 원화 기준과 근거, 예상액 합계가 있어야 한다.
+      static let knownRules: Set<String> = ["explicit-krw-shares-v1", "explicit-krw-shares-v2"]
+
       var value: FinalSettlement? {
         let excluded = snapshot.outputs.excluded.compactMap(\.value)
-        guard excluded.count == snapshot.outputs.excluded.count else { return nil }
+        guard excluded.count == snapshot.outputs.excluded.count, Self.knownRules.contains(snapshot.ruleVersion) else {
+          return nil
+        }
+        let v2 = snapshot.ruleVersion == "explicit-krw-shares-v2"
+        if v2, snapshot.outputs.estimatedTotalKrw == nil { return nil }
+        var expenses: [FinalSettlement.Expense] = []
+        for e in snapshot.inputs.expenses {
+          guard let basis = e.basis, !v2 || e.isEstimate != nil else { return nil }
+          if !v2, basis.0 == .referenceEstimate || basis.0 == .acquisitionCost { return nil }
+          expenses.append(
+            FinalSettlement.Expense(
+              id: e.expenseId, merchant: e.merchant, isManual: e.entry == "manual", date: e.expenseDate,
+              amountMinor: e.amountMinor, currency: e.currency, krwAmount: e.krwAmount, kind: e.kind ?? "",
+              krwBasis: basis.0, fx: basis.1, acquisition: basis.2))
+        }
         return FinalSettlement(
           id: finalizationId, version: version, finalizedAt: finalizedAt, reviewedRevision: reviewedRevision,
           ruleVersion: snapshot.ruleVersion, snapshotSHA256: snapshotSha256,
-          members: snapshot.inputs.members.map(\.value),
-          expenses: snapshot.inputs.expenses.map {
-            FinalSettlement.Expense(
-              id: $0.expenseId, merchant: $0.merchant, isManual: $0.entry == "manual", date: $0.expenseDate,
-              amountMinor: $0.amountMinor, currency: $0.currency, krwAmount: $0.krwAmount, kind: $0.kind ?? "")
-          },
+          members: snapshot.inputs.members.map(\.value), expenses: expenses,
           includedTotalKRW: snapshot.outputs.includedTotalKrw, transfers: snapshot.outputs.transfers.map(\.value),
-          excluded: excluded)
+          excluded: excluded, estimatedTotalKRW: snapshot.outputs.estimatedTotalKrw ?? 0)
       }
     }
   }

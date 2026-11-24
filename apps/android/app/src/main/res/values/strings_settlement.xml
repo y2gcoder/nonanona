@@ -47,7 +47,7 @@
     <string name="review_krw">원화</string>
     <string name="review_krw_fixed">원화 결제 · %1$s</string>
     <string name="review_krw_field">실제 원화 청구액(원)</string>
-    <string name="review_krw_hint">카드·계좌에 찍힌 원화 금액을 넣어 주세요. 아직 모르면 보류해 주세요. 환율로 자동 계산하지 않아요.</string>
+    <string name="review_krw_hint">카드·계좌에 찍힌 원화 금액을 넣어 주세요. 아직 모르면 보류해 주세요. 이 통화는 환율로 계산하지 않아요.</string>
     <string name="review_share">부담</string>
     <string name="review_mode_one">한 사람</string>
     <string name="review_mode_even">둘이 반씩</string>
@@ -111,4 +111,33 @@
     <string name="settle_failure_rejected">저장하지 못했어요. 결제자·원화·부담 금액을 다시 확인해 주세요.</string>
     <string name="settle_failure_unavailable">지금은 저장할 수 없어요. 잠시 후 다시 시도해 주세요.</string>
     <string name="settle_failure_unknown">저장하지 못했어요. 다시 시도해 주세요.</string>
+    <!-- 엔화 원화 기준(ADR-0008). 고정 문구만 쓴다. 예상액은 언제나 "예상"과 고시값·단위·출처·기준일을 함께 보인다. -->
+    <string name="review_krw_hint_jpy">실제 원화 청구액이 있으면 그 금액을, 없으면 증빙으로 확인한 환전 원가를 쓰고, 둘 다 없을 때만 기준환율 예상을 골라 주세요. 모르면 보류해 주세요.</string>
+    <string name="review_source_actual">실제 청구액</string>
+    <string name="review_source_acquisition">환전 원가</string>
+    <string name="review_source_estimate">기준환율 예상</string>
+    <string name="review_acq_krw_field">환전에 쓴 원화(원)</string>
+    <string name="review_acq_foreign_field">받은 엔(엔)</string>
+    <string name="review_acq_result">%1$s × %2$s ÷ %3$s = %4$s (원 단위 반올림)</string>
+    <string name="review_estimate_krw">예상 금액 %1$s</string>
+    <string name="review_estimate_formula">%1$s × %2$s원 ÷ %3$d엔, 원 단위 반올림</string>
+    <string name="review_estimate_undetermined">이 날짜의 기준환율을 아직 확인하지 못했어요. 실제 청구액·환전 원가를 쓰거나 보류해 주세요.</string>
+    <string name="review_estimate_unavailable">지출일 앞 31일 안에 기준환율 고시가 없어 예상 금액을 만들 수 없어요. 보류해 주세요.</string>
+    <string name="review_estimate_none">기준환율 예상 금액을 확인할 수 없어요. 새로고침하거나 보류해 주세요.</string>
+    <string name="review_fx_superseded">포함한 예상 금액 뒤에 더 새 기준환율 고시값이 들어왔어요. 다시 저장하면 새 값으로 바뀌어요.</string>
+    <string name="review_problem_acquisition">환전에 쓴 원화와 받은 엔을 원·엔 단위 숫자로 넣어 주세요.</string>
+    <string name="review_problem_estimate">쓸 수 있는 기준환율이 없어요. 다른 기준을 고르거나 보류해 주세요.</string>
+    <string name="fx_quote">한국은행 ECOS %1$s · %2$s 고시 · %3$d엔당 %4$s원</string>
+    <string name="fx_fallback">지출일(%1$s)에 고시가 없어 그 전 가장 최근 고시일 값이에요.</string>
+    <string name="fx_synthetic">가상 시험 환율 · 시장 환율 아님</string>
+    <string name="fx_not_actual">기준환율로 계산한 예상 금액이에요. 실제 청구액이 아니에요.</string>
+    <string name="fx_acquisition">증빙으로 확인한 환전 원가 · %1$s에 %2$s</string>
+    <string name="basis_estimate">예상 금액</string>
+    <string name="basis_acquisition">환전 원가</string>
+    <string name="expense_status_included_estimate">포함 · 예상</string>
+    <string name="expense_fx_superseded">더 새 기준환율 고시값이 있어요. 포함한 금액은 그대로이고 다시 검토할 수 있어요.</string>
+    <string name="settlement_estimated">이 중 예상 금액(기준환율)</string>
+    <string name="settlement_converted">원화 환산 근거</string>
+    <string name="settlement_converted_hint">실제 청구액이 아닌 지출이에요. 예상 금액은 확정해도 예상으로 남아요.</string>
+    <string name="settle_failure_quote_changed">기준환율 고시값이 새로 들어와 예상 금액이 바뀌었어요. 새 금액을 확인하고 다시 저장해 주세요.</string>
 </resources>

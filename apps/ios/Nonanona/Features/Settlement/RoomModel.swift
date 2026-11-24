@@ -219,7 +219,10 @@ final class RoomModel {
       let payer = form.payer, case .success(let shares) = form.shares(for: expense, members: ledger.members)
     else { return }
     let verified = expense.currency == "KRW" ? nil : form.krw(for: expense)
-    await send(target, version: form.baseVersion, .include(payer: payer, verifiedKRW: verified, shares: shares))
+    let conversion = form.conversion(for: expense)
+    await send(
+      target, version: form.baseVersion,
+      .include(payer: payer, verifiedKRW: verified, shares: shares, conversion: conversion))
   }
 
   func hold(_ target: ExpenseTarget, reason: String) async {
@@ -272,6 +275,11 @@ final class RoomModel {
         }
         reviewRefreshed.insert(target)
       case .finalized:
+        sentReviews[target] = nil
+        await loadLedger(target.tripID)
+      case .quoteChanged:
+        // 방장이 본 고시값 뒤에 같은 지출일 값이 새로 들어왔다. 입력(고른 기준·결제자·부담)은 그대로 두고 새 제안을
+        // 불러온다. 새 예상액으로 몫을 다시 계산해 보이고, 방장이 다시 저장해야 포함된다(다른 요청 키).
         sentReviews[target] = nil
         await loadLedger(target.tripID)
       case .sessionExpired:

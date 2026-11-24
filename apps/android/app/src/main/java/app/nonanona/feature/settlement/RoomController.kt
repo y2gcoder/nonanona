@@ -251,7 +251,7 @@ class RoomController(
         val payer = form.payer ?: return
         val shares = (form.shares(expense, ledger.members) as? ShareResult.Valid)?.shares ?: return
         val verified = if (expense.currency == "KRW") null else form.krw(expense)
-        send(target, form.baseVersion, ExpenseReview.Decision.Include(payer, verified, shares))
+        send(target, form.baseVersion, ExpenseReview.Decision.Include(payer, verified, shares, form.conversion(expense)))
     }
 
     fun hold(
@@ -325,6 +325,13 @@ class RoomController(
                     }
 
                     SettlementFailure.Finalized -> {
+                        sentReviews.remove(target)
+                        loadLedger(target.tripId)
+                    }
+
+                    SettlementFailure.QuoteChanged -> {
+                        // 방장이 본 고시값 뒤에 같은 지출일 값이 새로 들어왔다. 입력(고른 기준·결제자·부담)은 그대로 두고 새
+                        // 제안을 불러온다. 새 예상액으로 몫을 다시 계산해 보이고, 방장이 다시 저장해야 포함된다(다른 요청 키).
                         sentReviews.remove(target)
                         loadLedger(target.tripId)
                     }

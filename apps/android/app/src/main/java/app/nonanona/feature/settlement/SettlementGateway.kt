@@ -23,15 +23,74 @@ data class ShareLine(
     val krw: Long,
 )
 
-/** 지출의 원화 기준. 기준환율 자동 환산은 없다(ADR-0001의 제공처·반올림이 정해지기 전까지). */
+/** 지출의 원화 기준(ADR-0001 우선순위, ADR-0008). 앱은 모르는 값을 받으면 장부를 그리지 않는다(예상액을 실제처럼 보이지 않게). */
 enum class KrwBasis(
     val wire: String,
 ) {
     /** 원화로 결제한 금액 그대로. */
     KrwOriginal("krw_original"),
 
-    /** 방장이 확인한 실제 원화 청구액(외화 지출). */
+    /** 방장이 확인한 실제 원화 청구액(외화 지출, 우선순위 1). */
     VerifiedCharge("verified_krw_charge"),
+
+    /** 증빙으로 확인한 외화 취득 원가(엔화, 우선순위 2). 방장이 환전에 쓴 원화와 받은 엔을 적었다. */
+    AcquisitionCost("acquisition_cost"),
+
+    /** 한국은행 ECOS 기준환율로 계산한 예상액(엔화, 우선순위 3). 실제 청구액이 아니고 언제나 "예상"으로 보인다. */
+    ReferenceEstimate("reference_rate_estimate"),
+    ;
+
+    companion object {
+        fun of(wire: String): KrwBasis? = entries.firstOrNull { it.wire == wire }
+    }
+}
+
+/**
+ * 서버가 받아 둔 기준환율 고시값 하나(ECOS 731Y001/0000002 원/일본엔, [quoteUnit]엔당 원).
+ * [rate]는 고시 글자 그대로다(부동소수로 바꾸지 않는다).
+ */
+data class ReferenceQuote(
+    val quoteId: String,
+    val rate: String,
+    val quoteUnit: Int,
+    /** 값을 고시한 날(지출일이거나, 그날 고시가 없으면 그 전 가장 최근 고시일). */
+    val rateDate: String,
+    val itemName: String,
+    /** 가상 시험값(data_origin=fixture). 시장 환율이 아니므로 언제나 따로 표시한다. */
+    val isSynthetic: Boolean,
+)
+
+/** 열린 방의 엔화 지출에 서버가 지금 붙이는 기준환율 제안. */
+sealed interface FxProposal {
+    /** 쓸 수 있는 고시값과 그 값으로 서버가 계산한 원화. */
+    data class Proposed(
+        val quote: ReferenceQuote,
+        val krw: Long,
+    ) : FxProposal
+
+    /** 그 날짜의 고시 여부를 아직 확인하지 못했다(받은 기록이 덮지 않는다). 예상액을 만들지 않는다. */
+    data object Undetermined : FxProposal
+
+    /** 지출일 앞 31일 안에 고시값이 없다. 예상액을 만들지 않는다. */
+    data object Unavailable : FxProposal
+}
+
+/** 외화 취득 원가: 환전에 쓴 원화와 받은 외화(엔). 지출 원화 = 엔 × 원화 ÷ 받은 엔(원 단위 반올림). */
+data class AcquisitionBasis(
+    val krwPaid: Long,
+    val foreignMinor: Long,
+)
+
+/** 외화 지출의 원화가 실제 청구액이 아닐 때 방장이 고른 근거. 서버가 같은 계산으로 다시 확인한다. */
+sealed interface KrwConversion {
+    data class AcquisitionCost(
+        val basis: AcquisitionBasis,
+    ) : KrwConversion
+
+    /** 방장이 본 고시값. 그사이 그 지출일 값이 바뀌었으면 서버가 거절한다([SettlementFailure.QuoteChanged]). */
+    data class ReferenceEstimate(
+        val quoteId: String,
+    ) : KrwConversion
 }
 
 sealed interface ExpenseStatus {
@@ -102,6 +161,14 @@ data class LedgerExpense(
     val shares: List<ShareLine>,
     /** 공유한 가림 사본(사본으로 올린 지출만). 직접 입력은 null. */
     val artifact: ReceiptArtifactRef? = null,
+    /** 포함한 기준환율 예상액이 고정한 고시값([krwBasis]가 ReferenceEstimate일 때만). */
+    val fx: ReferenceQuote? = null,
+    /** 포함한 취득 원가([krwBasis]가 AcquisitionCost일 때만). */
+    val acquisition: AcquisitionBasis? = null,
+    /** 지금의 기준환율 제안(열린 방의 엔화 지출만). */
+    val fxProposal: FxProposal? = null,
+    /** 포함한 예상액 뒤에 더 새 고시값이 들어왔다. 포함 금액은 바뀌지 않는다(다시 검토할 수 있다). */
+    val fxSuperseded: Boolean = false,
 )
 
 /** 여행방 장부. revision은 방의 입력이 바뀔 때마다 서버가 올리고, 확정은 방장이 본 revision으로만 한다. */
@@ -128,11 +195,15 @@ data class ExpenseReview(
     val decision: Decision,
 ) {
     sealed interface Decision {
-        /** 포함: 결제자, 확인한 원화(KRW 지출은 null), 원 단위 몫(합이 원화와 같아야 한다). */
+        /**
+         * 포함: 결제자, 원화(KRW 지출은 null), 원 단위 몫(합이 원화와 같아야 한다). 외화의 원화가 실제 청구액이 아니면
+         * [conversion]에 근거를 담는다(취득 원가·기준환율 예상액). 원화는 방장이 본 값이고 서버가 다시 계산해 맞춰 본다.
+         */
         data class Include(
             val payer: MemberId,
             val verifiedKrw: Long?,
             val shares: List<ShareLine>,
+            val conversion: KrwConversion? = null,
         ) : Decision
 
         data class Hold(
@@ -170,6 +241,8 @@ data class SettlementPreview(
     val includedTotalKrw: Long,
     val transfers: List<Transfer>,
     val excluded: List<ExcludedExpense>,
+    /** 함께 쓴 돈 가운데 기준환율 예상액의 합. */
+    val estimatedTotalKrw: Long = 0,
 )
 
 /** 확정한 정산. 서버가 확정 순간의 입력(구성원·지출·몫)과 결과(송금)를 고정한 스냅숏을 그대로 그린다. */
@@ -185,6 +258,8 @@ data class FinalSettlement(
     val includedTotalKrw: Long,
     val transfers: List<Transfer>,
     val excluded: List<ExcludedExpense>,
+    /** 함께 쓴 돈 가운데 기준환율 예상액의 합(v1 확정본은 0 — 예상액이 없던 규칙). */
+    val estimatedTotalKrw: Long = 0,
 ) {
     data class Expense(
         val id: String,
@@ -195,6 +270,9 @@ data class FinalSettlement(
         val currency: String,
         val krwAmount: Long?,
         val kind: String,
+        val krwBasis: KrwBasis? = null,
+        val fx: ReferenceQuote? = null,
+        val acquisition: AcquisitionBasis? = null,
     )
 
     fun nameOf(id: MemberId): String = members.firstOrNull { it.id == id }?.displayName ?: "알 수 없는 구성원"
@@ -228,6 +306,9 @@ enum class SettlementFailure {
 
     /** 서버가 값을 받지 않았다(결제자·원화·몫·사유). */
     Rejected,
+
+    /** 방장이 본 기준환율 고시값이 바뀌었다(새로 받은 값). 장부를 다시 불러와 새 예상액을 확인한다. */
+    QuoteChanged,
     Network,
     Unavailable,
     Unknown,

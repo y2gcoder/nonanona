@@ -4,7 +4,7 @@
 한 기기는 가상 방장(다라), 다른 기기는 가상 회원(가나)으로 같은 시드 여행방(가상 후쿠오카 정산)을 정산한다.
 회원: 영수증 3장 공유 → 2장 확인 + 읽지 못한 1장은 값만 직접 입력 → 홈에서 로그인·여행방 열기 → 사본 2장 올리기
 → 직접 입력은 따로 최종 확인 뒤 올리기 → 다시 올려도 같은 지출 → 같은 지출이 보이지만 검토·확정 동작은 없음.
-방장: 로그인 → 외화 13,377원(반씩 안 나뉨 → 직접 나누기) 포함, 외화 1건 보류, KRW 직접 입력 반씩 포함 → 미리보기
+방장: 로그인 → 외화 13,377원(둘이 반씩: 결제자 6,689 / 회원 6,688, 직접 나누기 합 검사도 확인) 포함, 외화 1건 보류, KRW 직접 입력 반씩 포함 → 미리보기
 → (스크립트가 회원 계정으로 지출 1건 추가) → 확정이 오래된 revision으로 거절 → 새 미리보기 → 늦은 지출 보류 → 확정.
 두 기기: 같은 확정본(확정 번호·송금·제외) → 두 앱을 SIGKILL 뒤 다시 열어도 같음. 단계마다 서버 행을 확인한다.
 
@@ -439,17 +439,21 @@ def a_host_review():
     a_pick_member("review_payer", "다라")
     type_into("expense_review_screen", "review_krw", "13377")
     hide_keyboard()
-    assert "1원이 남아요" in (reach("expense_review_screen", id="review_share_problem").text or ""), "odd remainder blocks even split"
-    assert not reach("expense_review_screen", id="review_include").enabled
-    a_shot("android-settlement-review-not-divisible")
+    even_odd = "다라 6,689원 · 가나 6,688원 · 합계 13,377원. 남는 1원은 결제자(다라)가 더 부담해요."
+    assert reach("expense_review_screen", id="review_even_summary").text == even_odd, "odd amount: payer bears the extra won"
+    assert not u.find(id="review_share_problem")
+    assert reach("expense_review_screen", id="review_include").enabled
+    a_shot("android-settlement-review-even-odd")
+    # 직접 나누기는 그대로 쓸 수 있다: 합이 원화와 다르면 막힌다. 반씩으로 돌아가 포함한다.
     u.tap(reach("expense_review_screen", id="review_mode_exact"))
     type_into("expense_review_screen", "review_exact_1", "6688")
     type_into("expense_review_screen", "review_exact_2", "6688")
     hide_keyboard()
     assert "1원이 남았어요" in (reach("expense_review_screen", id="review_share_problem").text or "")
-    type_into("expense_review_screen", "review_exact_2", "6689")
-    hide_keyboard()
+    assert not reach("expense_review_screen", id="review_include").enabled
     a_shot("android-settlement-review-exact")
+    u.tap(reach("expense_review_screen", id="review_mode_even"))
+    assert reach("expense_review_screen", id="review_even_summary").text == even_odd
     u.tap(reach("expense_review_screen", id="review_include"))
     u.wait(id="room_screen", timeout=15)
     until(lambda: not u.find(id="expense_review_screen"), 15, "review closes")
@@ -462,7 +466,7 @@ def a_host_review():
     a_open_expense("38,000 KRW")
     assert reach("expense_review_screen", id="review_krw_fixed")
     a_pick_member("review_payer", "다라")
-    assert u.wait(text="한 사람 19,000원 · 합계 38,000원", timeout=5)
+    assert reach("expense_review_screen", id="review_even_summary").text == "한 사람 19,000원 · 합계 38,000원"
     u.tap(reach("expense_review_screen", id="review_include"))
     until(lambda: not u.find(id="expense_review_screen"), 15, "review closes")
     u.wait(id="room_screen", timeout=10)
@@ -472,7 +476,7 @@ def a_host_review():
 
 def a_preview():
     u.tap(reach("room_screen", id="open_settlement"))
-    until(lambda: u.texts_within("transfer_1") == ["가나 → 다라", "25,689원"], 15, "transfer 1")
+    until(lambda: u.texts_within("transfer_1") == ["가나 → 다라", "25,688원"], 15, "transfer 1")
     assert u.texts_within("settlement_total") == ["함께 쓴 돈", "51,377원"]
     assert any("보류: 원화 청구액 확인 대기" in t for t in u.texts_within("excluded_1"))
     a_shot("android-settlement-preview")
@@ -493,7 +497,7 @@ def a_finalize_stale_then_ok():
     until(lambda: not u.find(id="expense_review_screen"), 15, "review closes")
     u.tap(reach("room_screen", id="open_settlement"))
     until(lambda: (lambda b: b if b and b.enabled else None)(u.find(id="settlement_finalize")), 15, "finalize enabled")
-    assert u.texts_within("transfer_1") == ["가나 → 다라", "25,689원"]
+    assert u.texts_within("transfer_1") == ["가나 → 다라", "25,688원"]
     u.tap(u.find(id="settlement_finalize"))
     u.wait(id="finalize_confirm", timeout=10)
     a_shot("android-settlement-finalize-confirm")
@@ -508,7 +512,7 @@ def a_final(prefix, shot):
     u.tap(reach("room_screen", id="open_settlement"))
     node = u.wait(id="settlement_final_id", timeout=20)
     assert node.text.startswith(f"확정 번호 {prefix}"), node.text
-    assert u.texts_within("transfer_1") == ["가나 → 다라", "25,689원"]
+    assert u.texts_within("transfer_1") == ["가나 → 다라", "25,688원"]
     assert not u.find(id="transfer_2")
     assert u.texts_within("settlement_total") == ["함께 쓴 돈", "51,377원"]
     assert not u.find(id="settlement_finalize")
@@ -579,7 +583,7 @@ def main():
         by = {(e["amount_minor"], e["currency"]): e for e in r["expenses"]}
         s = by[(1408, "JPY")]
         assert (s["status"], s["payer"], s["krw_amount"], s["krw_basis"]) == ("included", "다라", 13377, "verified_krw_charge"), s
-        assert s["shares"] == [{"가나": 6689}, {"다라": 6688}], s["shares"]
+        assert s["shares"] == [{"가나": 6688}, {"다라": 6689}], s["shares"]  # 둘이 반씩, 결제자 다라가 1원 더
         assert (by[(1276, "JPY")]["status"], by[(1276, "JPY")]["hold_reason"]) == ("held", "원화 청구액 확인 대기")
         t = by[(38000, "KRW")]
         assert (t["status"], t["krw_amount"], t["krw_basis"], t["shares"]) == ("included", 38000, "krw_original",
@@ -618,7 +622,7 @@ def main():
     def finalized(r):
         assert r["status"] == "finalized" and r["finalizations"] == 1, r
         out = r["outputs"]
-        assert out["included_total_krw"] == 51377 and [t["krw"] for t in out["transfers"]] == [25689], out
+        assert out["included_total_krw"] == 51377 and [t["krw"] for t in out["transfers"]] == [25688], out
         assert sorted(x["reason"] for x in out["excluded"]) == ["결제 여부 불명확", "원화 청구액 확인 대기"], out
     final = server("after-finalize", finalized)
     prefix = final["finalization_id"][:8]

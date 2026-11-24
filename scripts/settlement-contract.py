@@ -325,6 +325,7 @@ def main():
                           ("non-member", [{"user_id": outsider.uid, "krw": 13377}]),
                           ("string amount", [{"user_id": host.uid, "krw": "13377"}]),
                           ("negative", [{"user_id": host.uid, "krw": 13378}, {"user_id": member.uid, "krw": -1}]),
+                          ("zero share", [{"user_id": host.uid, "krw": 13377}, {"user_id": member.uid, "krw": 0}]),
                           ("empty", [])]:
         st, code, _ = host.rpc("review_expense", **base, p_request_id=str(uuid.uuid4()), p_krw_amount=13377, p_shares=shares)
         check(f"shares {label} -> shares_invalid", st == 400 and code == "shares_invalid", status=st, code=code)
@@ -337,10 +338,18 @@ def main():
     st, ledger, _ = host.rpc("get_room_ledger", p_trip=trip)
     check("rejected reviews changed nothing", ledger["revision"] == 5 and all(e["version"] == 1 for e in ledger["expenses"]))
 
-    # 같은 지출, 같은 버전에 서로 다른 두 검토가 동시에 오면 하나만 반영되고 늦은 쪽은 stale_expense.
+    # 둘이 반씩(ADR-0007): 서버는 몫을 고르지 않고 받은 정수 몫만 검사한다(합 = 원화, 양수). 앱이 만드는 반씩 몫은
+    # 공통 예제(pair_splits)에서 온다. 두 사람 순서는 구성원 목록 순서(방장 먼저), 홀수면 결제자가 1원을 더 부담한다.
+    pair_split = {c["payer"]: c["split"] for c in EXAMPLES["pair_splits"]["cases"] if c["krw"] == 13377}
+
+    def pair_shares(payer_key):
+        split = pair_split[0 if payer_key == "host" else 1]
+        return [{"user_id": host.uid, "krw": split[0]}, {"user_id": member.uid, "krw": split[1]}]
+
+    # 같은 지출, 같은 버전에 서로 다른 두 검토(방장 결제·회원 결제의 반씩)가 동시에 오면 하나만 반영되고 늦은 쪽은 stale_expense.
     def review(req, payer):
         return host.rpc("review_expense", **{**base, "p_payer": payer}, p_request_id=req, p_krw_amount=13377,
-                        p_shares=[{"user_id": host.uid, "krw": 6688}, {"user_id": member.uid, "krw": 6689}])
+                        p_shares=pair_shares("host" if payer == host.uid else "member"))
     reqs = [str(uuid.uuid4()), str(uuid.uuid4())]
     with concurrent.futures.ThreadPoolExecutor(2) as pool:
         results = list(pool.map(review, reqs, [host.uid, member.uid]))
@@ -349,7 +358,6 @@ def main():
     loser = 1 - winner
     check("concurrent reviews of one version: exactly one commits, the other is stale_expense",
           statuses == [200, 409] and results[loser][1] == "stale_expense", codes=[r[1] for r in results])
-    # 이긴 쪽 결과를 예제(결제자=방장)로 맞춘다: 결제자가 회원이었다면 새 버전으로 다시 검토한다.
     st, replay, _ = review(reqs[winner], [host.uid, member.uid][winner])
     check("same review request replays the stored result", st == 200 and replay["replayed"]
           and replay["version"] == results[winner][1]["version"])
@@ -357,11 +365,25 @@ def main():
                            p_shares=[{"user_id": host.uid, "krw": 13376}])
     check("same review key, different content -> idempotency_conflict", st == 409 and code == "idempotency_conflict",
           status=st, code=code)
-    if winner == 1:
-        st, body, _ = host.rpc("review_expense", **{**base, "p_expected_version": 2}, p_request_id=str(uuid.uuid4()),
-                               p_krw_amount=13377, p_shares=[{"user_id": host.uid, "krw": 6688},
-                                                             {"user_id": member.uid, "krw": 6689}])
-        check("re-review with the current version", st == 200 and body["version"] == 3)
+    # 두 순서(회원 결제 → 방장 결제)와 예전에 직접 적던 몫을 차례로 검토하고, 그때마다 서버 미리보기의 송금을 본다.
+    # 다른 지출은 아직 확인 필요라 r01만 송금에 들어간다. 반씩이면 결제자가 아닌 사람이 floor(원화/2)를 보낸다.
+    role = {host.uid: "host", member.uid: "member"}
+    r01_review = EXAMPLES["settlement"]["expenses"][0]["review"]
+    half = 13377 // 2
+    steps = [("member", pair_shares("member"), [("host", "member", half)], "pair split, member paid"),
+             ("host", [{"user_id": uid[k], "krw": v} for k, v in r01_review["legacy_shares"].items()],
+              [("member", "host", 13377 - r01_review["legacy_shares"]["host"])], "legacy manual odd shares"),
+             ("host", [{"user_id": uid[k], "krw": v} for k, v in r01_review["shares"].items()],
+              [("member", "host", half)], "pair split, host paid (the example)")]
+    for payer_key, shares, transfers, label in steps:
+        st, ledger, _ = host.rpc("get_room_ledger", p_trip=trip)
+        version = next(e for e in ledger["expenses"] if e["expense_id"] == r01["expense_id"])["version"]
+        st, body, _ = host.rpc("review_expense", **{**base, "p_expected_version": version, "p_payer": uid[payer_key]},
+                               p_request_id=str(uuid.uuid4()), p_krw_amount=13377, p_shares=shares)
+        st2, preview, _ = member.rpc("preview_settlement", p_trip=trip)
+        got = [(role[t["from"]], role[t["to"]], t["krw"]) for t in preview["transfers"]] if st2 == 200 else None
+        check(f"r01 {label}: accepted as explicit shares and previewed", st == 200 and body["version"] == version + 1
+              and not preview["ready"] and got == transfers, status=st, transfers=got)
 
     st, ledger, _ = host.rpc("get_room_ledger", p_trip=trip)
     by_id = {e["expense_id"]: e for e in ledger["expenses"]}
@@ -459,7 +481,8 @@ def main():
           and sum(e["krw_amount"] for e in snap["inputs"]["expenses"] if e["kind"] == "shared") == snap["outputs"]["included_total_krw"])
     check("frozen inputs keep original amount, currency, KRW basis and shares",
           any(e["currency"] == "JPY" and e["amount_minor"] == 1408 and e["krw_amount"] == 13377
-              and e["krw_basis"] == "verified_krw_charge" and sorted(s["krw"] for s in e["shares"]) == [6688, 6689]
+              and e["krw_basis"] == "verified_krw_charge" and e["payer_id"] == host.uid
+              and {s["user_id"]: s["krw"] for s in e["shares"]} == {uid[k]: v for k, v in r01_review["shares"].items()}
               for e in snap["inputs"]["expenses"]))
     st, code, _ = member.rpc("submit_manual_expense", p_trip=trip, p_request_id=str(uuid.uuid4()), p_expense_date="2026-11-09",
                              p_amount_minor=100, p_currency="KRW", p_merchant="확정 뒤")

@@ -295,7 +295,7 @@ private fun ExpenseRow(
 
 /**
  * 방장 검토: 결제자, 원화(KRW는 그대로, 외화는 확인한 청구액), 부담(한 사람 · 둘이 반씩 · 직접 나누기)을 정하고 포함하거나
- * 사유와 함께 보류한다. 반씩 나누어떨어지지 않으면 직접 나누게 한다(남는 원을 고르지 않는다).
+ * 사유와 함께 보류한다. 반씩은 홀수 금액이면 결제자가 1원을 더 부담하고, 결제자가 두 사람 밖이면 직접 나누게 한다.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
@@ -428,8 +428,21 @@ fun ExpenseReviewScreen(
                             val lines = (result as? ShareResult.Valid)?.shares
                             if (krw != null && lines != null) {
                                 Text(
-                                    stringResource(R.string.review_even_each, wonText(lines[0].krw), wonText(krw)),
+                                    if (lines.size == 2 && lines[0].krw != lines[1].krw) {
+                                        stringResource(
+                                            R.string.review_even_payer_extra,
+                                            ledger.nameOf(lines[0].member),
+                                            wonText(lines[0].krw),
+                                            ledger.nameOf(lines[1].member),
+                                            wonText(lines[1].krw),
+                                            wonText(krw),
+                                            ledger.nameOf(form.payer),
+                                        )
+                                    } else {
+                                        stringResource(R.string.review_even_each, wonText(lines[0].krw), wonText(krw))
+                                    },
                                     style = TextRoles.supporting,
+                                    modifier = Modifier.testTag("review_even_summary"),
                                 )
                             }
                         }
@@ -656,6 +669,10 @@ private fun problemText(problem: ShareProblem): String =
 
         ShareProblem.NotDivisible -> {
             stringResource(R.string.review_problem_not_divisible)
+        }
+
+        ShareProblem.TooSmallToSplit -> {
+            stringResource(R.string.review_problem_too_small)
         }
 
         ShareProblem.ExactInvalid -> {

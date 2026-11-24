@@ -53,12 +53,14 @@
     <string name="review_mode_even">둘이 반씩</string>
     <string name="review_mode_exact">직접 나누기</string>
     <string name="review_even_each">한 사람 %1$s · 합계 %2$s</string>
+    <string name="review_even_payer_extra">%1$s %2$s · %3$s %4$s · 합계 %5$s. 남는 1원은 결제자(%6$s)가 더 부담해요.</string>
     <string name="review_exact_field">%1$s 부담(원)</string>
     <string name="review_problem_payer">결제자를 골라 주세요.</string>
     <string name="review_problem_krw">실제 원화 청구액을 넣거나 보류해 주세요.</string>
     <string name="review_problem_person">부담할 사람을 골라 주세요.</string>
     <string name="review_problem_pair">반씩 나눌 두 사람을 골라 주세요.</string>
-    <string name="review_problem_not_divisible">반씩 나누면 1원이 남아요. 직접 나누기로 사람마다 금액을 적어 주세요.</string>
+    <string name="review_problem_not_divisible">결제자가 두 사람 밖이라 남는 1원을 누가 낼지 정할 수 없어요. 직접 나누기로 사람마다 금액을 적어 주세요.</string>
+    <string name="review_problem_too_small">1원은 두 사람이 나눌 수 없어요. 한 사람으로 정해 주세요.</string>
     <string name="review_problem_exact_invalid">부담 금액은 원 단위 숫자로 적어 주세요.</string>
     <string name="review_problem_remaining">%1$s이 남았어요. 합계가 원화와 같아야 해요.</string>
     <string name="review_problem_over">%1$s 넘어요. 합계가 원화와 같아야 해요.</string>

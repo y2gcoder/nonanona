@@ -117,22 +117,25 @@ final class SettlementUITests: XCTestCase {
     XCTAssertTrue(app.descendants(matching: .any)["room-pending"].waitForExistence(timeout: 15))
     snapshot("ios-settlement-host-ledger-pending")
 
-    // r01(외화): 확인한 원화 13,377원은 반씩 나누어떨어지지 않아 직접 나눈다.
+    // r01(외화): 확인한 원화 13,377원(홀수)을 둘이 반씩 — 결제자 다라가 1원을 더 부담한다(6,689 / 6,688).
     openExpense(matching: "1,408 JPY")
     pickPayer("다라")
     replaceText(app.textFields["review-krw"], "13377")
     dismissKeyboard()
-    XCTAssertTrue(scrollTo(app.staticTexts["review-share-problem"]).label.contains("1원이 남아요"))
-    XCTAssertFalse(scrollTo(app.buttons["review-include"]).isEnabled)
-    snapshot("ios-settlement-review-not-divisible")
+    let evenOdd = "다라 6,689원 · 가나 6,688원 · 합계 13,377원. 남는 1원은 결제자(다라)가 더 부담해요."
+    XCTAssertEqual(scrollTo(app.staticTexts["review-even-summary"]).label, evenOdd)
+    XCTAssertFalse(app.staticTexts["review-share-problem"].exists)
+    XCTAssertTrue(scrollTo(app.buttons["review-include"]).isEnabled)
+    snapshot("ios-settlement-review-even-odd")
+    // 직접 나누기는 그대로 쓸 수 있다: 합이 원화와 다르면 막힌다. 반씩으로 돌아가 포함한다.
     scrollTo(app.segmentedControls["review-share-mode"]).buttons["직접 나누기"].tap()
     replaceText(app.textFields["review-exact-1"], "6688")
     dismissKeyboard()
     XCTAssertEqual(scrollTo(app.staticTexts["review-share-problem"]).label, "6,689원이 남았어요. 합계가 원화와 같아야 해요.")
     XCTAssertFalse(scrollTo(app.buttons["review-include"]).isEnabled)
-    replaceText(app.textFields["review-exact-2"], "6689")
-    dismissKeyboard()
     snapshot("ios-settlement-review-exact")
+    scrollTo(app.segmentedControls["review-share-mode"]).buttons["둘이 반씩"].tap()
+    XCTAssertEqual(scrollTo(app.staticTexts["review-even-summary"]).label, evenOdd)
     scrollTo(app.buttons["review-include"]).tap()
     XCTAssertTrue(app.descendants(matching: .any)["room-screen"].waitForExistence(timeout: 15))
 
@@ -145,7 +148,7 @@ final class SettlementUITests: XCTestCase {
     openExpense(matching: "38,000 KRW")
     XCTAssertTrue(scrollTo(app.staticTexts["review-krw-fixed"]).exists)
     pickPayer("다라")
-    XCTAssertTrue(scrollTo(app.staticTexts["한 사람 19,000원 · 합계 38,000원"]).exists)
+    XCTAssertEqual(scrollTo(app.staticTexts["review-even-summary"]).label, "한 사람 19,000원 · 합계 38,000원")
     scrollTo(app.buttons["review-include"]).tap()
     XCTAssertTrue(app.descendants(matching: .any)["room-screen"].waitForExistence(timeout: 15))
     XCTAssertFalse(app.descendants(matching: .any)["room-pending"].exists)
@@ -209,12 +212,12 @@ final class SettlementUITests: XCTestCase {
     XCTAssertTrue(app.descendants(matching: .any)["room-screen"].waitForExistence(timeout: 10))
   }
 
-  /// 미리보기: 서버가 계산한 송금(가나 → 다라 25,689원), 보류 제외. 스크립트가 미리보기를 연 뒤 회원 지출을 하나 더 넣는다.
+  /// 미리보기: 서버가 계산한 송금(가나 → 다라 25,688원), 보류 제외. 스크립트가 미리보기를 연 뒤 회원 지출을 하나 더 넣는다.
   func testH2_OpenPreview() throws {
     app.activate()
     scrollTo(app.buttons["open-settlement"]).tap()
     XCTAssertTrue(app.descendants(matching: .any)["transfer-1"].waitForExistence(timeout: 15))
-    XCTAssertEqual(app.descendants(matching: .any)["transfer-1"].label, "가나 → 다라, 25,689원")
+    XCTAssertEqual(app.descendants(matching: .any)["transfer-1"].label, "가나 → 다라, 25,688원")
     XCTAssertEqual(app.descendants(matching: .any)["settlement-total"].label, "함께 쓴 돈, 51,377원")
     XCTAssertTrue(app.descendants(matching: .any)["excluded-1"].label.contains("보류: 원화 청구액 확인 대기"))
     snapshot("ios-settlement-preview")
@@ -237,7 +240,7 @@ final class SettlementUITests: XCTestCase {
     scrollTo(app.buttons["open-settlement"]).tap()
     let finalize = app.buttons["settlement-finalize"]
     waitFor(timeout: 15) { finalize.exists && finalize.isEnabled }
-    XCTAssertEqual(app.descendants(matching: .any)["transfer-1"].label, "가나 → 다라, 25,689원")
+    XCTAssertEqual(app.descendants(matching: .any)["transfer-1"].label, "가나 → 다라, 25,688원")
     finalize.tap()
     XCTAssertTrue(app.alerts.buttons["확정"].firstMatch.waitForExistence(timeout: 5))
     snapshot("ios-settlement-finalize-confirm")
@@ -263,7 +266,7 @@ final class SettlementUITests: XCTestCase {
     let id = app.staticTexts["settlement-final-id"]
     XCTAssertTrue(id.waitForExistence(timeout: 20))
     XCTAssertTrue(id.label.hasPrefix("확정 번호 \(env["FINAL_ID_PREFIX"] ?? "?")"), id.label)
-    XCTAssertEqual(app.descendants(matching: .any)["transfer-1"].label, "가나 → 다라, 25,689원")
+    XCTAssertEqual(app.descendants(matching: .any)["transfer-1"].label, "가나 → 다라, 25,688원")
     XCTAssertFalse(app.descendants(matching: .any)["transfer-2"].exists)
     XCTAssertEqual(app.descendants(matching: .any)["settlement-total"].label, "함께 쓴 돈, 51,377원")
     XCTAssertTrue(app.descendants(matching: .any)["excluded-1"].label.contains("보류"))

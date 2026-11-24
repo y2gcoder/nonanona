@@ -5,21 +5,33 @@ enum class ShareMode {
     /** 한 사람이 전부 부담한다. */
     One,
 
-    /** 두 사람이 똑같이 나눈다. 정확히 나누어떨어질 때만 쓸 수 있다. */
+    /** 두 사람이 똑같이 나눈다. 홀수 금액이면 결제자가 남는 1원을 더 부담한다(결제자가 두 사람 중 하나일 때만). */
     Even,
 
     /** 사람마다 원 단위 몫을 직접 적는다(남는 원이 생길 때). */
     Exact,
 }
 
-/** 몫 계산. 반올림하거나 남는 원을 누구에게 줄지 고르지 않는다(규칙 미정, ADR-0001). 나누어떨어지지 않으면 null이다. */
+/** 몫 계산. 원 단위 정수만 쓰고 몫의 합은 언제나 원화와 같다. 환율 환산·반올림은 하지 않는다(ADR-0001). */
 object SharePlan {
-    fun evenSplit(
+    /**
+     * 두 사람 균등 몫(ADR-0007). [payerIndex]는 두 사람 중 결제자의 자리(0·1), 결제자가 두 사람 밖이면 null.
+     * 짝수 금액은 똑같이 나눈다. 홀수 금액은 결제자가 floor(원화/2)+1, 다른 사람이 floor(원화/2)를 부담한다.
+     * 결제자가 두 사람 밖인 홀수 금액은 남는 1원을 받을 사람이 없어 null(직접 나눈다). 한 사람 몫이 0원이 되는 1원도
+     * null이다(서버는 0원 몫을 받지 않는다 — 한 사람 부담으로 정한다).
+     */
+    fun pairSplit(
         krw: Long,
-        people: Int,
+        payerIndex: Int?,
     ): List<Long>? {
-        if (krw <= 0 || people <= 0 || krw % people != 0L) return null
-        return List(people) { krw / people }
+        if (krw < 2) return null
+        val half = krw / 2
+        if (krw % 2 == 0L) return listOf(half, half)
+        return when (payerIndex) {
+            0 -> listOf(half + 1, half)
+            1 -> listOf(half, half + 1)
+            else -> null
+        }
     }
 
     /** 원 단위 정수 입력. 전각 등 유니코드 숫자와 자릿수 쉼표·공백을 받고, 그 밖의 글자가 있으면 null. */
@@ -44,8 +56,11 @@ sealed interface ShareProblem {
 
     data object PairRequired : ShareProblem
 
-    /** 반으로 나누면 원이 남는다. 직접 나눠야 한다. */
+    /** 홀수 금액인데 결제자가 두 사람 밖이라 남는 1원을 줄 사람이 없다. 직접 나눠야 한다. */
     data object NotDivisible : ShareProblem
+
+    /** 1원은 두 사람이 나눌 수 없다(한 사람 몫이 0원). 한 사람 부담으로 정해야 한다. */
+    data object TooSmallToSplit : ShareProblem
 
     data object ExactInvalid : ShareProblem
 
@@ -95,8 +110,10 @@ data class ShareForm(
             ShareMode.Even -> {
                 val people = members.map { it.id }.filter { it in pair }
                 if (people.size != 2) return ShareResult.Invalid(ShareProblem.PairRequired)
-                val each = SharePlan.evenSplit(krw, 2) ?: return ShareResult.Invalid(ShareProblem.NotDivisible)
-                ShareResult.Valid(people.zip(each).map { (m, v) -> ShareLine(m, v) })
+                if (krw < 2) return ShareResult.Invalid(ShareProblem.TooSmallToSplit)
+                val payerIndex = people.indexOf(payer).takeIf { it >= 0 }
+                val split = SharePlan.pairSplit(krw, payerIndex) ?: return ShareResult.Invalid(ShareProblem.NotDivisible)
+                ShareResult.Valid(people.zip(split).map { (m, v) -> ShareLine(m, v) })
             }
 
             ShareMode.Exact -> {
@@ -116,7 +133,11 @@ data class ShareForm(
     }
 
     companion object {
-        /** 처음 열 때: 이미 포함한 지출이면 그 값, 아니면 결제자 미정·목록 앞 두 명 반씩. */
+        /**
+         * 처음 열 때: 이미 포함한 지출이면 그 값, 아니면 결제자 미정·목록 앞 두 명 반씩.
+         * 저장된 두 사람 몫이 반씩 규칙과 같을 때만 "둘이 반씩"으로 열고, 그 밖의 몫(예전에 직접 적은 홀수 몫 포함)은
+         * "직접 나누기"로 그대로 연다.
+         */
         fun of(
             expense: LedgerExpense,
             members: List<LedgerMember>,
@@ -137,7 +158,7 @@ data class ShareForm(
                             form.copy(mode = ShareMode.One, one = shares[0].member)
                         }
 
-                        shares.size == 2 && shares[0].krw == shares[1].krw -> {
+                        shares.size == 2 && isPairSplit(shares, expense.payer, members) -> {
                             form.copy(
                                 mode = ShareMode.Even,
                                 pair = shares.map { it.member }.toSet(),
@@ -150,6 +171,18 @@ data class ShareForm(
                     }.copy(exact = shares.associate { it.member to it.krw.toString() })
             }
             return form
+        }
+
+        private fun isPairSplit(
+            shares: List<ShareLine>,
+            payer: MemberId?,
+            members: List<LedgerMember>,
+        ): Boolean {
+            val people = members.map { it.id }.filter { id -> shares.any { it.member == id } }
+            if (people.size != 2) return false
+            val stored = people.map { id -> shares.first { it.member == id }.krw }
+            val payerIndex = people.indexOf(payer).takeIf { it >= 0 }
+            return SharePlan.pairSplit(stored.sum(), payerIndex) == stored
         }
     }
 }

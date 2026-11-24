@@ -189,7 +189,7 @@ struct ExpenseRow: View {
 }
 
 /// 방장 검토: 결제자, 원화(KRW는 그대로, 외화는 확인한 청구액), 부담(한 사람 · 둘이 반씩 · 직접 나누기)을 정하고
-/// 포함하거나 사유와 함께 보류한다. 반씩 나누어떨어지지 않으면 직접 나누게 한다(남는 원을 고르지 않는다).
+/// 포함하거나 사유와 함께 보류한다. 반씩은 홀수 금액이면 결제자가 1원을 더 부담하고, 결제자가 두 사람 밖이면 직접 나누게 한다.
 struct ExpenseReviewView: View {
   let expense: LedgerExpense
   let ledger: RoomLedger
@@ -280,7 +280,8 @@ struct ExpenseReviewView: View {
             .disabled(saving)
           }
           if let krw, case .success(let lines) = result {
-            Text("한 사람 \(Won.text(lines[0].krw)) · 합계 \(Won.text(krw))").textRole(.supporting)
+            Text(Self.evenSummary(lines, krw: krw, payer: form.payer, ledger: ledger))
+              .textRole(.supporting).accessibilityIdentifier("review-even-summary")
           }
         case .exact:
           ForEach(Array(ledger.members.enumerated()), id: \.element.id) { index, member in
@@ -354,12 +355,23 @@ struct ExpenseReviewView: View {
     case .krwMissing: return "실제 원화 청구액을 넣거나 보류해 주세요."
     case .personMissing: return "부담할 사람을 골라 주세요."
     case .pairRequired: return "반씩 나눌 두 사람을 골라 주세요."
-    case .notDivisible: return "반씩 나누면 1원이 남아요. 직접 나누기로 사람마다 금액을 적어 주세요."
+    case .notDivisible:
+      return "결제자가 두 사람 밖이라 남는 1원을 누가 낼지 정할 수 없어요. 직접 나누기로 사람마다 금액을 적어 주세요."
+    case .tooSmallToSplit: return "1원은 두 사람이 나눌 수 없어요. 한 사람으로 정해 주세요."
     case .exactInvalid: return "부담 금액은 원 단위 숫자로 적어 주세요."
     case .exactMismatch(let remaining):
       return remaining > 0
         ? "\(Won.text(remaining))이 남았어요. 합계가 원화와 같아야 해요." : "\(Won.text(-remaining)) 넘어요. 합계가 원화와 같아야 해요."
     }
+  }
+
+  /// 반씩 결과. 홀수 금액이면 결제자가 1원을 더 부담한다는 것과 사람마다 몫을 함께 보인다.
+  static func evenSummary(_ lines: [ShareLine], krw: Int, payer: MemberID?, ledger: RoomLedger) -> String {
+    guard lines.count == 2, lines[0].krw != lines[1].krw else {
+      return "한 사람 \(Won.text(lines[0].krw)) · 합계 \(Won.text(krw))"
+    }
+    let each = lines.map { "\(ledger.name(of: $0.member)) \(Won.text($0.krw))" }.joined(separator: " · ")
+    return "\(each) · 합계 \(Won.text(krw)). 남는 1원은 결제자(\(ledger.name(of: payer)))가 더 부담해요."
   }
 
   private func binding<T>(_ path: WritableKeyPath<ShareForm, T>) -> Binding<T> {

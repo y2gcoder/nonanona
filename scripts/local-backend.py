@@ -3,7 +3,7 @@
 
 사용(저장소 루트, mise 환경에서):
   python3 -I scripts/local-backend.py up            스택 시작 + reset
-  python3 -I scripts/local-backend.py reset         DB 초기화 → 가상 계정 → 가상 여행방·초대·정산 여행방 → 앱 설정 파일
+  python3 -I scripts/local-backend.py reset         DB 초기화 → 가상 계정 → 가상 여행방·초대·정산 여행방 → 기준환율 가상 시험값 → 앱 설정 파일
   python3 -I scripts/local-backend.py down          스택 정지 + 앱 설정 파일 삭제(앱은 테스트 모드로 돌아간다)
   python3 -I scripts/local-backend.py api-stop|api-start   API 게이트웨이만 멈추고 다시 띄운다(연결 실패 재현)
   python3 -I scripts/local-backend.py revoke-sessions      가상 회원 계정의 서버 세션을 지운다(세션 만료 재현)
@@ -130,8 +130,9 @@ def query(sql, log_name):
     return (RUN / f"{log_name}.log").read_text(encoding="utf-8")
 
 
-def reset():
-    supabase("db", "reset", log_name="db-reset")
+def reset(version=None):
+    """version을 주면 그 마이그레이션까지만 적용한다(업그레이드 검사용). 그때는 기준환율 가상 시험값을 넣지 않는다."""
+    supabase("db", "reset", *(["--version", version] if version else []), log_name="db-reset")
     env = status()
     log("migrations applied")
     member_password = secrets.token_urlsafe(24)
@@ -142,9 +143,18 @@ def reset():
     supabase("db", "query", "--file", str(FIXTURE), log_name="fixture")
     supabase("db", "query", "--file", str(SETTLEMENT_FIXTURE), log_name="fixture-settlement")
     log("synthetic trips (4, one settlement trip with both accounts) and invites (5) inserted")
+    if version is None:
+        load_fx_fixture()
     write_app_configs(env, member_password, host_password)
     write_private(RUN / "accounts.json", json.dumps({"host": [HOST[0], host_password], "member": [MEMBER[0], member_password]}))
     log("app configs written (gitignored): apps/android/local-backend.properties, apps/ios/Config/Local.xcconfig")
+
+
+def load_fx_fixture():
+    """기준환율 가상 시험값(시장 환율 아님, data_origin=fixture). ECOS 실제 값은 scripts/ecos-fx.py ingest로 따로 넣는다."""
+    r = subprocess.run([sys.executable, "-I", str(ROOT / "scripts" / "ecos-fx.py"), "fixture"], stdin=subprocess.DEVNULL)
+    if r.returncode != 0:
+        sys.exit("[local-backend] synthetic JPY reference rates failed to load")
 
 
 def gateway_container():

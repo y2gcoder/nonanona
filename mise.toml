@@ -149,6 +149,26 @@ run = "python3 -I scripts/local-backend.py reset"
 description = "정산 서버 계약 시험(실제 HTTP: 권한·재시도·동시성·오래된 버전·확정 불변). local:up 또는 local:reset 뒤. 실행마다 새 가상 여행방을 만든다. 인자: [결과 JSON]"
 run = "python3 -I scripts/settlement-contract.py"
 
+[tasks."local:fx-contract"]
+description = "엔화 원화 기준 계약 시험(실제 HTTP: ECOS 응답 원문 검사·as-of·고시값 갱신 충돌·승인·확정 고정·재현·권한). local:up 또는 local:reset 뒤. 가상 시험값만 쓴다. 인자: [결과 JSON]"
+run = "python3 -I scripts/fx-contract.py"
+
+[tasks."local:fx-upgrade"]
+description = "엔화 원화 기준 마이그레이션 업그레이드 검사: 앞 마이그레이션까지 되돌려 v1 확정본·검토 요청을 만든 뒤 새 마이그레이션을 올려 그대로인지 본다. 로컬 DB를 지우고 끝나면 local:reset 상태로 되돌린다. 인자: [결과 JSON]"
+run = "python3 -I scripts/fx-upgrade-check.py"
+
+[tasks."fx:fixture"]
+description = "기준환율 가상 시험값(시장 환율 아님, data_origin=fixture)을 로컬 DB에 넣는다. local:reset이 이미 넣는다"
+run = "python3 -I scripts/ecos-fx.py fixture"
+
+[tasks."fx:series"]
+description = "ECOS 731Y001/0000002(원/일본엔 100엔) 메타데이터 확인. ECOS_API_KEY 필요: op run --env-file=.env.tpl -- mise run fx:series"
+run = "python3 -I scripts/ecos-fx.py series"
+
+[tasks."fx:ingest"]
+description = "ECOS에서 원/일본엔(100엔) 일별 고시값을 받아 로컬 서버에 넣는다(data_origin=ecos_live). ECOS_API_KEY 필요(op run). 인자: <시작 YYYY-MM-DD> [<끝 YYYY-MM-DD>]"
+run = "python3 -I scripts/ecos-fx.py ingest"
+
 [tasks."e2e:settlement"]
 description = "두 기기 정산 E2E(로컬 Supabase 모드): 부팅한 iOS 시뮬레이터 하나 + 실행 중인 Android 에뮬레이터 하나. 한쪽이 가상 방장, 다른 쪽이 가상 회원으로 올리기·직접 입력 → 검토·보류 → 미리보기 → 오래된 revision 확정 거절 → 확정 → 다시 열어도 같은 확정본. local:up 뒤. 인자: <시뮬레이터 UDID> <방장 기기 ios|android> [증거 폴더]"
 run = "python3 -I scripts/e2e-settlement.py"

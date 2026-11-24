@@ -64,6 +64,22 @@ struct ReviewTarget: Hashable {
   let itemID: String
 }
 
+/// 지출 검토 위에 연 품목별 나누기: 여행방 지출(방장 검토)과, 그 지출을 이 기기에서 올린 확인한 영수증(안정 ID).
+struct ItemSplitTarget: Hashable {
+  let expense: ExpenseTarget
+  let receipt: ReviewTarget
+}
+
+/// 품목 이름 기기 번역 상태(영수증마다).
+enum ItemTranslationState: Equatable {
+  case checking
+  case available(ItemTranslationAvailability)
+  case translating
+  case translated(count: Int)
+  /// 번역하지 못했다(언어 없음·제공자 오류). 다시 시도하거나 이름을 직접 적는다.
+  case failed
+}
+
 enum JoinState: Equatable {
   case idle
   case joining
@@ -126,6 +142,15 @@ final class AppModel {
   private(set) var rowSummaries: [ReviewTarget: String] = [:]
   /// 확인할 사진을 다 보고 목록으로 돌아온 초안. 목록이 남은 상태를 알린다.
   private(set) var reviewFinished: Set<String> = []
+
+  /// 품목별 나누기 화면(지출 검토 위에 쌓인다). 품목 계획은 기기 안 초안 폴더에만 있다.
+  var itemSplit: ItemSplitTarget?
+  private(set) var itemPlans: [ReviewTarget: ItemPlan] = [:]
+  /// 품목 계획을 기기에 쓰지 못했다(가장 최근 저장의 결과).
+  private(set) var itemPlanSaveFailed: Set<ReviewTarget> = []
+  private(set) var itemTranslation: [ReviewTarget: ItemTranslationState] = [:]
+  private var itemPlanRevision = 0
+  private var itemPlanSettled: [ReviewTarget: Int] = [:]
 
   let graph: AppGraph
   /// 여행방 목록·장부·검토·송금표.
@@ -620,5 +645,122 @@ final class AppModel {
       }
       join = .failed(failure)
     }
+  }
+
+  // MARK: - 품목별 나누기(기기 안)
+
+  /// 이 지출을 이 기기에서 올렸다면 그 확인한 영수증. 장부의 사본 해시와 확인한 값(날짜·금액·통화)이 모두 같을 때만이다.
+  /// 품목 글자·사진은 이 기기에만 있으므로, 다른 기기에서 올린 지출은 품목으로 나눌 수 없다(nil).
+  func localReceipt(for expense: LedgerExpense) -> ReviewTarget? {
+    guard let sha = expense.artifact?.sha256 else { return nil }
+    for (draftID, manifest) in processing.sorted(by: { $0.key < $1.key }) {
+      for item in manifest.items where item.state == .confirmed {
+        guard let receipt = item.confirmed, receipt.artifactSHA256 == sha,
+          receipt.fields.amountMinor == expense.amountMinor, receipt.fields.currency == expense.currency,
+          receipt.fields.date == expense.date
+        else { continue }
+        return ReviewTarget(draftID: draftID, itemID: item.id)
+      }
+    }
+    return nil
+  }
+
+  func openItemSplit(_ expense: ExpenseTarget) {
+    guard let found = rooms.expense(expense), let receipt = localReceipt(for: found),
+      let processor = processors[receipt.draftID]
+    else { return }
+    Task {
+      // 화면에 있던(아직 쓰는 중일 수 있는) 입력을 디스크 값으로 덮지 않는다.
+      if itemPlans[receipt] == nil, let plan = try? await processor.itemPlan(receipt.itemID) {
+        itemPlans[receipt] = plan
+      }
+      itemSplit = ItemSplitTarget(expense: expense, receipt: receipt)
+      await checkTranslation(receipt)
+    }
+  }
+
+  func editItemPlan(_ target: ReviewTarget, _ change: (inout ItemPlan) -> Void) {
+    guard var plan = itemPlans[target], let processor = processors[target.draftID] else { return }
+    change(&plan)
+    itemPlans[target] = plan
+    saveItemPlan(target, plan, with: processor)
+  }
+
+  func retryItemPlanSave(_ target: ReviewTarget) {
+    guard let plan = itemPlans[target], let processor = processors[target.draftID] else { return }
+    saveItemPlan(target, plan, with: processor)
+  }
+
+  /// 검토 입력과 같은 방식: 순번을 붙여 쓰고, 실패 안내는 가장 최근 순번의 결과로만 바꾼다.
+  private func saveItemPlan(_ target: ReviewTarget, _ plan: ItemPlan, with processor: ReceiptProcessor) {
+    itemPlanRevision += 1
+    let revision = itemPlanRevision
+    Task {
+      let ok: Bool
+      do {
+        try await processor.saveItemPlan(target.itemID, plan, revision: revision)
+        ok = true
+      } catch {
+        ok = false
+      }
+      guard revision >= itemPlanSettled[target] ?? 0 else { return }
+      itemPlanSettled[target] = revision
+      if ok { itemPlanSaveFailed.remove(target) } else { itemPlanSaveFailed.insert(target) }
+    }
+  }
+
+  func checkTranslation(_ target: ReviewTarget) async {
+    itemTranslation[target] = .checking
+    itemTranslation[target] = .available(await graph.itemTranslator.availability())
+  }
+
+  /// 사용자가 적지 않은 이름만 기기 안에서 번역해 채운다. 실패하면 아무것도 바꾸지 않는다(다시 시도 또는 직접 입력).
+  func translateItemNames(_ target: ReviewTarget) async {
+    guard let plan = itemPlans[target], itemTranslation[target] != .translating else { return }
+    let lines = plan.lines.filter { !$0.originalName.isEmpty && $0.nameSource != .user }
+    guard !lines.isEmpty else {
+      itemTranslation[target] = .translated(count: 0)
+      return
+    }
+    itemTranslation[target] = .translating
+    let translator = graph.itemTranslator
+    do {
+      let names = try await translator.translate(lines.map(\.originalName))
+      guard names.count == lines.count else { throw ItemTranslationError.failed }
+      let byID = Dictionary(uniqueKeysWithValues: zip(lines.map(\.id), names))
+      editItemPlan(target) { $0.applyTranslations(byID, source: translator.source) }
+      itemTranslation[target] = .translated(count: names.filter { !$0.isEmpty }.count)
+    } catch {
+      itemTranslation[target] = .failed
+    }
+  }
+
+  /// 품목 계획과 방장이 고른 원화·결제자로 계산한 사람마다 몫. 화면이 열려 있는 동안 입력이 바뀌면 다시 계산한다.
+  func itemAllocation(_ split: ItemSplitTarget) -> Result<ItemAllocation, ItemAllocationProblem>? {
+    guard let plan = itemPlans[split.receipt], let expense = rooms.expense(split.expense),
+      let ledger = rooms.ledgers[split.expense.tripID], let form = rooms.forms[split.expense]
+    else { return nil }
+    return ItemAllocator.allocate(
+      plan: plan, krw: form.krw(for: expense), payer: form.payer?.value, members: ledger.members.map(\.id.value))
+  }
+
+  /// 계산한 몫을 지출 검토의 "직접 나누기"에 채우고 검토로 돌아간다. 서버에는 아무것도 보내지 않는다(방장이 "포함하기"를 눌러야 간다).
+  /// 나눠떨어지지 않으면 내림한 몫만 채워, 남은 원이 검토 화면에 그대로 보이고 방장이 누가 낼지 적는다.
+  func applyItemSplit(_ split: ItemSplitTarget) {
+    guard case .success(let allocation)? = itemAllocation(split), let ledger = rooms.ledgers[split.expense.tripID]
+    else { return }
+    let shares: [ItemMemberShare]
+    switch allocation {
+    case .exact(let s), .pairRule(let s): shares = s
+    case .remainder(let floors, _): shares = floors
+    }
+    rooms.editForm(split.expense) { form in
+      form.mode = .exact
+      form.exact = Dictionary(
+        uniqueKeysWithValues: ledger.members.map { member in
+          (member.id, shares.first { $0.member == member.id.value }.map { String($0.krw) } ?? "")
+        })
+    }
+    itemSplit = nil
   }
 }

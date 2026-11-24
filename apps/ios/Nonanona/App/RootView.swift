@@ -32,7 +32,7 @@ struct RootView: View {
           .navigationDestination(
             item: Binding(get: { model.rooms.reviewing }, set: { model.rooms.reviewing = $0 })
           ) { target in
-            ExpenseReviewDestination(rooms: model.rooms, target: target).id(target)
+            ExpenseReviewDestination(model: model, rooms: model.rooms, target: target).id(target)
           }
           .navigationDestination(
             item: Binding(get: { model.rooms.settlementShown }, set: { model.rooms.settlementShown = $0 })
@@ -168,6 +168,7 @@ private struct ReviewDestination: View {
 
 /// 지출 검토 목적지. 모델을 body에서 읽어 입력·저장 상태가 바뀌면 다시 그린다.
 private struct ExpenseReviewDestination: View {
+  @Bindable var model: AppModel
   @Bindable var rooms: RoomModel
   let target: ExpenseTarget
 
@@ -183,8 +184,45 @@ private struct ExpenseReviewDestination: View {
         onShowReceipt: { Task { await rooms.showReceipt(target) } },
         onHideReceipt: { rooms.hideReceipt(target) },
         onKeepEstimate: { Task { await rooms.keepEstimate(target) } },
-        onApplyEstimate: { Task { await rooms.applyNewEstimate(target) } })
+        onApplyEstimate: { Task { await rooms.applyNewEstimate(target) } },
+        itemSplitAvailable: model.localReceipt(for: expense) != nil,
+        onOpenItemSplit: { model.openItemSplit(target) }
+      )
+      // 지출 검토 위에 품목별 나누기(이 기기에서 올린 영수증만). 검토 화면에 붙여, 닫으면 검토로 돌아온다
+      // (뿌리 화면에 붙이면 닫을 때 검토까지 함께 닫힌다 — 시뮬레이터에서 재현).
+      .navigationDestination(item: $model.itemSplit) { split in
+        ItemSplitDestination(model: model, rooms: rooms, split: split).id(split)
+      }
     }
+  }
+}
+
+/// 품목별 나누기 목적지. 품목 계획(기기 안)과 방장 검토 입력(원화·결제자·구성원)을 body에서 읽어 바뀌면 다시 계산한다.
+private struct ItemSplitDestination: View {
+  @Bindable var model: AppModel
+  @Bindable var rooms: RoomModel
+  let split: ItemSplitTarget
+
+  var body: some View {
+    let ledger = rooms.ledgers[split.expense.tripID]
+    let expense = rooms.expense(split.expense)
+    let form = rooms.forms[split.expense]
+    ItemSplitView(
+      content: ItemSplitContent(
+        plan: model.itemPlans[split.receipt],
+        people: (ledger?.members ?? []).map { ItemSplitPerson(id: $0.id.value, name: $0.displayName) },
+        krw: expense.flatMap { form?.krw(for: $0) },
+        allocation: model.itemAllocation(split),
+        translation: model.itemTranslation[split.receipt],
+        translatorLabel: model.graph.itemTranslator.label,
+        translatorIsPreview: model.graph.itemTranslator.source == .preview,
+        saveFailed: model.itemPlanSaveFailed.contains(split.receipt)),
+      actions: ItemSplitActions(
+        edit: { model.editItemPlan(split.receipt, $0) },
+        retrySave: { model.retryItemPlanSave(split.receipt) },
+        translate: { Task { await model.translateItemNames(split.receipt) } },
+        recheckTranslation: { Task { await model.checkTranslation(split.receipt) } },
+        apply: { model.applyItemSplit(split) }))
   }
 }
 

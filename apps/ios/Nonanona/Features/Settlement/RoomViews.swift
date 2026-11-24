@@ -318,6 +318,9 @@ struct ExpenseReviewView: View {
   var onHideReceipt: () -> Void = {}
   var onKeepEstimate: () -> Void = {}
   var onApplyEstimate: () -> Void = {}
+  /// 이 지출을 이 기기에서 올려 영수증 품목(기기 안)으로 나눌 수 있다.
+  var itemSplitAvailable = false
+  var onOpenItemSplit: () -> Void = {}
 
   @State private var askingHoldReason = false
   static let holdReasons = ["원화 청구액 확인 대기", "결제 여부 불명확", "같은 지출일 수 있음"]
@@ -366,6 +369,25 @@ struct ExpenseReviewView: View {
       }
 
       KRWSection(expense: expense, form: form, saving: saving, edit: edit)
+
+      if expense.artifact != nil {
+        Section {
+          if itemSplitAvailable {
+            Button("영수증 품목으로 나누기", action: onOpenItemSplit)
+              .disabled(saving)
+              .accessibilityIdentifier("review-item-split")
+          } else {
+            Text("이 영수증은 다른 기기에서 올려 품목으로 나눌 수 없어요. 품목 글자는 올린 기기에만 있어요.")
+              .textRole(.supporting).foregroundStyle(.secondary)
+              .accessibilityIdentifier("review-item-split-unavailable")
+          }
+        } footer: {
+          if itemSplitAvailable {
+            Text("이 기기에 있는 품목으로 사람마다 몫을 계산해 \"직접 나누기\"에 채워요. 품목 이름은 올라가지 않아요.")
+              .textRole(.caption)
+          }
+        }
+      }
 
       Section {
         Picker("부담 방식", selection: binding(\.mode)) {

@@ -13,6 +13,8 @@ struct AppGraph: Sendable {
   let joinFlow: JoinFlow
   let recognizer: any ReceiptRecognizer
   let processingHooks: ProcessingHooks
+  /// 품목 이름 번역(기기 안). debug는 실행 환경 변수로 미리보기 대역을 고를 수 있다.
+  var itemTranslator: any ItemNameTranslator = AppleItemTranslator()
 
   static func live() -> AppGraph {
     let support = URL.applicationSupportDirectory
@@ -55,10 +57,19 @@ struct AppGraph: Sendable {
     #else
       let hooks = ProcessingHooks()
     #endif
+    #if DEBUG
+      // 시뮬레이터는 Apple Translation이 번역하지 않는다. 화면 흐름만 볼 때 정해 둔 사전(실제 번역 아님)을 쓴다.
+      let translationMode = ProcessInfo.processInfo.environment["NONANONA_ITEM_TRANSLATION"] ?? ""
+      let translator: any ItemNameTranslator =
+        translationMode.hasPrefix("preview")
+        ? PreviewItemTranslator(failOnce: translationMode == "preview-fail-once") : AppleItemTranslator()
+    #else
+      let translator: any ItemNameTranslator = AppleItemTranslator()
+    #endif
     return AppGraph(
       auth: auth, trips: trips, settlement: settlement, drafts: drafts,
       joinFlow: JoinFlow(auth: auth, trips: trips, pendingInvites: pending),
-      recognizer: VisionReceiptRecognizer(), processingHooks: hooks)
+      recognizer: VisionReceiptRecognizer(), processingHooks: hooks, itemTranslator: translator)
   }
 
   #if DEBUG

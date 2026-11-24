@@ -410,6 +410,9 @@ fun ExpenseReviewScreen(
     onHideReceipt: () -> Unit = {},
     onKeepEstimate: () -> Unit = {},
     onApplyEstimate: () -> Unit = {},
+    /** 이 지출을 이 기기에서 올려 영수증 품목(기기 안)으로 나눌 수 있다. */
+    itemSplitAvailable: Boolean = false,
+    onOpenItemSplit: () -> Unit = {},
 ) {
     var askingReason by rememberSaveable { mutableStateOf(false) }
     val saving = state == ReviewSaveState.Saving
@@ -478,6 +481,34 @@ fun ExpenseReviewScreen(
                 }
             }
             item { KrwSection(expense, form, saving, edit) }
+            if (expense.artifact != null) {
+                item {
+                    Column(
+                        Modifier.padding(horizontal = Spacing.m, vertical = Spacing.s),
+                        verticalArrangement = Arrangement.spacedBy(Spacing.xs),
+                    ) {
+                        if (itemSplitAvailable) {
+                            OutlinedButton(
+                                onClick = onOpenItemSplit,
+                                enabled = !saving,
+                                modifier = Modifier.fillMaxWidth().testTag("review_item_split"),
+                            ) { Text(stringResource(R.string.review_item_split)) }
+                            Text(
+                                stringResource(R.string.review_item_split_hint),
+                                style = TextRoles.supporting,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        } else {
+                            Text(
+                                stringResource(R.string.review_item_split_unavailable),
+                                style = TextRoles.supporting,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.testTag("review_item_split_unavailable"),
+                            )
+                        }
+                    }
+                }
+            }
             item {
                 Section(stringResource(R.string.review_share), null) {
                     val modes =

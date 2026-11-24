@@ -15,7 +15,13 @@ import app.nonanona.feature.receiptimport.AllowedReceiptFields
 import app.nonanona.feature.receiptimport.BoundaryViolation
 import app.nonanona.feature.receiptimport.DraftSource
 import app.nonanona.feature.receiptimport.FieldProblem
+import app.nonanona.feature.receiptimport.ItemAllocation
+import app.nonanona.feature.receiptimport.ItemAllocationResult
+import app.nonanona.feature.receiptimport.ItemAllocator
+import app.nonanona.feature.receiptimport.ItemPlan
+import app.nonanona.feature.receiptimport.ItemPlanLine
 import app.nonanona.feature.receiptimport.ItemState
+import app.nonanona.feature.receiptimport.ItemTranslationAvailability
 import app.nonanona.feature.receiptimport.MaskPreview
 import app.nonanona.feature.receiptimport.MaskRegion
 import app.nonanona.feature.receiptimport.OcrProposal
@@ -35,8 +41,11 @@ import app.nonanona.feature.receiptimport.incomingPhoto
 import app.nonanona.feature.receiptimport.nextToReview
 import app.nonanona.feature.receiptimport.sharedImageUris
 import app.nonanona.feature.settlement.ExpenseTarget
+import app.nonanona.feature.settlement.LedgerExpense
 import app.nonanona.feature.settlement.ReceiptContext
 import app.nonanona.feature.settlement.RoomController
+import app.nonanona.feature.settlement.RoomUiState
+import app.nonanona.feature.settlement.ShareMode
 import app.nonanona.feature.trip.InviteAcceptFailure
 import app.nonanona.feature.trip.InviteCode
 import app.nonanona.feature.trip.JoinState
@@ -85,6 +94,30 @@ sealed interface Route {
     data class Settlement(
         val trip: TripId,
     ) : Route
+
+    /** 지출 검토 위의 품목별 나누기: 여행방 지출과, 그 지출을 이 기기에서 올린 확인한 영수증(안정 ID). 세 번째 칸에 쌓인다. */
+    data class ItemSplit(
+        val target: ExpenseTarget,
+        val receipt: Receipt,
+    ) : Route
+}
+
+/** 품목 이름 기기 번역 상태(영수증마다). */
+sealed interface ItemTranslationState {
+    data object Checking : ItemTranslationState
+
+    data class Available(
+        val availability: ItemTranslationAvailability,
+    ) : ItemTranslationState
+
+    data object Translating : ItemTranslationState
+
+    data class Translated(
+        val count: Int,
+    ) : ItemTranslationState
+
+    /** 번역하지 못했다(언어 없음·서비스 오류). 다시 시도하거나 이름을 직접 적는다. */
+    data object Failed : ItemTranslationState
 }
 
 sealed interface UploadState {
@@ -179,7 +212,30 @@ data class AppUiState(
     val draftSaveFailed: Set<Route.Receipt> = emptySet(),
     /** "확인하고 다음"이 디스크에 확인을 남기지 못한 사진. 확인되지 않았고 입력·선택은 그대로다. */
     val confirmFailed: Set<Route.Receipt> = emptySet(),
+    /** 품목별 나누기 계획(기기 안 초안 폴더에만 있다), 저장 실패, 번역 상태. 키는 확인한 영수증. */
+    val itemPlans: Map<Route.Receipt, ItemPlan> = emptyMap(),
+    val itemPlanSaveFailed: Set<Route.Receipt> = emptySet(),
+    val itemTranslation: Map<Route.Receipt, ItemTranslationState> = emptyMap(),
 ) {
+    /**
+     * 이 지출을 이 기기에서 올렸다면 그 확인한 영수증. 장부의 사본 해시와 확인한 값(날짜·금액·통화)이 모두 같을 때만이다.
+     * 품목 글자·사진은 이 기기에만 있으므로, 다른 기기에서 올린 지출은 품목으로 나눌 수 없다(null).
+     */
+    fun localReceipt(expense: LedgerExpense): Route.Receipt? {
+        val sha = expense.artifact?.sha256 ?: return null
+        for ((draftId, manifest) in processing.toSortedMap()) {
+            val item =
+                manifest.items.firstOrNull {
+                    val r = it.confirmed
+                    it.state == ItemState.Confirmed && r != null && r.artifactSha256 == sha &&
+                        r.fields.amountMinor == expense.amountMinor && r.fields.currency == expense.currency &&
+                        r.fields.date == expense.date
+                } ?: continue
+            return Route.Receipt(draftId, item.id)
+        }
+        return null
+    }
+
     /** 올릴 수 있는 영수증: 확인했고 가린 사본이 있는 것. 직접 입력(사본 없음)은 이번 단계에서 올리지 않는다. */
     fun confirmedCount(draftId: String): Int =
         processing[draftId]?.items?.count { it.state == ItemState.Confirmed && it.confirmed?.isManualEntry == false } ?: 0
@@ -807,6 +863,131 @@ class AppViewModel(
         viewModelScope.launch { runCatching { action.confirm(processor, itemId) } }
     }
 
+    // 품목별 나누기(기기 안)
+
+    fun openItemSplit(target: ExpenseTarget) {
+        val expense = rooms.state.value.expense(target) ?: return
+        val receipt = state.value.localReceipt(expense) ?: return
+        val processor = processors[receipt.draftId] ?: return
+        viewModelScope.launch {
+            // 화면에 있던(아직 쓰는 중일 수 있는) 입력을 디스크 값으로 덮지 않는다.
+            if (receipt !in state.value.itemPlans) {
+                runCatching { processor.itemPlan(receipt.itemId) }.getOrNull()?.let { plan ->
+                    mutableState.update { if (receipt in it.itemPlans) it else it.copy(itemPlans = it.itemPlans + (receipt to plan)) }
+                }
+            }
+            showOnly(Route.Home, Route.Room, Route.Expense(target), Route.ItemSplit(target, receipt))
+            checkTranslation(receipt)
+        }
+    }
+
+    fun editItemPlan(
+        receipt: Route.Receipt,
+        change: (ItemPlan) -> ItemPlan,
+    ) {
+        val processor = processors[receipt.draftId] ?: return
+        var next: ItemPlan? = null
+        mutableState.update { s ->
+            val plan = s.itemPlans[receipt] ?: return@update s
+            change(plan).also { next = it }.let { s.copy(itemPlans = s.itemPlans + (receipt to it)) }
+        }
+        next?.let { saveItemPlan(receipt, it, processor) }
+    }
+
+    fun retryItemPlanSave(receipt: Route.Receipt) {
+        val processor = processors[receipt.draftId] ?: return
+        val plan = state.value.itemPlans[receipt] ?: return
+        saveItemPlan(receipt, plan, processor)
+    }
+
+    private var itemPlanRevision = 0L
+    private val itemPlanSettled = mutableMapOf<Route.Receipt, Long>()
+
+    /** 검토 입력과 같은 방식: 순번을 붙여 쓰고, 실패 안내는 가장 최근 순번의 결과로만 바꾼다. */
+    private fun saveItemPlan(
+        receipt: Route.Receipt,
+        plan: ItemPlan,
+        processor: ReceiptProcessor,
+    ) {
+        val revision = ++itemPlanRevision
+        viewModelScope.launch {
+            val ok = runCatching { processor.saveItemPlan(receipt.itemId, plan, revision) }.isSuccess
+            if (revision < (itemPlanSettled[receipt] ?: 0)) return@launch
+            itemPlanSettled[receipt] = revision
+            mutableState.update {
+                it.copy(itemPlanSaveFailed = if (ok) it.itemPlanSaveFailed - receipt else it.itemPlanSaveFailed + receipt)
+            }
+        }
+    }
+
+    private fun setTranslation(
+        receipt: Route.Receipt,
+        value: ItemTranslationState,
+    ) = mutableState.update { it.copy(itemTranslation = it.itemTranslation + (receipt to value)) }
+
+    fun checkTranslation(receipt: Route.Receipt) {
+        setTranslation(receipt, ItemTranslationState.Checking)
+        viewModelScope.launch { setTranslation(receipt, ItemTranslationState.Available(graph.itemTranslator.availability())) }
+    }
+
+    /** 사용자가 적지 않은 이름만 기기 안에서 번역해 채운다. 실패하면 아무것도 바꾸지 않는다(다시 시도 또는 직접 입력). */
+    fun translateItemNames(receipt: Route.Receipt) {
+        val plan = state.value.itemPlans[receipt] ?: return
+        if (state.value.itemTranslation[receipt] == ItemTranslationState.Translating) return
+        val lines = plan.lines.filter { it.originalName.isNotEmpty() && it.nameSource != ItemPlanLine.NameSource.User }
+        if (lines.isEmpty()) return setTranslation(receipt, ItemTranslationState.Translated(0))
+        setTranslation(receipt, ItemTranslationState.Translating)
+        val translator = graph.itemTranslator
+        viewModelScope.launch {
+            val names = runCatching { translator.translate(lines.map { it.originalName }) }.getOrNull()
+            if (names == null || names.size != lines.size) return@launch setTranslation(receipt, ItemTranslationState.Failed)
+            val byId = lines.map { it.id }.zip(names).toMap()
+            editItemPlan(receipt) { it.applyTranslations(byId, translator.source) }
+            setTranslation(receipt, ItemTranslationState.Translated(names.count { it.isNotEmpty() }))
+        }
+    }
+
+    /** 언어를 받거나 관리하는 시스템 화면(기기 번역 서비스가 주면). */
+    fun translationSettings() = graph.itemTranslator.settingsIntent()
+
+    val itemTranslatorIsPreview: Boolean get() = graph.itemTranslator.source == ItemPlanLine.NameSource.Preview
+
+    /** 품목 계획과 방장이 고른 원화·결제자로 계산한 사람마다 몫. */
+    fun itemAllocation(
+        split: Route.ItemSplit,
+        app: AppUiState,
+        room: RoomUiState,
+    ): ItemAllocationResult? {
+        val plan = app.itemPlans[split.receipt] ?: return null
+        val expense = room.expense(split.target) ?: return null
+        val ledger = room.ledgers[split.target.tripId] ?: return null
+        val form = room.forms[split.target] ?: return null
+        return ItemAllocator.allocate(plan, form.krw(expense), form.payer?.value, ledger.members.map { it.id.value })
+    }
+
+    /**
+     * 계산한 몫을 지출 검토의 "직접 나누기"에 채우고 검토로 돌아간다. 서버에는 아무것도 보내지 않는다(방장이 "포함하기"를 눌러야 간다).
+     * 나눠떨어지지 않으면 내림한 몫만 채워, 남은 원이 검토 화면에 그대로 보이고 방장이 누가 낼지 적는다.
+     */
+    fun applyItemSplit(split: Route.ItemSplit) {
+        val room = rooms.state.value
+        val allocation = itemAllocation(split, state.value, room)?.allocation ?: return
+        val ledger = room.ledgers[split.target.tripId] ?: return
+        val shares =
+            when (allocation) {
+                is ItemAllocation.Exact -> allocation.shares
+                is ItemAllocation.PairRule -> allocation.shares
+                is ItemAllocation.Remainder -> allocation.floors
+            }
+        rooms.editForm(split.target) { form ->
+            form.copy(
+                mode = ShareMode.Exact,
+                exact = ledger.members.associate { m -> m.id to (shares.firstOrNull { it.member == m.id.value }?.krw?.toString() ?: "") },
+            )
+        }
+        if (backStack.lastOrNull() == split) back()
+    }
+
     /** 목록(홈)에서 고른 화면을 연다. 넓은 창에서는 목록 옆의 상세를 바꾸고, 좁은 창에서는 홈 위에 쌓는다. */
     fun openDetail(route: Route) = showOnly(Route.Home, route)
 
@@ -897,7 +1078,15 @@ class AppViewModel(
     }
 
     /** 검토 화면을 떠나면(다른 지출 포함) 그 화면에서 연 가림 사본을 지운다. */
-    private fun keepReceiptOnlyForTop() = rooms.clearReceipts(keep = (backStack.lastOrNull() as? Route.Expense)?.target)
+    private fun keepReceiptOnlyForTop() =
+        rooms.clearReceipts(
+            keep =
+                when (val top = backStack.lastOrNull()) {
+                    is Route.Expense -> top.target
+                    is Route.ItemSplit -> top.target
+                    else -> null
+                },
+        )
 
     private suspend fun <T> io(block: suspend () -> T): T = withContext(Dispatchers.IO) { block() }
 

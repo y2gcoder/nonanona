@@ -21,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -237,8 +238,37 @@ fun NonanonaApp(viewModel: AppViewModel) {
                             onHideReceipt = { viewModel.rooms.hideReceipt(target) },
                             onKeepEstimate = { viewModel.rooms.keepEstimate(target) },
                             onApplyEstimate = { viewModel.rooms.applyNewEstimate(target) },
+                            itemSplitAvailable = state.localReceipt(expense) != null,
+                            onOpenItemSplit = { viewModel.openItemSplit(target) },
                         )
                     }
+                }
+                // 지출 검토 위의 품목별 나누기(이 기기에서 올린 영수증만). 세 번째 칸에 쌓인다.
+                entry<Route.ItemSplit>(metadata = ListDetailSceneStrategy.extraPane()) { route ->
+                    val ledger = rooms.ledgers[route.target.tripId]
+                    val expense = rooms.expense(route.target)
+                    val form = rooms.forms[route.target]
+                    val context = LocalContext.current
+                    val settings = viewModel.translationSettings()
+                    ItemSplitScreen(
+                        plan = state.itemPlans[route.receipt],
+                        people = ledger?.members.orEmpty().map { ItemSplitPerson(it.id.value, it.displayName) },
+                        krw = if (expense != null && form != null) form.krw(expense) else null,
+                        allocation = viewModel.itemAllocation(route, state, rooms),
+                        translation = state.itemTranslation[route.receipt],
+                        translatorIsPreview = viewModel.itemTranslatorIsPreview,
+                        hasTranslationSettings = settings != null,
+                        saveFailed = route.receipt in state.itemPlanSaveFailed,
+                        edit = { change -> viewModel.editItemPlan(route.receipt, change) },
+                        onRetrySave = { viewModel.retryItemPlanSave(route.receipt) },
+                        onTranslate = { viewModel.translateItemNames(route.receipt) },
+                        onOpenTranslationSettings = {
+                            runCatching { settings?.send(context, 0, null) }
+                            viewModel.checkTranslation(route.receipt)
+                        },
+                        onApply = { viewModel.applyItemSplit(route) },
+                        onBack = viewModel::back.takeUnless { twoPane },
+                    )
                 }
                 entry<Route.Settlement>(metadata = ListDetailSceneStrategy.extraPane()) { route ->
                     SettlementScreen(

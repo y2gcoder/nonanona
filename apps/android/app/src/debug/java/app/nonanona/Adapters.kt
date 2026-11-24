@@ -8,6 +8,7 @@ import app.nonanona.localbackend.LocalBackendConfig
 import app.nonanona.localbackend.LocalSettlementGateway
 import app.nonanona.localbackend.LocalSupabaseSession
 import app.nonanona.localbackend.LocalTripGateway
+import app.nonanona.testing.PreviewItemTranslator
 import app.nonanona.testing.TestAuthGateway
 import app.nonanona.testing.TestTripGateway
 import java.io.File
@@ -37,6 +38,7 @@ internal fun createAdapters(context: Context): Adapters {
             debugUploadUi = DebugUploadSection,
             debugReceiptConfirm = confirmWithSuggestions(context),
             writeFault = writeFault(context),
+            itemTranslator = itemTranslator(context),
         )
     }
     val auth =
@@ -51,8 +53,21 @@ internal fun createAdapters(context: Context): Adapters {
         debugReceiptConfirm = confirmWithSuggestions(context),
         debugUploadUi = DebugUploadSection,
         writeFault = writeFault(context),
+        itemTranslator = itemTranslator(context),
     )
 }
+
+/**
+ * 검증용: files/debug-processing.properties의 itemTranslation=preview(또는 preview-fail-once)면 미리보기 대역(정해 둔 사전,
+ * 실제 번역 아님)을 쓴다. 없으면 기기 번역 서비스(null).
+ */
+private fun itemTranslator(context: Context) =
+    debugValue(context, "itemTranslation")?.takeIf { it.startsWith("preview") }?.let {
+        PreviewItemTranslator(
+            failOnce =
+                it == "preview-fail-once",
+        )
+    }
 
 /**
  * 검증용 저장 실패 주입: files/receipt-import/debug-fail-writes에 적힌 경로 조각(줄마다, 예: processing.json, reviews/)이

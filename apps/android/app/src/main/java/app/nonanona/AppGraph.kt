@@ -5,12 +5,14 @@ import android.content.Context
 import androidx.compose.runtime.Composable
 import app.nonanona.feature.account.AuthGateway
 import app.nonanona.feature.receiptimport.CanvasReceiptFlattener
+import app.nonanona.feature.receiptimport.ItemNameTranslator
 import app.nonanona.feature.receiptimport.MlKitReceiptRecognizer
 import app.nonanona.feature.receiptimport.ProcessingHooks
 import app.nonanona.feature.receiptimport.ReceiptDraftStore
 import app.nonanona.feature.receiptimport.ReceiptFlattener
 import app.nonanona.feature.receiptimport.ReceiptProcessor
 import app.nonanona.feature.receiptimport.ReceiptRecognizer
+import app.nonanona.feature.receiptimport.platformItemTranslator
 import app.nonanona.feature.settlement.SettlementGateway
 import app.nonanona.feature.settlement.UnavailableSettlementGateway
 import app.nonanona.feature.trip.TripGateway
@@ -31,6 +33,8 @@ class Adapters(
     val debugUploadUi: DebugUploadUi? = null,
     /** 검증용 저장 실패 주입. release는 null. */
     val writeFault: ((File) -> Boolean)? = null,
+    /** 품목 이름 번역. null이면 기기 번역 서비스(release와 debug 기본값). debug는 미리보기 대역을 고를 수 있다. */
+    val itemTranslator: ItemNameTranslator? = null,
 )
 
 /** 초안 화면이 개발용 올리기 화면에 넘기는 값. */
@@ -86,6 +90,9 @@ class AppGraph(
     /** ML Kit 번들 일본어 모델. 처음 쓸 때 만든다. */
     val recognizer: ReceiptRecognizer by lazy { MlKitReceiptRecognizer() }
     val flattener: ReceiptFlattener = CanvasReceiptFlattener
+
+    /** 품목 이름 번역(기기 안). */
+    val itemTranslator: ItemNameTranslator = adapters.itemTranslator ?: platformItemTranslator(appContext)
     val joinFlow =
         JoinFlow(
             auth = adapters.auth,

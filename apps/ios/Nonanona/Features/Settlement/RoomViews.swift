@@ -521,7 +521,6 @@ struct KRWSection: View {
             .accessibilityIdentifier("review-estimate-synthetic")
         }
       }
-      .accessibilityElement(children: .combine)
     } else {
       Text(unavailableText).textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("review-estimate-none")
     }

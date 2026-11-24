@@ -260,6 +260,156 @@ final class SettlementUITests: XCTestCase {
     expectFinal("ios-settlement-host-final")
   }
 
+  // MARK: - 엔화 원화 기준(ADR-0008, scripts/e2e-fx.py)
+  // 가상 시험 환율(시장 환율 아님): 11-02 905.25(11-03은 고시 없음), 11-04 903.60 → 스크립트가 904.20으로 정정.
+
+  /// 기준환율 예상: 지출일(11-03)에 고시가 없어 그 전 고시일(11-02) 값을 쓰고, 예상·가상 시험값으로 표시한다.
+  func testF1_EstimateWithFallbackAndSyntheticLabel() throws {
+    app.activate()
+    goHome()
+    loginFromHome()
+    openTrip()
+    refreshRoom()
+    XCTAssertTrue(app.descendants(matching: .any)["room-pending"].waitForExistence(timeout: 15))
+    openExpense(matching: "1,276 JPY")
+    pickPayer("다라")
+    pickKRWSource("기준환율 예상")
+    XCTAssertEqual(scrollTo(app.staticTexts["review-estimate-krw"]).label, "예상 금액 11,551원")
+    XCTAssertEqual(
+      scrollTo(app.staticTexts["review-estimate-quote"]).label,
+      "한국은행 ECOS 원/일본엔(100엔) · 2026-11-02 고시 · 100엔당 905.25원")
+    XCTAssertEqual(
+      scrollTo(app.staticTexts["review-estimate-fallback"]).label,
+      "지출일(2026-11-03)에 고시가 없어 그 전 가장 최근 고시일 값이에요.")
+    XCTAssertEqual(scrollTo(app.staticTexts["review-estimate-synthetic"]).label, "가상 시험 환율 · 시장 환율 아님")
+    XCTAssertEqual(
+      scrollTo(app.staticTexts["review-even-summary"]).label,
+      "다라 5,776원 · 가나 5,775원 · 합계 11,551원. 남는 1원은 결제자(다라)가 더 부담해요.")
+    snapshot("ios-fx-review-estimate")
+    scrollTo(app.buttons["review-include"]).tap()
+    XCTAssertTrue(app.descendants(matching: .any)["room-screen"].waitForExistence(timeout: 15))
+  }
+
+  /// 예상 금액을 본 채로 둔다. 스크립트가 그사이 그 지출일 고시값을 정정한다.
+  func testF2a_OpenEstimateBeforeQuoteCorrection() throws {
+    app.activate()
+    openExpense(matching: "1,500 JPY")
+    pickPayer("다라")
+    pickKRWSource("기준환율 예상")
+    XCTAssertEqual(scrollTo(app.staticTexts["review-estimate-krw"]).label, "예상 금액 13,554원")
+    XCTAssertTrue(app.staticTexts["review-estimate-quote"].label.hasSuffix("2026-11-04 고시 · 100엔당 903.60원"))
+    XCTAssertFalse(app.staticTexts["review-estimate-fallback"].exists)
+    snapshot("ios-fx-review-before-correction")
+  }
+
+  /// 옛 고시값으로 저장하면 서버가 거절하고(quoteChanged), 새 예상 금액으로 다시 채운 뒤 다시 저장한다.
+  func testF2b_IncludeAfterCorrectionShowsNewEstimate() throws {
+    app.activate()
+    scrollTo(app.buttons["review-include"]).tap()
+    let failure = app.staticTexts["review-failure"]
+    XCTAssertTrue(failure.waitForExistence(timeout: 15))
+    XCTAssertEqual(failure.label, "기준환율 고시값이 새로 들어와 예상 금액이 바뀌었어요. 새 금액을 확인하고 다시 저장해 주세요.")
+    XCTAssertEqual(scrollTo(app.staticTexts["review-estimate-krw"]).label, "예상 금액 13,563원")
+    XCTAssertTrue(app.staticTexts["review-estimate-quote"].label.hasSuffix("2026-11-04 고시 · 100엔당 904.20원"))
+    XCTAssertEqual(
+      scrollTo(app.staticTexts["review-even-summary"]).label,
+      "다라 6,782원 · 가나 6,781원 · 합계 13,563원. 남는 1원은 결제자(다라)가 더 부담해요.")
+    snapshot("ios-fx-review-quote-changed")
+    scrollTo(app.buttons["review-include"]).tap()
+    XCTAssertTrue(app.descendants(matching: .any)["room-screen"].waitForExistence(timeout: 15))
+  }
+
+  /// 환전 원가: 8,000엔 × 95,000원 ÷ 10,000엔 = 76,000원.
+  func testF3_AcquisitionCost() throws {
+    app.activate()
+    openExpense(matching: "8,000 JPY")
+    pickPayer("다라")
+    pickKRWSource("환전 원가")
+    replaceText(app.textFields["review-acq-krw"], "95000")
+    replaceText(app.textFields["review-acq-foreign"], "10000")
+    dismissKeyboard()
+    XCTAssertEqual(
+      scrollTo(app.staticTexts["review-acq-result"]).label,
+      "8,000 JPY × 95,000원 ÷ 10,000 JPY = 76,000원 (원 단위 반올림)")
+    XCTAssertEqual(scrollTo(app.staticTexts["review-even-summary"]).label, "한 사람 38,000원 · 합계 76,000원")
+    snapshot("ios-fx-review-acquisition")
+    scrollTo(app.buttons["review-include"]).tap()
+    XCTAssertTrue(app.descendants(matching: .any)["room-screen"].waitForExistence(timeout: 15))
+  }
+
+  /// 아직 확인하지 못한 날짜: 예상 금액이 없고 포함할 수 없다. 보류한다.
+  func testF4_UndeterminedDateHolds() throws {
+    app.activate()
+    openExpense(matching: "2,000 JPY")
+    pickPayer("다라")
+    pickKRWSource("기준환율 예상")
+    XCTAssertEqual(
+      scrollTo(app.staticTexts["review-estimate-none"]).label,
+      "이 날짜의 기준환율을 아직 확인하지 못했어요. 실제 청구액·환전 원가를 쓰거나 보류해 주세요.")
+    XCTAssertEqual(
+      scrollTo(app.staticTexts["review-share-problem"]).label, "쓸 수 있는 기준환율이 없어요. 다른 기준을 고르거나 보류해 주세요.")
+    XCTAssertFalse(scrollTo(app.buttons["review-include"]).isEnabled)
+    snapshot("ios-fx-review-undetermined")
+    hold(reason: "원화 청구액 확인 대기")
+    XCTAssertTrue(app.descendants(matching: .any)["room-screen"].waitForExistence(timeout: 15))
+    XCTAssertFalse(app.descendants(matching: .any)["room-pending"].exists)
+    let estimateRow = app.buttons.matching(
+      NSPredicate(format: "identifier BEGINSWITH 'expense-' AND label CONTAINS '1,276 JPY'")
+    ).firstMatch
+    XCTAssertTrue(scrollTo(estimateRow).label.contains("예상 금액 11,551원"), estimateRow.label)
+    XCTAssertTrue(estimateRow.label.contains("가상 시험 환율 · 시장 환율 아님"), estimateRow.label)
+    snapshot("ios-fx-ledger")
+  }
+
+  /// 미리보기: 예상 금액 합계와 원화 환산 근거. 그대로 확정한다.
+  func testF5_PreviewShowsEstimatedPartThenFinalize() throws {
+    app.activate()
+    scrollTo(app.buttons["open-settlement"]).tap()
+    XCTAssertTrue(app.descendants(matching: .any)["transfer-1"].waitForExistence(timeout: 15))
+    expectFXTotals()
+    snapshot("ios-fx-preview")
+    let finalize = app.buttons["settlement-finalize"]
+    scrollTo(finalize).tap()
+    XCTAssertTrue(app.alerts.buttons["확정"].firstMatch.waitForExistence(timeout: 5))
+    app.alerts.buttons["확정"].firstMatch.tap()
+    // 목록이 아래로 넘어가 있어 맨 위 상태 줄은 그려지지 않았을 수 있다. 화면 제목으로 확정본을 확인한다.
+    XCTAssertTrue(app.navigationBars["확정된 송금표"].waitForExistence(timeout: 20))
+  }
+
+  /// 확정본: 스크립트가 확정 뒤 고시값을 다시 바꾸고 앱을 다시 연 뒤에도 같은 값과 근거를 보인다.
+  func testF6_FinalKeepsFrozenEstimates() throws {
+    app.activate()
+    goHome()
+    openTrip()
+    refreshRoom()
+    XCTAssertTrue(app.descendants(matching: .any)["room-finalized"].waitForExistence(timeout: 20))
+    scrollTo(app.buttons["open-settlement"]).tap()
+    let id = app.staticTexts["settlement-final-id"]
+    XCTAssertTrue(id.waitForExistence(timeout: 20))
+    XCTAssertTrue(id.label.hasPrefix("확정 번호 \(env["FINAL_ID_PREFIX"] ?? "?")"), id.label)
+    expectFXTotals()
+    XCTAssertFalse(app.buttons["settlement-finalize"].exists)
+    snapshot("ios-fx-final")
+  }
+
+  private func expectFXTotals() {
+    XCTAssertEqual(app.descendants(matching: .any)["transfer-1"].label, "가나 → 다라, 50,556원")
+    XCTAssertEqual(app.descendants(matching: .any)["settlement-total"].label, "함께 쓴 돈, 101,114원")
+    XCTAssertEqual(app.descendants(matching: .any)["settlement-estimated"].label, "이 중 예상 금액(기준환율), 25,114원")
+    let first = scrollTo(app.descendants(matching: .any)["converted-1"]).label
+    XCTAssertTrue(first.contains("예상 금액 11,551원") && first.contains("2026-11-02 고시 · 100엔당 905.25원"), first)
+    XCTAssertTrue(first.contains("가상 시험 환율 · 시장 환율 아님") && first.contains("실제 청구액이 아니에요"), first)
+    let second = scrollTo(app.descendants(matching: .any)["converted-2"]).label
+    XCTAssertTrue(second.contains("예상 금액 13,563원") && second.contains("100엔당 904.20원"), second)
+    let third = scrollTo(app.descendants(matching: .any)["converted-3"]).label
+    XCTAssertTrue(third.contains("환전 원가 76,000원") && third.contains("95,000원에 10,000 JPY"), third)
+    XCTAssertTrue(scrollTo(app.descendants(matching: .any)["excluded-1"]).label.contains("보류: 원화 청구액 확인 대기"))
+  }
+
+  private func pickKRWSource(_ label: String) {
+    scrollTo(app.segmentedControls["review-krw-source"]).buttons[label].tap()
+  }
+
   // MARK: - 도우미
 
   private func expectFinal(_ shot: String) {

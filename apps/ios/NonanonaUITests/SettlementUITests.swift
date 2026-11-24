@@ -392,6 +392,140 @@ final class SettlementUITests: XCTestCase {
     snapshot("ios-fx-final")
   }
 
+  // MARK: - 기준환율 정정(ADR-0009, scripts/e2e-fx-correction.py)
+  // 스크립트가 가상 회원으로 엔화 3건을 올리고 가상 방장 계정으로 예상액을 포함(같은 RPC)한다: 2,000엔(10-20, 909.35 → 18,187원),
+  // 1,500엔(11-04, 903.60 → 13,554원), 1,000엔(11-06, 904.40 → 9,044원). 단계 사이에 가상 시험 환율을 정정한다.
+
+  /// 정정 전: 결정할 지출이 없고 확정할 수 있다. 스크립트가 이 미리보기를 연 채로 세 날짜를 정정한다.
+  func testX1_PreviewReadyBeforeCorrection() throws {
+    app.activate()
+    goHome()
+    loginFromHome()
+    openTrip()
+    refreshRoom()
+    XCTAssertFalse(app.descendants(matching: .any)["room-fx-correction"].exists)
+    scrollTo(app.buttons["open-settlement"]).tap()
+    XCTAssertTrue(app.descendants(matching: .any)["transfer-1"].waitForExistence(timeout: 15))
+    XCTAssertFalse(app.staticTexts["settlement-fx-blocked"].exists)
+    XCTAssertTrue(scrollTo(app.buttons["settlement-finalize"]).isEnabled)
+    snapshot("ios-fxc-preview-before")
+  }
+
+  /// 본 미리보기로 확정하면 서버가 거절한다(revision은 같고 고시값만 정정됨). 결정이 필요한 지출 3건이 보이고, 1,500엔을
+  /// 눌러 고정값과 새 값을 기준·기준일·금액으로 비교한 뒤 고정 금액 유지를 고른다.
+  func testX2_FinalizeBlockedThenKeepPinned() throws {
+    app.activate()
+    scrollTo(app.buttons["settlement-finalize"]).tap()
+    XCTAssertTrue(app.alerts.buttons["확정"].firstMatch.waitForExistence(timeout: 5))
+    app.alerts.buttons["확정"].firstMatch.tap()
+    let first = app.buttons["settlement-fx-1"]
+    XCTAssertTrue(first.waitForExistence(timeout: 20))
+    XCTAssertEqual(
+      scrollTo(app.staticTexts["settlement-failure"]).label,
+      "기준환율이 정정된 예상 금액이 있어 확정하지 않았어요. 지출마다 고정 금액 유지나 새 예상 금액 적용을 골라 주세요.")
+    XCTAssertEqual(
+      app.staticTexts["settlement-fx-blocked"].label, "기준환율이 정정된 예상 금액 3건이 있어 확정할 수 없어요.")
+    XCTAssertTrue(scrollTo(first).label.contains("고정 18,187원 · 쓸 고시값 없음"), first.label)
+    let second = scrollTo(app.buttons["settlement-fx-2"])
+    XCTAssertTrue(second.label.contains("1,500 JPY") && second.label.contains("고정 13,554원 → 새 13,563원"), second.label)
+    let third = scrollTo(app.buttons["settlement-fx-3"])
+    XCTAssertTrue(third.label.contains("고정 9,044원 → 새 9,049원"), third.label)
+    XCTAssertFalse(scrollTo(app.buttons["settlement-finalize"]).isEnabled)
+    snapshot("ios-fxc-blocked")
+    scrollTo(app.buttons["settlement-fx-2"]).tap()
+    XCTAssertTrue(app.descendants(matching: .any)["expense-review-screen"].waitForExistence(timeout: 10))
+    expectCompare(
+      pinned: "13,554원", pinnedDate: "2026-11-04 고시 · 100엔당 903.60원", new: "새 예상 금액 13,563원",
+      newDate: "2026-11-04 고시 · 100엔당 904.20원", diff: "차이 +9원")
+    XCTAssertEqual(
+      scrollTo(app.staticTexts["review-fx-state"]).label, "확정하려면 둘 중 하나를 골라 주세요. 고르기 전에는 포함한 금액이 바뀌지 않아요.")
+    snapshot("ios-fxc-compare")
+    scrollTo(app.buttons["review-fx-keep"]).tap()
+    XCTAssertTrue(app.descendants(matching: .any)["room-screen"].waitForExistence(timeout: 15))
+  }
+
+  /// 같은 값이 다시 들어와도(스크립트) 유지 결정은 그대로다. 1,000엔에는 새 예상 금액을 적용한다(둘이 반씩은 새 금액으로).
+  func testX3_RefetchKeepsDecisionThenApplyNew() throws {
+    app.activate()
+    refreshRoom()
+    XCTAssertEqual(scrollTo(app.descendants(matching: .any)["room-fx-correction"]).label, "환율 정정 결정 필요 2건")
+    let kept = app.buttons.matching(
+      NSPredicate(format: "identifier BEGINSWITH 'expense-' AND label CONTAINS '1,500 JPY'")
+    ).firstMatch
+    XCTAssertTrue(scrollTo(kept).label.contains("고정 금액 유지를 골랐어요"), kept.label)
+    XCTAssertTrue(kept.label.contains("예상 금액 13,554원"), kept.label)
+    openExpense(matching: "1,000 JPY")
+    expectCompare(
+      pinned: "9,044원", pinnedDate: "2026-11-06 고시 · 100엔당 904.40원", new: "새 예상 금액 9,049원",
+      newDate: "2026-11-06 고시 · 100엔당 904.90원", diff: "차이 +5원")
+    XCTAssertEqual(
+      scrollTo(app.staticTexts["review-even-summary"]).label,
+      "다라 4,525원 · 가나 4,524원 · 합계 9,049원. 남는 1원은 결제자(다라)가 더 부담해요.")
+    snapshot("ios-fxc-apply")
+    scrollTo(app.buttons["review-fx-apply"]).tap()
+    XCTAssertTrue(app.descendants(matching: .any)["room-screen"].waitForExistence(timeout: 15))
+  }
+
+  /// 또 다른 정정(스크립트)은 앞의 유지 결정을 무효로 만든다. 새 비교를 보고 다시 유지한다.
+  func testX4_AnotherCorrectionNeedsANewDecision() throws {
+    app.activate()
+    refreshRoom()
+    XCTAssertEqual(scrollTo(app.descendants(matching: .any)["room-fx-correction"]).label, "환율 정정 결정 필요 2건")
+    openExpense(matching: "1,500 JPY")
+    expectCompare(
+      pinned: "13,554원", pinnedDate: "2026-11-04 고시 · 100엔당 903.60원", new: "새 예상 금액 13,568원",
+      newDate: "2026-11-04 고시 · 100엔당 904.50원", diff: "차이 +14원")
+    snapshot("ios-fxc-repeat")
+    scrollTo(app.buttons["review-fx-keep"]).tap()
+    XCTAssertTrue(app.descendants(matching: .any)["room-screen"].waitForExistence(timeout: 15))
+  }
+
+  /// 정정 뒤 쓸 고시값이 없는 지출: 유지·적용 없이 보류한다(자동으로 다시 계산하지 않는다).
+  func testX5_UnavailableQuoteHolds() throws {
+    app.activate()
+    openExpense(matching: "2,000 JPY")
+    XCTAssertEqual(scrollTo(app.staticTexts["review-fx-pinned-krw"]).label, "18,187원")
+    XCTAssertEqual(scrollTo(app.staticTexts["review-fx-new-none"]).label, "쓸 수 있는 기준환율 고시값이 없어요.")
+    XCTAssertTrue(scrollTo(app.staticTexts["review-fx-state"]).label.hasPrefix("정정 뒤 이 날짜에 쓸 수 있는 기준환율이 없어"))
+    XCTAssertFalse(app.buttons["review-fx-keep"].exists)
+    XCTAssertFalse(app.buttons["review-fx-apply"].exists)
+    snapshot("ios-fxc-unavailable")
+    hold(reason: "원화 청구액 확인 대기")
+    XCTAssertTrue(app.descendants(matching: .any)["room-screen"].waitForExistence(timeout: 15))
+    // 머리(맨 위)를 화면 안으로 가져온 뒤 본다(목록은 화면 밖 줄을 만들지 않는다).
+    scrollTo(app.descendants(matching: .any)["room-status"])
+    XCTAssertFalse(app.descendants(matching: .any)["room-fx-correction"].exists)
+  }
+
+  /// 모두 정했다: 확정한다. 유지한 금액은 고정 고시값 그대로 예상 금액으로 남는다.
+  func testX6_FinalizeKeepsPinnedEstimate() throws {
+    app.activate()
+    scrollTo(app.buttons["open-settlement"]).tap()
+    XCTAssertTrue(app.descendants(matching: .any)["transfer-1"].waitForExistence(timeout: 15))
+    XCTAssertFalse(app.staticTexts["settlement-fx-blocked"].exists)
+    XCTAssertEqual(app.descendants(matching: .any)["transfer-1"].label, "가나 → 다라, 11,301원")
+    XCTAssertEqual(app.descendants(matching: .any)["settlement-estimated"].label, "이 중 예상 금액(기준환율), 22,603원")
+    let first = scrollTo(app.descendants(matching: .any)["converted-1"]).label
+    XCTAssertTrue(first.contains("예상 금액 13,554원") && first.contains("100엔당 903.60원"), first)
+    let second = scrollTo(app.descendants(matching: .any)["converted-2"]).label
+    XCTAssertTrue(second.contains("예상 금액 9,049원") && second.contains("100엔당 904.90원"), second)
+    scrollTo(app.buttons["settlement-finalize"]).tap()
+    XCTAssertTrue(app.alerts.buttons["확정"].firstMatch.waitForExistence(timeout: 5))
+    app.alerts.buttons["확정"].firstMatch.tap()
+    XCTAssertTrue(app.navigationBars["확정된 송금표"].waitForExistence(timeout: 20))
+    let final = scrollTo(app.descendants(matching: .any)["converted-1"]).label
+    XCTAssertTrue(final.contains("예상 금액 13,554원") && final.contains("실제 청구액이 아니에요"), final)
+    snapshot("ios-fxc-final")
+  }
+
+  private func expectCompare(pinned: String, pinnedDate: String, new: String, newDate: String, diff: String) {
+    XCTAssertEqual(scrollTo(app.staticTexts["review-fx-pinned-krw"]).label, pinned)
+    XCTAssertTrue(app.staticTexts["review-fx-pinned-quote"].label.hasSuffix(pinnedDate))
+    XCTAssertEqual(scrollTo(app.staticTexts["review-fx-new-krw"]).label, new)
+    XCTAssertTrue(app.staticTexts["review-fx-new-quote"].label.hasSuffix(newDate))
+    XCTAssertEqual(scrollTo(app.staticTexts["review-fx-diff"]).label, diff)
+  }
+
   private func expectFXTotals() {
     XCTAssertEqual(app.descendants(matching: .any)["transfer-1"].label, "가나 → 다라, 50,556원")
     XCTAssertEqual(app.descendants(matching: .any)["settlement-total"].label, "함께 쓴 돈, 101,114원")

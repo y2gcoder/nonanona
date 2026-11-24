@@ -499,6 +499,8 @@ data class ItemProposalPanel(
     val request: ShareProposalRequest?,
     val sent: ShareProposal?,
     val sendState: ProposalSendState?,
+    /** 확인 창을 연 뒤 보낼 값이 바뀌어 보내지 않았다(다시 확인해야 보낸다). */
+    val consentChanged: Boolean = false,
 )
 
 @Composable
@@ -619,6 +621,14 @@ private fun ProposalSection(
                     modifier = Modifier.testTag("items_problem"),
                 )
             }
+        }
+        if (proposal.consentChanged) {
+            Text(
+                stringResource(R.string.proposal_consent_changed),
+                style = TextRoles.supporting,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.testTag("items_proposal_consent_changed"),
+            )
         }
         when (val st = proposal.sendState) {
             is ProposalSendState.Sent -> {

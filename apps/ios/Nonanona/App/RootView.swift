@@ -65,14 +65,15 @@ struct RootView: View {
     .alert(
       "방장에게 제안을 보낼까요?",
       isPresented: Binding(
-        get: { model.proposalConfirmation != nil }, set: { if !$0 { model.proposalConfirmation = nil } }),
-      presenting: model.proposalConfirmation.flatMap { split in model.proposalRequest(split).map { (split, $0) } }
-    ) { shown in
-      Button("보내기") { Task { await model.confirmProposalSend(shown.0, shown.1) } }
+        get: { model.rooms.proposalConsent != nil }, set: { if !$0 { model.rooms.cancelProposalConsent() } }),
+      presenting: model.rooms.proposalConsent
+    ) { consent in
+      // 창은 연 순간 고정한 값(consent)을 그리고 그 값으로만 보낸다. 지금 값과 다르면 보내지 않는다.
+      Button("보내기") { Task { await model.confirmProposalSend(consent) } }
         .accessibilityIdentifier("proposal-send-confirm")
-      Button("취소", role: .cancel) { model.proposalConfirmation = nil }
-    } message: { shown in
-      Text(proposalConsentText(shown.1, trip: shown.0.expense.tripID))
+      Button("취소", role: .cancel) { model.rooms.cancelProposalConsent() }
+    } message: { consent in
+      Text(proposalConsentText(consent.request, trip: consent.target.tripID))
     }
     .sheet(
       isPresented: Binding(
@@ -260,7 +261,8 @@ private struct ItemSplitDestination: View {
           ? ItemProposalPanel(
             basis: basis, remainderChoice: model.proposalRemainder(split)?.value,
             request: model.proposalRequest(split), sent: expense?.shareProposal,
-            sendState: rooms.proposalState[split.expense]) : nil),
+            sendState: rooms.proposalState[split.expense],
+            consentChanged: rooms.proposalConsentChanged.contains(split.expense)) : nil),
       actions: ItemSplitActions(
         edit: { model.editItemPlan(split.receipt, $0) },
         retrySave: { model.retryItemPlanSave(split.receipt) },

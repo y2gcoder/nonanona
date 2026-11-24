@@ -18,6 +18,7 @@
     <string name="proposal_preview">보낼 몫: %1$s</string>
     <string name="proposal_send">방장에게 제안 보내기</string>
     <string name="proposal_sending">보내는 중…</string>
+    <string name="proposal_consent_changed">확인 창을 연 뒤 지출이나 원화 기준이 바뀌어 보내지 않았어요. 바뀐 값을 확인하고 다시 보내 주세요.</string>
     <string name="proposal_sent">제안을 보냈어요. 방장이 확인하고 포함해야 정산에 들어가요.</string>
     <string name="proposal_footer">보내는 값: 사람마다 금액(원), 원화 기준과 합계, 지출 버전. 품목 이름·품목 금액·영수증 글자·사진은 보내지 않아요.</string>
     <string name="proposal_confirm_title">방장에게 제안을 보낼까요?</string>

@@ -46,7 +46,7 @@ final class ProposalUITests: XCTestCase {
   }
 
   /// 장부에서 제안 화면을 열고 품목마다 낼 사람을 고른다. 남은 원은 고르기 전에는 보낼 수 없고, 고른 사람(`P_REMAINDER`)에게만 간다.
-  /// 확인 창에서 보낼 값을 보고 보낸 뒤, 같은 내용을 한 번 더 보낸다(같은 요청 키 → 같은 제안).
+  /// 확인 창에서 보낼 값을 보고 보낸 뒤, 같은 내용을 다시 동의해 한 번 더 보낸다(새 보내기 → 새 행, 가장 최근은 같은 값).
   func testU3_ProposeWithExplicitRemainder() throws {
     openProposal()
     XCTAssertTrue(app.staticTexts["items-privacy"].label.contains("방장에게는 사람마다 부담 금액(원)만"))
@@ -75,7 +75,7 @@ final class ProposalUITests: XCTestCase {
     XCTAssertEqual(scrollTo(preview).label, env["P_PREVIEW"])
     snapshot("ios-proposal-ready")
     send()
-    // 같은 내용을 다시 보낸다(응답을 못 받은 재시도와 같은 요청 키). 서버는 같은 제안을 돌려준다.
+    // 같은 내용을 다시 동의해 보낸다(새 보내기). 불확실한 재시도의 같은 키는 단위 시험이 본다.
     send()
     XCTAssertEqual(scrollTo(app.staticTexts["items-proposal-state"]).label, "보낸 제안: 방장 확인을 기다려요.")
     snapshot("ios-proposal-sent")

@@ -179,8 +179,6 @@ final class AppModel {
     else { return nil }
     return choice.member
   }
-  /// 보내기 전 확인 창(보낼 값을 그대로 보이고 동의를 받는다).
-  var proposalConfirmation: ItemSplitTarget?
 
   let graph: AppGraph
   /// 여행방 목록·장부·검토·송금표.
@@ -850,17 +848,17 @@ final class AppModel {
       fxQuoteID: quote?.quoteID, shares: shares)
   }
 
+  /// 확인 창을 연다. 보낼 값은 여는 순간 고정하고(RoomModel.proposalConsent), 창은 그 값을 그린다.
   func requestProposalSend(_ split: ItemSplitTarget) {
-    guard proposalRequest(split) != nil else { return }
-    proposalConfirmation = split
+    guard let request = proposalRequest(split) else { return }
+    rooms.openProposalConsent(request, target: split.expense)
   }
 
-  /// 확인 창에서 "보내기"를 누른 뒤에만 보낸다. 창을 연 뒤 값이 바뀌었으면(장부 새로고침 등) 보내지 않고 다시 확인하게 한다.
-  /// 확인 창은 버튼 동작보다 먼저 닫히며 `proposalConfirmation`을 지우므로, 창이 보인 대상과 요청을 그대로 받는다.
-  func confirmProposalSend(_ split: ItemSplitTarget, _ shown: ShareProposalRequest) async {
-    proposalConfirmation = nil
-    guard let request = proposalRequest(split), request == shown else { return }
-    await rooms.propose(request, target: split.expense)
+  /// 확인 창에서 "보내기"를 누른 뒤에만 보낸다. 창을 연 뒤 장부가 바뀌어 지금 값이 고정한 값과 다르면 보내지 않는다(다시 동의).
+  /// 확인 창은 버튼 동작보다 먼저 닫히며 창 상태를 지우므로, 창이 그린 고정 값을 그대로 받는다.
+  func confirmProposalSend(_ shown: ProposalConsent) async {
+    let split = proposalSplit.flatMap { $0.expense == shown.target ? $0 : nil }
+    await rooms.confirmProposalConsent(shown, current: split.flatMap(proposalRequest))
   }
 
   /// 계산한 몫을 지출 검토의 "직접 나누기"에 채우고 검토로 돌아간다. 서버에는 아무것도 보내지 않는다(방장이 "포함하기"를 눌러야 간다).

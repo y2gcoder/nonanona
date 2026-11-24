@@ -83,6 +83,9 @@ def main():
         "host_up": receipt(host, "host_up", d(7), 9000, "KRW"),
         "nofx": receipt(member, "nofx", d(25), 1000, "JPY"),
         "race": receipt(member, "race", d(8), 7000, "KRW"),
+        "usd": receipt(member, "usd", d(9), 4200, "USD"),
+        "legacy": receipt(member, "legacy", d(9), 3100, "USD"),
+        "aba": receipt(member, "aba", d(10), 6000, "KRW"),
     }
     st, body, _ = member.rpc("submit_manual_expense", p_trip=trip, p_request_id=str(uuid.uuid4()), p_expense_date=d(4),
                              p_amount_minor=5000, p_currency="KRW", p_merchant="가상 직접")
@@ -289,6 +292,51 @@ def main():
     check("estimate proposal on an undetermined date -> stale_quote (no invented basis)", st == 409 and code == "stale_quote",
           code=code)
 
+    # ------------------------------------------------------------ 범위: 원화·엔화만(20261124180000)
+    for key, krw in (("usd", 56789), ("legacy", 41000)):
+        st, _, _ = host.rpc("review_expense", p_expense=ids[key], p_expected_version=1, p_request_id=str(uuid.uuid4()),
+                            p_decision="include", p_payer=host.uid, p_krw_amount=krw,
+                            p_shares=shares(host=krw - 20000, member=20000))
+        assert st == 200, (key, st)
+    st, code, _ = propose("usd", "verified_krw_charge", 56789, shares(host=36789, member=20000))
+    check("USD expense the host included with a verified charge -> basis_invalid (KRW/JPY scope)",
+          st == 400 and code == "basis_invalid", code=code)
+    for basis, total in (("acquisition_cost", 56789), ("krw_original", 4200)):
+        st, code, _ = propose("usd", basis, total, shares(host=total - 1000, member=1000))
+        check(f"USD expense with {basis} -> basis_invalid", st == 400 and code == "basis_invalid", code=code)
+    # 범위를 넣기 전에 들어간 USD 행(소유자 권한으로 흉내): 지우지 않고, 장부에는 보이지 않아 방이 그대로 읽힌다.
+    legacy_id = str(uuid.uuid4())
+    psql(f"""insert into public.expense_share_proposals (id, trip_id, expense_id, proposed_by, expense_version, krw_basis,
+             krw_total, request_id, fingerprint) values ('{legacy_id}', '{trip}', '{ids["legacy"]}', '{member.uid}', 2,
+             'verified_krw_charge', 41000, '{uuid.uuid4()}', 'legacy');
+             insert into public.expense_share_proposal_lines (proposal_id, trip_id, user_id, krw) values
+             ('{legacy_id}', '{trip}', '{host.uid}', 21000), ('{legacy_id}', '{trip}', '{member.uid}', 20000);""")
+    for client, who in ((host, "host"), (member, "uploader")):
+        st, body, _ = client.rpc("get_room_ledger", p_trip=trip)
+        legacy = {e["expense_id"]: e for e in body["expenses"]}[ids["legacy"]] if st == 200 else None
+        check(f"{who} ledger stays readable with a legacy out-of-scope row; that proposal is not exposed",
+              st == 200 and legacy["share_proposal"] is None, status=st)
+
+    # ------------------------------------------------------------ A→B→A: 동의한 보내기마다 새 요청 키(앱 정책)
+    a, b = shares(host=3000, member=3000), shares(host=4000, member=2000)
+    st, ra, ka = propose("aba", "krw_original", 6000, a)
+    st2, rb, kb = propose("aba", "krw_original", 6000, b)
+    check("A then B with new keys: both new rows, B is latest", st == 200 and st2 == 200 and ra["latest"] and rb["latest"]
+          and exp("aba")["share_proposal"]["proposal_id"] == rb["proposal_id"])
+    st, again, _ = propose("aba", "krw_original", 6000, a, request=ka)
+    check("re-sending A with its old key is only a replay: latest=false and the ledger still shows B",
+          st == 200 and again["replayed"] and again["latest"] is False and again["proposal_id"] == ra["proposal_id"]
+          and exp("aba")["share_proposal"]["proposal_id"] == rb["proposal_id"])
+    st, ra2, _ = propose("aba", "krw_original", 6000, a)
+    latest = exp("aba")["share_proposal"]
+    check("a fresh consent for A gets a new key: new row, A is the latest again",
+          st == 200 and not ra2["replayed"] and ra2["latest"] and latest["proposal_id"] == ra2["proposal_id"]
+          and sorted(x["krw"] for x in latest["shares"]) == [3000, 3000])
+    st, rep, _ = propose("aba", "krw_original", 6000, a, request=ka)
+    st2, rep2, _ = propose("aba", "krw_original", 6000, b, request=kb)
+    check("ambiguous retries replay their own rows and report latest correctly (old A false, old B false)",
+          rep["replayed"] and rep["latest"] is False and rep2["replayed"] and rep2["latest"] is False)
+
     # ------------------------------------------------------------ 잠금 아래 방장 검토와 경쟁
     # 방장 쪽 트랜잭션이 여행방을 잠근 채 지출 버전을 올리는 동안 보낸 제안은 기다렸다가 stale_expense로 끝난다.
     race_version = exp("race")["version"]
@@ -327,7 +375,7 @@ def main():
           exp("race")["share_proposal"]["shares"]].index(member.uid)]["krw"]) == latest)
 
     # ------------------------------------------------------------ 확정: 제안은 확정에 닿지 않는다
-    for key in ("race", "host_up", "nofx", "manual"):
+    for key in ("race", "host_up", "nofx", "manual", "aba"):
         e = exp(key)
         if key == "nofx":
             st, _, _ = host.rpc("review_expense", p_expense=ids[key], p_expected_version=e["version"],

@@ -311,15 +311,15 @@ protocol SettlementGateway: Sendable {
   func finalize(_ trip: TripID, reviewedRevision: Int, requestID: UUID) async throws -> FinalizeResult
   /// 확정본이 없으면 nil.
   func finalized(_ trip: TripID) async throws -> FinalSettlement?
-  /// 올린 사람의 품목 나누기 제안 몫(ADR-0011). 요청의 값(지출·버전·원화 기준·합계·사람마다 원)만 보낸다.
-  func propose(_ proposal: ShareProposalRequest, in trip: TripID) async throws -> SubmittedProposal
+  /// 올린 사람의 품목 나누기 제안 몫(ADR-0011). 요청의 값(지출·버전·원화 기준·합계·사람마다 원)과 그 보내기의 요청 키만 보낸다.
+  func propose(_ operation: ProposalOperation, in trip: TripID) async throws -> SubmittedProposal
 }
 
 extension SettlementGateway {
   func keepEstimate(_ keep: FXKeep, in trip: TripID) async throws -> ReviewedExpense {
     throw SettlementFailure.unavailable
   }
-  func propose(_ proposal: ShareProposalRequest, in trip: TripID) async throws -> SubmittedProposal {
+  func propose(_ operation: ProposalOperation, in trip: TripID) async throws -> SubmittedProposal {
     throw SettlementFailure.unavailable
   }
 }

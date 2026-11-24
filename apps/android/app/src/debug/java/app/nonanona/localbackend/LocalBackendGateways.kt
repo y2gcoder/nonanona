@@ -21,6 +21,7 @@ import app.nonanona.feature.settlement.LedgerExpense
 import app.nonanona.feature.settlement.LedgerMember
 import app.nonanona.feature.settlement.MaskedReceiptImage
 import app.nonanona.feature.settlement.MemberId
+import app.nonanona.feature.settlement.ProposalOperation
 import app.nonanona.feature.settlement.ReceiptArtifactRef
 import app.nonanona.feature.settlement.ReceiptViewException
 import app.nonanona.feature.settlement.ReceiptViewFailure
@@ -34,7 +35,6 @@ import app.nonanona.feature.settlement.SettlementPreview
 import app.nonanona.feature.settlement.ShareLine
 import app.nonanona.feature.settlement.SharePlan
 import app.nonanona.feature.settlement.ShareProposal
-import app.nonanona.feature.settlement.ShareProposalRequest
 import app.nonanona.feature.settlement.SubmittedProposal
 import app.nonanona.feature.settlement.Transfer
 import app.nonanona.feature.trip.InviteAcceptException
@@ -518,14 +518,16 @@ class LocalSettlementGateway(
 
     /** 품목 나누기 제안 몫(ADR-0011). 본문은 [body]가 만드는 키만 담는다. */
     override suspend fun propose(
-        proposal: ShareProposalRequest,
+        operation: ProposalOperation,
         trip: TripId,
     ): SubmittedProposal {
-        val raw = call("propose_expense_shares", body(proposal))
+        val raw = call("propose_expense_shares", body(operation))
         return parse {
             JSONObject(raw).let {
-                if (it.getString("expense_id") != proposal.expenseId) throw SettlementException(SettlementFailure.Unknown)
-                SubmittedProposal(it.getString("proposal_id"), it.getBoolean("replayed"))
+                if (it.getString("expense_id") != operation.request.expenseId) throw SettlementException(SettlementFailure.Unknown)
+                // latest는 20261124180000부터. 없으면(예전 서버) 가장 최근으로 본다.
+                val latest = if (it.has("latest")) it.getBoolean("latest") else true
+                SubmittedProposal(it.getString("proposal_id"), it.getBoolean("replayed"), latest)
             }
         }
     }
@@ -549,15 +551,17 @@ class LocalSettlementGateway(
 
     companion object {
         /** 제안 요청 본문: 지출·버전·요청 키·원화 기준·합계·(예상액이면) 고시값·사람마다 {구성원 ID, 원}. 다른 키는 없다. */
-        fun body(proposal: ShareProposalRequest): JSONObject =
-            JSONObject()
+        fun body(operation: ProposalOperation): JSONObject {
+            val proposal = operation.request
+            return JSONObject()
                 .put("p_expense", proposal.expenseId)
                 .put("p_expected_version", proposal.expectedVersion)
-                .put("p_request_id", proposal.requestId.toString())
+                .put("p_request_id", operation.requestId.toString())
                 .put("p_krw_basis", proposal.basis.wire)
                 .put("p_krw_total", proposal.krwTotal)
                 .put("p_fx_quote_id", proposal.fxQuoteId ?: JSONObject.NULL)
                 .put("p_shares", JSONArray(proposal.shares.map { JSONObject().put("user_id", it.member.value).put("krw", it.krw) }))
+        }
 
         private val rejectedCodes =
             setOf(

@@ -46,6 +46,7 @@ import app.nonanona.feature.settlement.ExpenseTarget
 import app.nonanona.feature.settlement.LedgerExpense
 import app.nonanona.feature.settlement.MemberId
 import app.nonanona.feature.settlement.ProposalBasis
+import app.nonanona.feature.settlement.ProposalConsent
 import app.nonanona.feature.settlement.ProposalShares
 import app.nonanona.feature.settlement.ReceiptContext
 import app.nonanona.feature.settlement.RoomController
@@ -244,8 +245,6 @@ data class AppUiState(
      * 바뀌면(기준환율 정정 등) 예전 선택을 새 금액에 쓰지 않는다(다시 고른다).
      */
     val proposalRemainder: Map<Route.ItemProposal, Pair<MemberId, Long>> = emptyMap(),
-    /** 보내기 전 확인 창(보낼 값을 그대로 보이고 동의를 받는다). */
-    val proposalConfirmation: Route.ItemProposal? = null,
     val itemTranslation: Map<Route.Receipt, ItemTranslationState> = emptyMap(),
 ) {
     /**
@@ -1129,22 +1128,19 @@ class AppViewModel(
         return ShareProposalRequest(expense.id, expense.version, basis.basis, basis.krw, basis.quote?.quoteId, shares)
     }
 
+    /** 확인 창을 연다. 보낼 값은 여는 순간 고정하고(RoomUiState.proposalConsent), 창은 그 값을 그린다. */
     fun requestProposalSend(route: Route.ItemProposal) {
-        if (proposalRequest(route) == null) return
-        mutableState.update { it.copy(proposalConfirmation = route) }
+        val request = proposalRequest(route) ?: return
+        rooms.openProposalConsent(request, route.target)
     }
 
-    fun cancelProposalSend() = mutableState.update { it.copy(proposalConfirmation = null) }
-
-    /** 확인 창에서 "보내기"를 누른 뒤에만 보낸다. 창을 연 뒤 값이 바뀌었으면(장부 새로고침 등) 보내지 않는다. */
-    fun confirmProposalSend(
-        route: Route.ItemProposal,
-        shown: ShareProposalRequest,
-    ) {
-        mutableState.update { it.copy(proposalConfirmation = null) }
-        val request = proposalRequest(route) ?: return
-        if (request != shown) return
-        rooms.propose(request, route.target)
+    /**
+     * 확인 창에서 "보내기"를 누른 뒤에만 보낸다. 창이 그린 고정 값([shown])과 지금 화면 상태로 다시 만든 값이 다르면
+     * (창을 연 뒤 장부를 새로 읽어 버전·기준이 바뀌었으면) 보내지 않는다. 다시 동의해야 보낸다.
+     */
+    fun confirmProposalSend(shown: ProposalConsent) {
+        val route = backStack.filterIsInstance<Route.ItemProposal>().lastOrNull { it.target == shown.target }
+        rooms.confirmProposalConsent(shown, route?.let { proposalRequest(it) })
     }
 
     /** 목록(홈)에서 고른 화면을 연다. 넓은 창에서는 목록 옆의 상세를 바꾸고, 좁은 창에서는 홈 위에 쌓는다. */

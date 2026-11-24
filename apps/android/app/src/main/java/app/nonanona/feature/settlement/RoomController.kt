@@ -113,6 +113,10 @@ data class RoomUiState(
     val receiptViews: Map<ExpenseTarget, ReceiptViewState> = emptyMap(),
     /** 올린 사람의 품목 나누기 제안 보내기 상태(지출마다, ADR-0011). */
     val proposalState: Map<ExpenseTarget, ProposalSendState> = emptyMap(),
+    /** 열린 동의 창(연 순간 고정한 보낼 값). 배치가 바뀌어도 남도록 상태에 둔다. */
+    val proposalConsent: ProposalConsent? = null,
+    /** 동의 창을 연 뒤 보낼 값이 바뀌어 보내지 않은 지출. 다시 동의하면 지운다. */
+    val proposalConsentChanged: Set<ExpenseTarget> = emptySet(),
 ) {
     fun expense(target: ExpenseTarget): LedgerExpense? = ledgers[target.tripId]?.expenses?.firstOrNull { it.id == target.expenseId }
 }
@@ -357,31 +361,78 @@ class RoomController(
         }
     }
 
+    /** 응답이 불확실하게 끝난 보내기(지출마다). 같은 요청을 다시 보낼 때만 그 요청 키를 다시 쓴다. */
+    private val pendingProposals = mutableMapOf<ExpenseTarget, ProposalOperation>()
+
+    /** 동의 창을 연 순간의 보낼 값을 고정한다. 창은 이 값을 그리고, "보내기"를 누를 때 지금 값과 다르면 보내지 않는다. */
+    fun openProposalConsent(
+        request: ShareProposalRequest,
+        target: ExpenseTarget,
+    ) = mutable.update {
+        it.copy(proposalConsent = ProposalConsent(target, request), proposalConsentChanged = it.proposalConsentChanged - target)
+    }
+
+    fun cancelProposalConsent() = mutable.update { it.copy(proposalConsent = null) }
+
     /**
-     * 올린 사람이 동의한 제안을 보낸다(ADR-0011). 서버로 가는 값은 [ShareProposalRequest]뿐이다(품목 정보 없음).
-     * 같은 내용은 같은 요청 키라 다시 보내도 같은 제안으로 수렴한다. 보낸 뒤나 지출·고시값이 바뀌어 거절되면 장부를 새로 불러온다.
+     * 동의 창의 "보내기". [shown]은 창이 그린(연 순간 고정한) 값, [current]는 지금 화면 상태로 다시 만든 값이다. 그사이 장부를
+     * 새로 읽어 버전·기준·몫이 바뀌었으면 보내지 않고 바뀌었다고 알린다(새로 동의해야 보낸다). 같으면 고정한 값을 보낸다.
+     */
+    fun confirmProposalConsent(
+        shown: ProposalConsent,
+        current: ShareProposalRequest?,
+    ) {
+        if (current != shown.request) {
+            mutable.update {
+                it.copy(proposalConsent = null, proposalConsentChanged = it.proposalConsentChanged + shown.target)
+            }
+            return
+        }
+        mutable.update { it.copy(proposalConsent = null) }
+        propose(shown.request, shown.target)
+    }
+
+    /**
+     * 올린 사람이 동의한 제안을 보낸다(ADR-0011). 서버로 가는 값은 [ShareProposalRequest]와 요청 키뿐이다(품목 정보 없음).
+     * 요청 키는 동의한 보내기마다 새로 만든다. 응답이 불확실하게 끝난(연결·일시 장애·알 수 없음) 같은 요청을 다시 보낼 때만 그 키를
+     * 다시 쓴다. 재시도한 제안이 이미 가장 최근이 아니면(latest=false) 보냈다고 보이지 않는다. 보낸 뒤나 지출·고시값이 바뀌어
+     * 거절되면 장부를 새로 불러온다.
      */
     fun propose(
         request: ShareProposalRequest,
         target: ExpenseTarget,
     ) {
         if (state.value.proposalState[target] == ProposalSendState.Sending) return
+        val operation = pendingProposals[target]?.takeIf { it.request == request } ?: ProposalOperation(request, UUID.randomUUID())
+        pendingProposals[target] = operation
         setProposal(target, ProposalSendState.Sending)
         scope.launch {
             val result =
                 try {
-                    Result.success(settlement.propose(request, target.tripId))
+                    Result.success(settlement.propose(operation, target.tripId))
                 } catch (e: SettlementException) {
                     Result.failure(e)
                 }
             val sent = result.getOrNull()
             if (sent != null) {
-                setProposal(target, ProposalSendState.Sent(sent.replayed))
+                pendingProposals.remove(target)
+                setProposal(
+                    target,
+                    if (sent.replayed && !sent.latest) {
+                        ProposalSendState.Failed(SettlementFailure.Stale)
+                    } else {
+                        ProposalSendState.Sent(sent.replayed)
+                    },
+                )
                 loadLedger(target.tripId)
                 return@launch
             }
             val failure = (result.exceptionOrNull() as SettlementException).failure
             setProposal(target, ProposalSendState.Failed(failure))
+            // 서버가 받았는지 모르는 실패만 같은 요청 키를 남긴다.
+            if (failure !in setOf(SettlementFailure.Network, SettlementFailure.Unavailable, SettlementFailure.Unknown)) {
+                pendingProposals.remove(target)
+            }
             when (failure) {
                 SettlementFailure.SessionExpired -> {
                     onSessionExpired()

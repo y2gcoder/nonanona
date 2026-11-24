@@ -399,9 +399,9 @@ interface SettlementGateway {
     /** 확정본이 없으면 null. */
     suspend fun finalized(trip: TripId): FinalSettlement?
 
-    /** 올린 사람의 품목 나누기 제안 몫(ADR-0011). 요청의 값(지출·버전·원화 기준·합계·사람마다 원)만 보낸다. */
+    /** 올린 사람의 품목 나누기 제안 몫(ADR-0011). 요청의 값(지출·버전·원화 기준·합계·사람마다 원)과 그 보내기의 요청 키만 보낸다. */
     suspend fun propose(
-        proposal: ShareProposalRequest,
+        operation: ProposalOperation,
         trip: TripId,
     ): SubmittedProposal = throw SettlementException(SettlementFailure.Unavailable)
 }

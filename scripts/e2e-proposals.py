@@ -4,15 +4,15 @@
 한 기기는 가상 회원(가나, 영수증을 올린 사람), 다른 기기는 가상 방장(다라)이다. 실행마다 새 가상 여행방을 만든다(DB를 지우지 않는다).
 1. 올린 회원: 가상 품목 영수증 i01(3,500엔, 2026-11-05) 공유 → 확인 → 로그인 → 여행방에 사본 올리기.
 2. 올린 회원: 장부에서 "품목으로 나눠 방장에게 제안" → 품목마다 낼 사람 → 가상 시험 환율 902.15의 예상 금액 31,575원은
-   1원이 남아, 고르기 전에는 보낼 수 없음 → 가나에게 → 확인 창(보낼 값과 "품목 … 보내지 않아요") → 보내기, 같은 내용 한 번 더.
-   서버: 제안 1건(다라 20,005·가나 11,570), 지출은 그대로 확인 필요·몫 없음, 방 revision 그대로.
+   1원이 남아, 고르기 전에는 보낼 수 없음 → 가나에게 → 확인 창(보낼 값과 "품목 … 보내지 않아요") → 보내기, 같은 내용을 다시 동의해 한 번 더.
+   서버: 같은 값 제안 2건(다라 20,005·가나 11,570), 지출은 그대로 확인 필요·몫 없음, 방 revision 그대로.
 3. 스크립트가 그 지출일 가상 시험 환율을 903.15로 정정 → 방장 검토: "원화 기준이 바뀌어 쓸 수 없어요", 채우기 없음.
    올린 회원 장부: "원화 기준이 바뀌어 … 다시 보내 주세요".
 4. 올린 회원: 다시 열면 남은 원 선택이 지워져 있음 → 다라에게 → 31,610원(다라 20,028·가나 11,582)으로 다시 보내기.
 5. 방장: 제안(기준·사람마다 제안/입력)을 보고 "직접 나누기에 채우기" → 결제자 다라 → 포함하기. 서버: 포함·예상 기준·몫 = 제안.
 6. 스크립트가 방장 계정으로 확정 → 확정본 몫·합계·잔액이 정확하고 제안이 없음. 올린 회원 장부: "같은 몫으로 포함", 제안 단추 없음.
 7. 두 앱이 오간 모든 REST/RPC JSON 본문(로그인 본문·헤더 제외)과 서버 DB 전체(pg_dump 데이터)에 품목 글자가 없고,
-   제안 요청 본문은 허용한 키뿐이며 같은 내용의 두 요청은 같은 요청 키다.
+   제안 요청 본문은 허용한 키뿐이며 동의한 보내기마다 요청 키가 새롭다(같은 내용을 다시 동의해도 새 행, 가장 최근은 같은 값).
 끝에 그 지출일 가상 시험 환율을 902.15로 되돌린다.
 
 두 앱의 백엔드 주소는 빌드할 때 정해진다. 빌드하는 동안만 앱 설정 파일(gitignore)의 포트를 기록 프록시(54399)로 바꾸고 곧 되돌린다.
@@ -247,9 +247,9 @@ def no_item_text_anywhere():
     log(f"traffic {len(traffic)} entries, item text hits {text_hits}; db dump {len(dump)} bytes, hits {db_hits}; "
         f"propose requests {len(proposes)} keys-only {keys_ok}")
     assert not db_hits and not text_hits and keys_ok, result
-    # 보내기 단계마다 같은 내용을 두 번 보낸다(재시도와 같은 요청 키). 정정 뒤 새 내용은 새 키다.
+    # 보내기 단계마다 같은 내용을 두 번 동의해 보낸다. 동의한 보내기마다 새 요청 키다(불확실한 재시도만 같은 키, 단위 시험).
     ids = [p["p_request_id"] for p in proposes]
-    assert len(ids) == 4 and ids[0] == ids[1] and ids[2] == ids[3] and ids[1] != ids[2], ids
+    assert len(ids) == 4 and len(set(ids)) == 4, ids
     clients = {t["client"] for t in traffic}
     assert {"ios", "android"} <= clients, f"both apps went through the recording proxy: {clients}"
     assert "/rest/v1/rpc/propose_expense_shares" in rpc_paths and "/rest/v1/rpc/get_room_ledger" in rpc_paths
@@ -430,13 +430,15 @@ def a_open_trip(name):
 def a_upload():
     a_account("member")
     abase.share_from_files(["receipt-i01.png"], folder="NonanonaProposal")
-    u.tap(u.wait(id="draft_row", timeout=30))
+    # 가상 여행방이 많으면 초안 줄이 홈 목록 아래에 있다. 넘겨서 찾는다.
+    until(lambda: u.find(id="home_screen"), 30, "home after share")
+    u.tap(reach("home_screen", id="draft_row"))
     until(lambda: a_texts("processing_summary") == "읽음 1/1", 120, "read")
     u.tap(reach("draft_screen", id="item_1_debug_confirm"))
     until(lambda: a_texts("item_1_status") == "확인함", 20, "confirmed")
     a_open_trip("가나")
     a_home()
-    u.tap(u.wait(id="draft_row", timeout=20))
+    u.tap(reach("home_screen", id="draft_row"))
     assert reach("draft_screen", id="upload_destination").text == f"올릴 곳: {TRIP}"
     u.tap(reach("draft_screen", id="upload_start"))
     u.tap(u.wait(text="올리기", timeout=10))
@@ -645,8 +647,9 @@ def main():
         uploader_propose(FIRST, "first")
 
         def first_sent(r):
+            # 같은 내용을 두 번 동의해 보냈다: 행 둘(같은 값), 가장 최근도 같은 값.
             assert [(p["total"], p["shares"], p["basis"], p["by"]) for p in r["proposals"]] == [
-                (31575, {"다라": 20005, "가나": 11570}, "reference_rate_estimate", "가나")], r["proposals"]
+                (31575, {"다라": 20005, "가나": 11570}, "reference_rate_estimate", "가나")] * 2, r["proposals"]
             e = r["expenses"][0]
             assert (e["status"], e["shares"], e["krw_amount"]) == ("pending", None, None), e
             assert r["revision"] == base["revision"], "a proposal does not bump the room revision"
@@ -659,8 +662,8 @@ def main():
         uploader_state(STALE_UPLOADER, shot="stale")
         uploader_propose(SECOND, "second")
         def second_sent(r):
-            assert [p["total"] for p in r["proposals"]] == [31575, 31610], r["proposals"]
-            assert r["proposals"][1]["shares"] == {"다라": 20028, "가나": 11582}, r["proposals"]
+            assert [p["total"] for p in r["proposals"]] == [31575, 31575, 31610, 31610], r["proposals"]
+            assert r["proposals"][-1]["shares"] == {"다라": 20028, "가나": 11582}, r["proposals"]
             assert r["expenses"][0]["status"] == "pending" and r["expenses"][0]["shares"] is None
         server("second-proposal", trip, second_sent)
 

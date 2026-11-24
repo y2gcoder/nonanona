@@ -113,8 +113,14 @@ final class RoomModel {
 
   func isSaving(_ target: ExpenseTarget) -> Bool { inFlight[target] != nil || keeping.contains(target) }
 
-  /// 올린 사람의 품목 나누기 제안 보내기 상태(지출마다). 같은 내용은 같은 요청 키라 다시 보내도 같은 제안으로 수렴한다.
+  /// 올린 사람의 품목 나누기 제안 보내기 상태(지출마다).
   private(set) var proposalState: [ExpenseTarget: ProposalSendState] = [:]
+  /// 응답이 불확실하게 끝난 보내기(지출마다). 같은 요청을 다시 보낼 때만 그 요청 키를 다시 쓴다.
+  private var pendingProposals: [ExpenseTarget: ProposalOperation] = [:]
+  /// 열린 동의 창(연 순간 고정한 보낼 값). 배치가 바뀌어도 남도록 모델에 둔다.
+  var proposalConsent: ProposalConsent?
+  /// 동의 창을 연 뒤 보낼 값이 바뀌어 보내지 않은 지출. 다시 동의하면 지운다.
+  private(set) var proposalConsentChanged: Set<ExpenseTarget> = []
   /// 검토 중 다른 변경이 먼저 저장돼 최신 값으로 다시 연 지출.
   private(set) var reviewRefreshed: Set<ExpenseTarget> = []
 
@@ -368,18 +374,51 @@ final class RoomModel {
 
   // MARK: - 품목 나누기 제안(올린 사람)
 
-  /// 올린 사람이 동의한 제안을 보낸다. 서버로 가는 값은 `ShareProposalRequest`뿐이다(품목 정보 없음).
+  /// 동의 창을 연 순간의 보낼 값을 고정한다. 창은 이 값을 그리고, "보내기"를 누를 때 지금 값과 다르면 보내지 않는다.
+  func openProposalConsent(_ request: ShareProposalRequest, target: ExpenseTarget) {
+    proposalConsentChanged.remove(target)
+    proposalConsent = ProposalConsent(target: target, request: request)
+  }
+
+  func cancelProposalConsent() { proposalConsent = nil }
+
+  /// 동의 창의 "보내기". `shown`은 창이 그린(연 순간 고정한) 값, `current`는 지금 화면 상태로 다시 만든 값이다. 그사이 장부를
+  /// 새로 읽어 버전·기준·몫이 바뀌었으면 보내지 않고 바뀌었다고 알린다(새로 동의해야 보낸다). 같으면 고정한 값을 보낸다.
+  func confirmProposalConsent(_ shown: ProposalConsent, current: ShareProposalRequest?) async {
+    proposalConsent = nil
+    guard current == shown.request else {
+      proposalConsentChanged.insert(shown.target)
+      return
+    }
+    await propose(shown.request, target: shown.target)
+  }
+
+  /// 올린 사람이 동의한 제안을 보낸다. 서버로 가는 값은 `ShareProposalRequest`와 요청 키뿐이다(품목 정보 없음).
+  /// 요청 키는 동의한 보내기마다 새로 만든다. 응답이 불확실하게 끝난(연결·일시 장애·알 수 없음) 같은 요청을 다시 보낼 때만 그
+  /// 키를 다시 쓴다. 재시도한 제안이 이미 가장 최근이 아니면(latest=false) 보냈다고 보이지 않는다.
   /// 보낸 뒤나 지출·고시값이 바뀌어 거절되면 장부를 새로 불러온다(장부의 제안 상태와 새 기준을 보인다).
   func propose(_ request: ShareProposalRequest, target: ExpenseTarget) async {
     if proposalState[target] == .sending { return }
+    let operation =
+      pendingProposals[target].flatMap { $0.request == request ? $0 : nil }
+      ?? ProposalOperation(request: request, requestID: UUID())
+    pendingProposals[target] = operation
     proposalState[target] = .sending
     do {
-      let sent = try await settlement.propose(request, in: target.tripID)
-      proposalState[target] = .sent(replayed: sent.replayed)
+      let sent = try await settlement.propose(operation, in: target.tripID)
+      pendingProposals[target] = nil
+      proposalState[target] = sent.replayed && !sent.latest ? .failed(.stale) : .sent(replayed: sent.replayed)
       await loadLedger(target.tripID)
     } catch {
       let failure = await settlementFailure(error)
       proposalState[target] = .failed(failure)
+      switch failure {
+      case .network, .unavailable, .unknown:
+        // 서버가 받았는지 모른다. 같은 요청을 다시 보내면 같은 키를 쓴다.
+        break
+      default:
+        pendingProposals[target] = nil
+      }
       switch failure {
       case .stale, .quoteChanged, .finalized, .rejected: await loadLedger(target.tripID)
       default: break

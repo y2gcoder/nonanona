@@ -317,6 +317,7 @@ fun NonanonaApp(viewModel: AppViewModel) {
                                 request = viewModel.proposalRequest(route, state, rooms),
                                 sent = expense?.shareProposal,
                                 sendState = rooms.proposalState[route.target],
+                                consentChanged = route.target in rooms.proposalConsentChanged,
                             ),
                         onChooseRemainder = { viewModel.chooseProposalRemainder(route, MemberId(it)) },
                         onPropose = { viewModel.requestProposalSend(route) },
@@ -345,15 +346,14 @@ fun NonanonaApp(viewModel: AppViewModel) {
         debugUploadUi.Confirmation(confirmation, viewModel::confirmUpload, viewModel::cancelUploadConfirmation)
     }
 
-    state.proposalConfirmation?.let { route ->
-        viewModel.proposalRequest(route, state, rooms)?.let { request ->
-            ProposalConsentDialog(
-                request = request,
-                ledger = rooms.ledgers[route.target.tripId],
-                onConfirm = { viewModel.confirmProposalSend(route, request) },
-                onCancel = viewModel::cancelProposalSend,
-            )
-        }
+    // 동의 창은 연 순간 고정한 값(consent)을 그리고 그 값으로만 보낸다. 다시 그려도 지금 장부 값으로 바뀌지 않는다.
+    rooms.proposalConsent?.let { consent ->
+        ProposalConsentDialog(
+            request = consent.request,
+            ledger = rooms.ledgers[consent.target.tripId],
+            onConfirm = { viewModel.confirmProposalSend(consent) },
+            onCancel = viewModel.rooms::cancelProposalConsent,
+        )
     }
 
     rooms.finalizeConfirmation?.let { trip ->

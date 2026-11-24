@@ -1,8 +1,6 @@
 package app.nonanona.feature.settlement
 
 import app.nonanona.feature.receiptimport.ItemAllocation
-import java.nio.ByteBuffer
-import java.security.MessageDigest
 import java.util.UUID
 
 /**
@@ -54,25 +52,28 @@ data class ShareProposalRequest(
     val krwTotal: Long,
     val fxQuoteId: String?,
     val shares: List<ShareLine>,
-) {
-    /** 같은 내용이면 같은 요청 키(재시도가 같은 제안으로 수렴), 내용이 다르면 다른 키. 몫 순서는 상관없다. iOS와 같은 규칙이다. */
-    val requestId: UUID
-        get() {
-            val lines = shares.sortedBy { it.member.value }.joinToString(",") { "${it.member.value}:${it.krw}" }
-            val text =
-                listOf("share_proposal", expenseId, expectedVersion.toString(), basis.wire, krwTotal.toString(), fxQuoteId ?: "-", lines)
-                    .joinToString("|")
-            val bytes = MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8)).copyOf(16)
-            bytes[6] = ((bytes[6].toInt() and 0x0F) or 0x80).toByte() // 버전 8(이름 기반, 이 앱이 정한 해시)
-            bytes[8] = ((bytes[8].toInt() and 0x3F) or 0x80).toByte() // RFC 4122 변형
-            val buffer = ByteBuffer.wrap(bytes)
-            return UUID(buffer.long, buffer.long)
-        }
-}
+)
+
+/**
+ * 동의한 보내기 하나(요청과 그 요청 키). 요청 키는 동의할 때마다 새로 만들고, 응답이 불확실해 같은 요청을 다시 보낼 때만
+ * 같은 키를 쓴다. 그래서 A→B→A에서 마지막 A는 새 제안이 되어 가장 최근이 된다(내용으로 키를 정하면 옛 A의 재시도가 된다).
+ */
+data class ProposalOperation(
+    val request: ShareProposalRequest,
+    val requestId: UUID,
+)
+
+/** 동의 창을 열 때 고정한 보낼 값. 창은 이 값을 그리고, "보내기"를 누를 때 지금 값과 같아야 보낸다. */
+data class ProposalConsent(
+    val target: ExpenseTarget,
+    val request: ShareProposalRequest,
+)
 
 data class SubmittedProposal(
     val proposalId: String,
     val replayed: Boolean,
+    /** 그 제안이 지금도 그 지출의 가장 최근 제안인가(재시도한 옛 제안이면 false). 예전 서버는 보내지 않아 true로 본다. */
+    val latest: Boolean = true,
 )
 
 /** 올린 사람이 제안을 묶을 원화 기준. 방장도 장부에서 같은 값을 볼 수 있는 기준만 고른다. */

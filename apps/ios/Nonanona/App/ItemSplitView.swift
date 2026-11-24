@@ -35,6 +35,8 @@ struct ItemProposalPanel {
   let request: ShareProposalRequest?
   let sent: ShareProposal?
   let sendState: ProposalSendState?
+  /// 확인 창을 연 뒤 보낼 값이 바뀌어 보내지 않았다(다시 확인해야 보낸다).
+  var consentChanged = false
 }
 
 struct ItemSplitActions {
@@ -305,6 +307,10 @@ struct ItemSplitView: View {
         case nil:
           EmptyView()
         }
+      }
+      if proposal.consentChanged {
+        Text("확인 창을 연 뒤 지출이나 원화 기준이 바뀌어 보내지 않았어요. 바뀐 값을 확인하고 다시 보내 주세요.")
+          .textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("items-proposal-consent-changed")
       }
       switch proposal.sendState {
       case .sent?:

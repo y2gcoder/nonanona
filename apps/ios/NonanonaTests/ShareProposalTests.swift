@@ -78,36 +78,18 @@ struct ShareProposalTests {
     let request = ShareProposalRequest(
       expenseID: "e1", expectedVersion: 3, basis: .referenceEstimate, krwTotal: 12746, fxQuoteID: "q1",
       shares: [ShareLine(member: Self.host, krw: 6373), ShareLine(member: Self.uploader, krw: 6373)])
-    let body = LocalSettlementGateway.body(for: request)
+    let operation = ProposalOperation(request: request, requestID: UUID())
+    let body = LocalSettlementGateway.body(for: operation)
     #expect(
       Set(body.keys) == [
         "p_expense", "p_expected_version", "p_request_id", "p_krw_basis", "p_krw_total", "p_fx_quote_id", "p_shares",
       ])
     let shares = try #require(body["p_shares"] as? [[String: Any]])
     #expect(shares.allSatisfy { Set($0.keys) == ["user_id", "krw"] })
-    #expect(body["p_request_id"] as? String == request.requestID.uuidString.lowercased())
+    #expect(body["p_request_id"] as? String == operation.requestID.uuidString.lowercased())
     // 품목 이름·금액 글자가 들어갈 자리가 없다(요청 타입에 없다). 본문 글자에도 없다.
     let text = String(decoding: try JSONSerialization.data(withJSONObject: body), as: UTF8.self)
     for word in ["唐揚げ", "消費税", "name", "item", "1280", "ocr"] { #expect(!text.contains(word)) }
-  }
-
-  @Test func requestKeyIsStableOrderInsensitiveAndContentBound() {
-    let a = ShareProposalRequest(
-      expenseID: "e1", expectedVersion: 1, basis: .krwOriginal, krwTotal: 10001, fxQuoteID: nil,
-      shares: [ShareLine(member: Self.host, krw: 6000), ShareLine(member: Self.uploader, krw: 4001)])
-    let reordered = ShareProposalRequest(
-      expenseID: "e1", expectedVersion: 1, basis: .krwOriginal, krwTotal: 10001, fxQuoteID: nil,
-      shares: [ShareLine(member: Self.uploader, krw: 4001), ShareLine(member: Self.host, krw: 6000)])
-    let otherVersion = ShareProposalRequest(
-      expenseID: "e1", expectedVersion: 2, basis: .krwOriginal, krwTotal: 10001, fxQuoteID: nil, shares: a.shares)
-    let otherShares = ShareProposalRequest(
-      expenseID: "e1", expectedVersion: 1, basis: .krwOriginal, krwTotal: 10001, fxQuoteID: nil,
-      shares: [ShareLine(member: Self.host, krw: 6001), ShareLine(member: Self.uploader, krw: 4000)])
-    // Android ShareProposalRequest.requestId와 같은 값(같은 규칙).
-    #expect(a.requestID.uuidString.lowercased() == "49a7be2e-a0fd-84ce-a01c-462089b4a18e")
-    #expect(a.requestID == reordered.requestID)
-    #expect(a.requestID != otherVersion.requestID && a.requestID != otherShares.requestID)
-    #expect(a.requestID.uuidString.lowercased().range(of: "^[0-9a-f-]{14}8", options: .regularExpression) != nil)
   }
 
   @Test func basisBindsOnlyToValuesTheHostCanSee() throws {
@@ -197,8 +179,13 @@ struct ShareProposalTests {
     #expect(LocalSettlementGateway.failure(.http(status: 400, code: "shares_mismatch")) == .rejected)
   }
 
-  @Test func submittedResponseParses() throws {
+  @Test func submittedResponseParsesWithAndWithoutLatest() throws {
+    // 예전 서버(20261124170000) 응답에는 latest가 없다.
     let r = try LocalJSON.decoder.decode(LocalJSON.ProposalSubmitted.self, from: Self.data("propose-submitted.json"))
-    #expect(!r.replayed && !r.proposalId.isEmpty)
+    #expect(!r.replayed && !r.proposalId.isEmpty && r.latest == nil)
+    let replay = try LocalJSON.decoder.decode(
+      LocalJSON.ProposalSubmitted.self,
+      from: Data(#"{"proposal_id":"p","expense_id":"e","expense_version":1,"replayed":true,"latest":false}"#.utf8))
+    #expect(replay.replayed && replay.latest == false)
   }
 }

@@ -10,6 +10,7 @@ import app.nonanona.feature.settlement.LedgerExpense
 import app.nonanona.feature.settlement.MemberId
 import app.nonanona.feature.settlement.ProposalBasis
 import app.nonanona.feature.settlement.ProposalComparison
+import app.nonanona.feature.settlement.ProposalOperation
 import app.nonanona.feature.settlement.ProposalShares
 import app.nonanona.feature.settlement.ReferenceQuote
 import app.nonanona.feature.settlement.RoomLedger
@@ -28,7 +29,6 @@ import app.nonanona.localbackend.Outcome
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -107,7 +107,8 @@ class ShareProposalTest {
     fun requestBodyCarriesOnlyIdsVersionBasisTotalAndShares() {
         val request =
             ShareProposalRequest("e1", 3, KrwBasis.ReferenceEstimate, 12746, "q1", listOf(ShareLine(host, 6373), ShareLine(uploader, 6373)))
-        val body = LocalSettlementGateway.body(request)
+        val operation = ProposalOperation(request, java.util.UUID.randomUUID())
+        val body = LocalSettlementGateway.body(operation)
         assertEquals(
             setOf("p_expense", "p_expected_version", "p_request_id", "p_krw_basis", "p_krw_total", "p_fx_quote_id", "p_shares"),
             body.keys().asSequence().toSet(),
@@ -123,19 +124,9 @@ class ShareProposalTest {
                     .toSet(),
             )
         }
-        assertEquals(request.requestId.toString(), body.getString("p_request_id"))
+        assertEquals(operation.requestId.toString(), body.getString("p_request_id"))
         val text = body.toString()
         for (word in listOf("唐揚げ", "消費税", "name", "item", "1280", "ocr")) assertFalse(word, text.contains(word))
-    }
-
-    @Test
-    fun requestKeyMatchesIosAndIsContentBound() {
-        val a = ShareProposalRequest("e1", 1, KrwBasis.KrwOriginal, 10001, null, listOf(ShareLine(host, 6000), ShareLine(uploader, 4001)))
-        // iOS ShareProposalRequest.requestID와 같은 값(같은 규칙).
-        assertEquals("49a7be2e-a0fd-84ce-a01c-462089b4a18e", a.requestId.toString())
-        assertEquals(a.requestId, a.copy(shares = a.shares.reversed()).requestId)
-        assertNotEquals(a.requestId, a.copy(expectedVersion = 2).requestId)
-        assertNotEquals(a.requestId, a.copy(shares = listOf(ShareLine(host, 6001), ShareLine(uploader, 4000))).requestId)
     }
 
     @Test

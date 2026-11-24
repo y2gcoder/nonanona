@@ -324,19 +324,20 @@
     }
 
     /// 품목 나누기 제안 몫(ADR-0011). 본문은 `body(for:)`가 만드는 키만 담는다.
-    func propose(_ proposal: ShareProposalRequest, in trip: TripID) async throws -> SubmittedProposal {
-      let data = try await call("propose_expense_shares", Self.body(for: proposal))
+    func propose(_ operation: ProposalOperation, in trip: TripID) async throws -> SubmittedProposal {
+      let data = try await call("propose_expense_shares", Self.body(for: operation))
       guard let r = try? LocalJSON.decoder.decode(LocalJSON.ProposalSubmitted.self, from: data),
-        r.expenseId == proposal.expenseID
+        r.expenseId == operation.request.expenseID
       else { throw SettlementFailure.unknown }
-      return SubmittedProposal(proposalID: r.proposalId, replayed: r.replayed)
+      return SubmittedProposal(proposalID: r.proposalId, replayed: r.replayed, latest: r.latest ?? true)
     }
 
     /// 제안 요청 본문: 지출·버전·요청 키·원화 기준·합계·(예상액이면) 고시값·사람마다 {구성원 ID, 원}. 다른 키는 없다.
-    static func body(for proposal: ShareProposalRequest) -> [String: Any] {
-      [
+    static func body(for operation: ProposalOperation) -> [String: Any] {
+      let proposal = operation.request
+      return [
         "p_expense": proposal.expenseID, "p_expected_version": proposal.expectedVersion,
-        "p_request_id": proposal.requestID.uuidString.lowercased(), "p_krw_basis": proposal.basis.rawValue,
+        "p_request_id": operation.requestID.uuidString.lowercased(), "p_krw_basis": proposal.basis.rawValue,
         "p_krw_total": proposal.krwTotal, "p_fx_quote_id": proposal.fxQuoteID.map { $0 as Any } ?? NSNull(),
         "p_shares": proposal.shares.map { ["user_id": $0.member.value, "krw": $0.krw] as [String: Any] },
       ]
@@ -536,6 +537,8 @@
       let proposalId: String
       let expenseId: String
       let replayed: Bool
+      /// 20261124180000부터. 없으면(예전 서버) 가장 최근으로 본다.
+      let latest: Bool?
     }
 
     /// 장부의 품목 나누기 제안. 기준·상태·몫이 하나라도 맞지 않으면 nil(→ 장부 전체 `.unknown`).

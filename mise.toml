@@ -169,6 +169,10 @@ run = "python3 -I scripts/fx-correction-upgrade-check.py"
 description = "품목 나누기 제안 몫 계약 시험(ADR-0011, 실제 HTTP: 올린 사람만·정확한 몫·원화 기준 묶기·고시값 정정·재시도·잠금 경쟁·보이는 사람·확정에 닿지 않음). local:up 또는 local:reset 뒤. 인자: [결과 JSON]"
 run = "python3 -I scripts/share-proposal-contract.py"
 
+[tasks."local:share-proposal-upgrade"]
+description = "제안 범위 마이그레이션(20261124180000) 업그레이드 검사, DB를 지우지 않는다: 그 마이그레이션 전에 'prepare'(예전 RPC로 USD 제안 만들기) → supabase migration up → 'verify'(장부가 읽히고 그 제안은 null, 재시도 수렴, 새 USD 거절). 인자: prepare | verify [결과 JSON]"
+run = "python3 -I scripts/share-proposal-upgrade-check.py"
+
 [tasks."fx:fixture"]
 description = "기준환율 가상 시험값(시장 환율 아님, data_origin=fixture)을 로컬 DB에 넣는다. local:reset이 이미 넣는다"
 run = "python3 -I scripts/ecos-fx.py fixture"

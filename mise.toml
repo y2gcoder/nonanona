@@ -157,6 +157,14 @@ run = "python3 -I scripts/fx-contract.py"
 description = "엔화 원화 기준 마이그레이션 업그레이드 검사: 앞 마이그레이션까지 되돌려 v1 확정본·검토 요청을 만든 뒤 새 마이그레이션을 올려 그대로인지 본다. 로컬 DB를 지우고 끝나면 local:reset 상태로 되돌린다. 인자: [결과 JSON]"
 run = "python3 -I scripts/fx-upgrade-check.py"
 
+[tasks."local:fx-correction-contract"]
+description = "확정 전 기준환율 정정 계약 시험(ADR-0009, 실제 HTTP: 정정 시 확정 차단·고정 금액 유지·새 예상 적용·반복 정정·같은 값 다시 받기·고시값 사라짐·출처 종류·받기와 확정·유지의 동시성·재시도·권한). local:up 또는 local:reset 뒤. 인자: [결과 JSON]"
+run = "python3 -I scripts/fx-correction-contract.py"
+
+[tasks."local:fx-correction-upgrade"]
+description = "정정 정책 마이그레이션 업그레이드 검사: 앞 마이그레이션까지 되돌려 v2 확정본·확정·검토 요청·정정된 포함 예상액을 만든 뒤 새 마이그레이션을 올려 본다. 로컬 DB를 지우고 끝나면 local:reset 상태로 되돌린다. 인자: [결과 JSON]"
+run = "python3 -I scripts/fx-correction-upgrade-check.py"
+
 [tasks."fx:fixture"]
 description = "기준환율 가상 시험값(시장 환율 아님, data_origin=fixture)을 로컬 DB에 넣는다. local:reset이 이미 넣는다"
 run = "python3 -I scripts/ecos-fx.py fixture"

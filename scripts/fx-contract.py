@@ -332,6 +332,17 @@ def main():
                            p_decision="hold", p_hold_reason="원화 청구액 확인 대기")
     st, body, _ = review(host, "usd", p_krw_amount=1450, p_shares=[{"user_id": member.uid, "krw": 1450}])
     st, body, _ = review(host, "krw", p_shares=pair(38000))
+    # 정정된 예상액은 방장 결정 전에는 확정을 막는다(ADR-0009). 여기서는 고정 금액 유지를 고른다(자세한 검사는 fx-correction-contract.py).
+    st, prev, _ = host.rpc("preview_settlement", p_trip=trip)
+    check("superseded estimates (both pinned to the d2 quote for d3) block the preview until the host decides (ADR-0009)",
+          not prev["ready"] and sorted(prev["fx_correction_expense_ids"]) == sorted([ids["est"], ids["same"]]),
+          blocking=prev.get("fx_correction_expense_ids"))
+    for key in ("est", "same"):
+        e = ledger()[0][ids[key]]
+        st, body, _ = host.rpc("keep_fx_estimate", p_expense=ids[key], p_expected_version=e["version"],
+                               p_request_id=str(uuid.uuid4()), p_replacement_quote_id=e["fx_proposal"]["quote_id"])
+        check(f"host keeps the pinned estimate ({key})", st == 200 and ledger()[0][ids[key]]["fx_correction"] == "kept",
+              status=st)
     st, prev, _ = host.rpc("preview_settlement", p_trip=trip)
     check("preview is ready and lists the held expense as excluded", prev["ready"]
           and [x["expense_id"] for x in prev["excluded"] if x["kind"] == "held"] == [ids["undet"]])

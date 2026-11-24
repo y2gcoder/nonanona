@@ -33,6 +33,9 @@ import app.nonanona.feature.settlement.SettlementGateway
 import app.nonanona.feature.settlement.SettlementPreview
 import app.nonanona.feature.settlement.ShareLine
 import app.nonanona.feature.settlement.SharePlan
+import app.nonanona.feature.settlement.ShareProposal
+import app.nonanona.feature.settlement.ShareProposalRequest
+import app.nonanona.feature.settlement.SubmittedProposal
 import app.nonanona.feature.settlement.Transfer
 import app.nonanona.feature.trip.InviteAcceptException
 import app.nonanona.feature.trip.InviteAcceptFailure
@@ -513,6 +516,20 @@ class LocalSettlementGateway(
         return parse { LocalJson.final(JSONObject(raw)) ?: throw JSONException("final") }
     }
 
+    /** 품목 나누기 제안 몫(ADR-0011). 본문은 [body]가 만드는 키만 담는다. */
+    override suspend fun propose(
+        proposal: ShareProposalRequest,
+        trip: TripId,
+    ): SubmittedProposal {
+        val raw = call("propose_expense_shares", body(proposal))
+        return parse {
+            JSONObject(raw).let {
+                if (it.getString("expense_id") != proposal.expenseId) throw SettlementException(SettlementFailure.Unknown)
+                SubmittedProposal(it.getString("proposal_id"), it.getBoolean("replayed"))
+            }
+        }
+    }
+
     private suspend fun call(
         name: String,
         body: JSONObject,
@@ -531,6 +548,17 @@ class LocalSettlementGateway(
         }
 
     companion object {
+        /** 제안 요청 본문: 지출·버전·요청 키·원화 기준·합계·(예상액이면) 고시값·사람마다 {구성원 ID, 원}. 다른 키는 없다. */
+        fun body(proposal: ShareProposalRequest): JSONObject =
+            JSONObject()
+                .put("p_expense", proposal.expenseId)
+                .put("p_expected_version", proposal.expectedVersion)
+                .put("p_request_id", proposal.requestId.toString())
+                .put("p_krw_basis", proposal.basis.wire)
+                .put("p_krw_total", proposal.krwTotal)
+                .put("p_fx_quote_id", proposal.fxQuoteId ?: JSONObject.NULL)
+                .put("p_shares", JSONArray(proposal.shares.map { JSONObject().put("user_id", it.member.value).put("krw", it.krw) }))
+
         private val rejectedCodes =
             setOf(
                 "payer_required",
@@ -583,6 +611,10 @@ class LocalSettlementGateway(
 
                 http.code == "fx_not_superseded" -> {
                     SettlementFailure.FxNothingToKeep
+                }
+
+                http.code == "uploader_only" -> {
+                    SettlementFailure.UploaderOnly
                 }
 
                 http.code in rejectedCodes -> {
@@ -745,6 +777,18 @@ internal object LocalJson {
                 null
             }
         val shares = json.getJSONArray("shares")
+        val shareProposal =
+            if (json.present("share_proposal")) {
+                if (entry != "receipt") return null
+                shareProposal(
+                    json.getJSONObject("share_proposal"),
+                    json.getString("currency"),
+                    json.getString("uploaded_by"),
+                    json.getInt("version"),
+                ) ?: return null
+            } else {
+                null
+            }
         return LedgerExpense(
             id = json.getString("expense_id"),
             version = json.getInt("version"),
@@ -771,6 +815,44 @@ internal object LocalJson {
             fxProposal = proposal,
             fxSuperseded = json.optBoolean("fx_superseded", false),
             fxCorrection = correction,
+            shareProposal = shareProposal,
+        )
+    }
+
+    /** 장부의 품목 나누기 제안. 기준·상태·몫이 하나라도 맞지 않으면 null(→ 장부 전체 Unknown). */
+    private fun shareProposal(
+        json: JSONObject,
+        currency: String,
+        uploadedBy: String,
+        version: Int,
+    ): ShareProposal? {
+        val basis = json.strict("krw_basis")?.let(KrwBasis::of) ?: return null
+        val state = json.strict("state")?.let(ShareProposal.State::of) ?: return null
+        val proposedBy = json.strict("proposed_by") ?: return null
+        val expenseVersion = json.wholeNumber("expense_version") ?: return null
+        val total = json.wholeNumber("krw_total") ?: return null
+        val quote = if (json.present("fx_quote_id")) json.strict("fx_quote_id") ?: return null else null
+        val raw = json.optJSONArray("shares") ?: return null
+        val shares =
+            (0 until raw.length()).map { i ->
+                val line = raw.optJSONObject(i) ?: return null
+                ShareLine(MemberId(line.strict("user_id") ?: return null), line.wholeNumber("krw") ?: return null)
+            }
+        val ok =
+            proposedBy == uploadedBy && expenseVersion in 1..version.toLong() && total > 0 && total < SharePlan.MAX_KRW &&
+                shares.isNotEmpty() && shares.all { it.krw > 0 } && shares.map { it.member }.toSet().size == shares.size &&
+                shares.sumOf { it.krw } == total && (basis == KrwBasis.ReferenceEstimate) == (quote != null) &&
+                (if (basis == KrwBasis.KrwOriginal) currency == "KRW" else currency == "JPY")
+        if (!ok) return null
+        return ShareProposal(
+            json.strict("proposal_id") ?: return null,
+            MemberId(proposedBy),
+            expenseVersion.toInt(),
+            basis,
+            total,
+            quote,
+            shares,
+            state,
         )
     }
 
@@ -802,6 +884,10 @@ internal object LocalJson {
     fun ledger(json: JSONObject): RoomLedger? {
         val raw = json.getJSONArray("expenses")
         val expenses = (0 until raw.length()).map { expense(raw.getJSONObject(it)) ?: return null }
+        val members = members(json.getJSONArray("members"))
+        // 제안 몫은 이 방 구성원에게만 갈 수 있다.
+        val ids = members.map { it.id }.toSet()
+        if (!expenses.all { e -> e.shareProposal?.shares?.all { it.member in ids } ?: true }) return null
         return RoomLedger(
             tripId = TripId(json.getString("trip_id")),
             name = json.getString("trip_name"),
@@ -809,7 +895,7 @@ internal object LocalJson {
             revision = json.getLong("revision"),
             isHost = json.getString("my_role") == "host",
             me = MemberId(json.getString("me")),
-            members = members(json.getJSONArray("members")),
+            members = members,
             expenses = expenses,
         )
     }

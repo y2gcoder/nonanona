@@ -44,7 +44,15 @@ import app.nonanona.feature.receiptimport.ItemPlan
 import app.nonanona.feature.receiptimport.ItemPlanLine
 import app.nonanona.feature.receiptimport.ItemTranslationAvailability
 import app.nonanona.feature.receiptimport.SummaryKind
+import app.nonanona.feature.settlement.KrwBasis
+import app.nonanona.feature.settlement.ProposalBasis
+import app.nonanona.feature.settlement.ProposalSendState
+import app.nonanona.feature.settlement.ShareProposal
+import app.nonanona.feature.settlement.ShareProposalRequest
+import app.nonanona.feature.settlement.messageRes
 import app.nonanona.feature.settlement.originalAmount
+import app.nonanona.feature.settlement.quoteText
+import app.nonanona.feature.settlement.uploaderTextRes
 import app.nonanona.feature.settlement.wonText
 
 /** 품목별 나누기에서 고를 수 있는 사람(여행방 구성원). 서버 ID와 표시 이름만 받는다. */
@@ -77,6 +85,10 @@ fun ItemSplitScreen(
     onOpenTranslationSettings: () -> Unit,
     onApply: () -> Unit,
     onBack: (() -> Unit)?,
+    /** 올린 사람(회원)의 제안 화면이면 값이 있다(ADR-0011). null이면 방장 검토(직접 나누기에 채우기). */
+    proposal: ItemProposalPanel? = null,
+    onChooseRemainder: (String) -> Unit = {},
+    onPropose: () -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -98,7 +110,7 @@ fun ItemSplitScreen(
         ) {
             item {
                 Text(
-                    stringResource(R.string.items_privacy),
+                    stringResource(if (proposal == null) R.string.items_privacy else R.string.proposal_privacy),
                     style = TextRoles.supporting,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(Spacing.m).testTag("items_privacy"),
@@ -176,7 +188,11 @@ fun ItemSplitScreen(
                 }
             }
             item { SummarySection(plan) }
-            item { ResultSection(plan, people, krw, allocation, onApply) }
+            if (proposal != null) {
+                item { ProposalSection(plan, people, allocation, proposal, onChooseRemainder, onPropose) }
+            } else {
+                item { ResultSection(plan, people, krw, allocation, onApply) }
+            }
         }
     }
 }
@@ -471,6 +487,164 @@ private fun ResultSection(
                 style = TextRoles.supporting,
                 color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.testTag("items_problem"),
+            )
+        }
+    }
+}
+
+/** 제안 화면에 그릴 값: 묶을 원화 기준, 남은 원을 낼 사람, 보낼 요청(전부), 장부의 가장 최근 제안과 보내기 상태. */
+data class ItemProposalPanel(
+    val basis: ProposalBasis,
+    val remainderChoice: String?,
+    val request: ShareProposalRequest?,
+    val sent: ShareProposal?,
+    val sendState: ProposalSendState?,
+)
+
+@Composable
+private fun proposalBasisText(basis: ProposalBasis): String =
+    when (basis) {
+        is ProposalBasis.Ready -> {
+            val krw = wonText(basis.krw)
+            val quote = basis.quote
+            when (basis.basis) {
+                KrwBasis.KrwOriginal -> {
+                    stringResource(R.string.proposal_basis_krw, krw)
+                }
+
+                KrwBasis.ReferenceEstimate -> {
+                    if (quote == null) {
+                        krw
+                    } else {
+                        stringResource(
+                            if (quote.isSynthetic) R.string.proposal_basis_estimate_synthetic else R.string.proposal_basis_estimate,
+                            krw,
+                            quoteText(quote),
+                        )
+                    }
+                }
+
+                KrwBasis.VerifiedCharge -> {
+                    stringResource(R.string.proposal_basis_verified, krw)
+                }
+
+                KrwBasis.AcquisitionCost -> {
+                    stringResource(R.string.proposal_basis_acquisition, krw)
+                }
+            }
+        }
+
+        is ProposalBasis.Unavailable -> {
+            stringResource(
+                when (basis.reason) {
+                    ProposalBasis.Reason.Finalized -> R.string.proposal_basis_finalized
+                    ProposalBasis.Reason.NoKrwBasis -> R.string.proposal_basis_none
+                    ProposalBasis.Reason.UnsupportedCurrency -> R.string.proposal_basis_unsupported
+                },
+            )
+        }
+    }
+
+@Composable
+private fun ProposalSection(
+    plan: ItemPlan,
+    people: List<ItemSplitPerson>,
+    allocation: ItemAllocationResult?,
+    proposal: ItemProposalPanel,
+    onChooseRemainder: (String) -> Unit,
+    onPropose: () -> Unit,
+) {
+    fun name(id: String) = people.firstOrNull { it.id == id }?.name
+    Block(stringResource(R.string.proposal_title), stringResource(R.string.proposal_footer)) {
+        Text(proposalBasisText(proposal.basis), style = TextRoles.supporting, modifier = Modifier.testTag("items_proposal_basis"))
+        if (proposal.basis is ProposalBasis.Ready) {
+            val ok = allocation?.allocation
+            val problem = allocation?.problem
+            if (ok != null) {
+                when (ok) {
+                    is ItemAllocation.Exact -> {
+                        ShareRows(ok.shares, people)
+                    }
+
+                    is ItemAllocation.PairRule -> {
+                        ShareRows(ok.shares, people)
+                    }
+
+                    is ItemAllocation.Remainder -> {
+                        ShareRows(ok.floors, people)
+                        Text(
+                            stringResource(R.string.proposal_remainder, wonText(ok.remaining)),
+                            style = TextRoles.supporting,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.testTag("items_remainder"),
+                        )
+                        ok.floors.forEachIndexed { index, share ->
+                            FilterChip(
+                                selected = proposal.remainderChoice == share.member,
+                                onClick = { onChooseRemainder(share.member) },
+                                label = {
+                                    Text(
+                                        stringResource(
+                                            R.string.proposal_remainder_choice,
+                                            name(share.member) ?: stringResource(R.string.items_unknown_member),
+                                            wonText(ok.remaining),
+                                        ),
+                                    )
+                                },
+                                modifier = Modifier.testTag("items_remainder_${index + 1}"),
+                            )
+                        }
+                    }
+                }
+                proposal.request?.let { request ->
+                    val unknown = stringResource(R.string.items_unknown_member)
+                    val lines = request.shares.map { "${name(it.member.value) ?: unknown} ${wonText(it.krw)}" }.joinToString(" · ")
+                    Text(
+                        stringResource(R.string.proposal_preview, lines),
+                        style = TextRoles.supporting,
+                        modifier = Modifier.testTag("items_proposal_preview"),
+                    )
+                }
+                val sending = proposal.sendState == ProposalSendState.Sending
+                Button(
+                    onClick = onPropose,
+                    enabled = proposal.request != null && !sending,
+                    modifier = Modifier.fillMaxWidth().testTag("items_propose"),
+                ) { Text(stringResource(if (sending) R.string.proposal_sending else R.string.proposal_send)) }
+            } else if (problem != null) {
+                Text(
+                    problemText(problem, plan, people),
+                    style = TextRoles.supporting,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.testTag("items_problem"),
+                )
+            }
+        }
+        when (val st = proposal.sendState) {
+            is ProposalSendState.Sent -> {
+                Text(
+                    stringResource(R.string.proposal_sent),
+                    style = TextRoles.supporting,
+                    modifier = Modifier.testTag("items_proposal_sent"),
+                )
+            }
+
+            is ProposalSendState.Failed -> {
+                Text(
+                    stringResource(st.failure.messageRes()),
+                    style = TextRoles.supporting,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.testTag("items_proposal_failed"),
+                )
+            }
+
+            else -> {}
+        }
+        proposal.sent?.let {
+            Text(
+                stringResource(it.state.uploaderTextRes()),
+                style = TextRoles.supporting,
+                modifier = Modifier.testTag("items_proposal_state"),
             )
         }
     }

@@ -192,6 +192,9 @@ fun RoomLedgerScreen(
     onSettlement: () -> Unit,
     onRefresh: () -> Unit,
     onBack: (() -> Unit)?,
+    /** 회원이 이 기기에서 올린 영수증 지출이면 품목으로 나눠 방장에게 제안할 수 있다(ADR-0011). */
+    canPropose: (LedgerExpense) -> Boolean = { false },
+    onPropose: (String) -> Unit = {},
 ) {
     val pending = ledger.expenses.count { it.status == ExpenseStatus.Pending }
     val corrections = ledger.expenses.count { it.fxCorrection?.blocksFinalize == true }
@@ -284,6 +287,21 @@ fun RoomLedgerScreen(
                         (if (canReview) Modifier.clickable { onReview(expense.id) } else Modifier)
                             .testTag("expense_${index + 1}"),
                 )
+                val sent = expense.shareProposal
+                if (!canReview && sent != null && expense.uploadedBy == ledger.me) {
+                    Text(
+                        stringResource(sent.state.uploaderTextRes()),
+                        style = TextRoles.caption,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = Spacing.m).testTag("expense_proposal_${index + 1}"),
+                    )
+                }
+                if (!canReview && canPropose(expense)) {
+                    TextButton(
+                        onClick = { onPropose(expense.id) },
+                        modifier = Modifier.padding(horizontal = Spacing.s).testTag("propose_items_${index + 1}"),
+                    ) { Text(stringResource(R.string.proposal_open)) }
+                }
                 HorizontalDivider()
             }
             item {
@@ -361,6 +379,13 @@ private fun ExpenseRow(
                 (expense.status as? ExpenseStatus.Held)?.let {
                     Text(stringResource(R.string.expense_hold_reason, it.reason), style = TextRoles.caption)
                 }
+                if (ledger.isHost && expense.shareProposal?.state == ShareProposal.State.Current) {
+                    Text(
+                        stringResource(R.string.proposal_host_row_note),
+                        style = TextRoles.caption,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
             }
         },
         trailingContent = {
@@ -413,6 +438,8 @@ fun ExpenseReviewScreen(
     /** 이 지출을 이 기기에서 올려 영수증 품목(기기 안)으로 나눌 수 있다. */
     itemSplitAvailable: Boolean = false,
     onOpenItemSplit: () -> Unit = {},
+    /** 올린 사람의 제안 몫을 "직접 나누기"에 채운다(보내지 않는다, ADR-0011). */
+    onFillProposal: () -> Unit = {},
 ) {
     var askingReason by rememberSaveable { mutableStateOf(false) }
     val saving = state == ReviewSaveState.Saving
@@ -472,6 +499,20 @@ fun ExpenseReviewScreen(
                     onShow = onShowReceipt,
                     onHide = onHideReceipt,
                 )
+            }
+            val proposal = expense.shareProposal
+            if (ledger.isHost && proposal != null) {
+                item {
+                    ShareProposalSection(
+                        proposal = proposal,
+                        expense = expense,
+                        ledger = ledger,
+                        form = form,
+                        entered = (result as? ShareResult.Valid)?.shares,
+                        saving = saving,
+                        onFill = onFillProposal,
+                    )
+                }
             }
             item {
                 Section(stringResource(R.string.review_payer), stringResource(R.string.review_payer_hint)) {
@@ -1006,6 +1047,105 @@ fun ReceiptViewFailure.messageRes(): Int =
         ReceiptViewFailure.Unknown -> R.string.receipt_failure_unknown
     }
 
+/**
+ * 방장 검토의 "올린 사람의 품목 나누기 제안": 원화 기준·합계, 사람마다 제안 몫과 지금 입력(또는 포함한) 몫, 상태.
+ * 채우기는 입력만 바꾸고 보내지 않는다. 지금 제안이 아니거나 방장이 고를 수 있는 원화와 맞지 않으면 채울 수 없다.
+ */
+@Composable
+private fun ShareProposalSection(
+    proposal: ShareProposal,
+    expense: LedgerExpense,
+    ledger: RoomLedger,
+    form: ShareForm,
+    entered: List<ShareLine>?,
+    saving: Boolean,
+    onFill: () -> Unit,
+) {
+    val canFill = form.filledFrom(proposal, expense, ledger.members) != null
+    val other = entered ?: if (expense.status == ExpenseStatus.Included) expense.shares else emptyList()
+    val otherLabel = stringResource(if (entered != null) R.string.proposal_entered else R.string.proposal_included)
+    val comparison = ProposalComparison.of(proposal, other, ledger.members)
+    val none = stringResource(R.string.proposal_none)
+    Section(stringResource(R.string.proposal_host_title), stringResource(R.string.proposal_host_hint)) {
+        val total = wonText(proposal.krwTotal)
+        val label =
+            stringResource(
+                when (proposal.basis) {
+                    KrwBasis.KrwOriginal -> R.string.proposal_host_label_krw
+                    KrwBasis.ReferenceEstimate -> R.string.proposal_host_label_estimate
+                    KrwBasis.VerifiedCharge -> R.string.proposal_host_label_verified
+                    KrwBasis.AcquisitionCost -> R.string.proposal_host_label_acquisition
+                },
+                total,
+            )
+        Text(
+            stringResource(R.string.proposal_host_from, ledger.nameOf(proposal.proposedBy), label),
+            style = TextRoles.body,
+            modifier = Modifier.testTag("review_proposal_basis"),
+        )
+        comparison.rows.forEachIndexed { index, row ->
+            Row(Modifier.fillMaxWidth().testTag("review_proposal_row_${index + 1}")) {
+                Text(ledger.nameOf(row.member), style = TextRoles.body, modifier = Modifier.weight(1f))
+                Text(
+                    stringResource(
+                        R.string.proposal_host_row,
+                        row.proposed?.let { wonText(it) } ?: none,
+                        otherLabel,
+                        row.other?.let { wonText(it) } ?: none,
+                    ),
+                    style = TextRoles.body,
+                )
+            }
+        }
+        if (other.isNotEmpty()) {
+            Text(
+                stringResource(if (comparison.matches) R.string.proposal_host_match else R.string.proposal_host_differs, otherLabel),
+                style = TextRoles.supporting,
+                color = if (comparison.matches) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.error,
+                modifier = Modifier.testTag("review_proposal_match"),
+            )
+        }
+        Text(
+            stringResource(proposal.state.hostTextRes()),
+            style = TextRoles.supporting,
+            modifier = Modifier.testTag("review_proposal_state"),
+        )
+        if (proposal.state == ShareProposal.State.Current) {
+            OutlinedButton(
+                onClick = onFill,
+                enabled = !saving && canFill,
+                modifier = Modifier.fillMaxWidth().testTag("review_proposal_fill"),
+            ) { Text(stringResource(R.string.proposal_host_fill)) }
+            if (!canFill) {
+                Text(
+                    stringResource(R.string.proposal_host_unfillable),
+                    style = TextRoles.supporting,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("review_proposal_unfillable"),
+                )
+            }
+        }
+    }
+}
+
+fun ShareProposal.State.uploaderTextRes(): Int =
+    when (this) {
+        ShareProposal.State.Current -> R.string.proposal_uploader_current
+        ShareProposal.State.StaleExpense -> R.string.proposal_uploader_stale_expense
+        ShareProposal.State.StaleBasis -> R.string.proposal_uploader_stale_basis
+        ShareProposal.State.Applied -> R.string.proposal_uploader_applied
+        ShareProposal.State.Closed -> R.string.proposal_uploader_closed
+    }
+
+fun ShareProposal.State.hostTextRes(): Int =
+    when (this) {
+        ShareProposal.State.Current -> R.string.proposal_host_current
+        ShareProposal.State.StaleExpense -> R.string.proposal_host_stale_expense
+        ShareProposal.State.StaleBasis -> R.string.proposal_host_stale_basis
+        ShareProposal.State.Applied -> R.string.proposal_host_applied
+        ShareProposal.State.Closed -> R.string.proposal_host_closed
+    }
+
 @Composable
 private fun Section(
     title: String,
@@ -1468,6 +1608,7 @@ fun SettlementFailure.messageRes(): Int =
         SettlementFailure.FxCorrectionRequired -> R.string.settle_failure_fx_required
         SettlementFailure.FxReplacementUnavailable -> R.string.settle_failure_fx_unavailable
         SettlementFailure.FxNothingToKeep -> R.string.settle_failure_fx_nothing
+        SettlementFailure.UploaderOnly -> R.string.settle_failure_uploader_only
         SettlementFailure.Network -> R.string.failure_network
         SettlementFailure.Unavailable -> R.string.settle_failure_unavailable
         SettlementFailure.Unknown -> R.string.settle_failure_unknown

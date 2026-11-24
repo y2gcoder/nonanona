@@ -103,6 +103,8 @@ struct ShareProposalTests {
     let otherShares = ShareProposalRequest(
       expenseID: "e1", expectedVersion: 1, basis: .krwOriginal, krwTotal: 10001, fxQuoteID: nil,
       shares: [ShareLine(member: Self.host, krw: 6001), ShareLine(member: Self.uploader, krw: 4000)])
+    // Android ShareProposalRequest.requestId와 같은 값(같은 규칙).
+    #expect(a.requestID.uuidString.lowercased() == "49a7be2e-a0fd-84ce-a01c-462089b4a18e")
     #expect(a.requestID == reordered.requestID)
     #expect(a.requestID != otherVersion.requestID && a.requestID != otherShares.requestID)
     #expect(a.requestID.uuidString.lowercased().range(of: "^[0-9a-f-]{14}8", options: .regularExpression) != nil)

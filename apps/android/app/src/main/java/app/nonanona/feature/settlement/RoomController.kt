@@ -79,6 +79,19 @@ sealed interface SettlementScreenState {
     ) : SettlementScreenState
 }
 
+sealed interface ProposalSendState {
+    data object Sending : ProposalSendState
+
+    data class Sent(
+        val replayed: Boolean,
+    ) : ProposalSendState
+
+    /** 보내지 못했다. 지출·기준환율이 바뀐 경우(Stale·QuoteChanged)에는 장부를 새로 불러와 새 값으로 다시 계산하게 한다. */
+    data class Failed(
+        val failure: SettlementFailure,
+    ) : ProposalSendState
+}
+
 data class RoomUiState(
     val tripList: List<TripSummary> = emptyList(),
     val listFailure: RoomLoadFailure? = null,
@@ -98,6 +111,8 @@ data class RoomUiState(
     val finalizeConfirmation: TripId? = null,
     /** 검토 화면에서 연 가림 사본(지출별). 저장하지 않는다. */
     val receiptViews: Map<ExpenseTarget, ReceiptViewState> = emptyMap(),
+    /** 올린 사람의 품목 나누기 제안 보내기 상태(지출마다, ADR-0011). */
+    val proposalState: Map<ExpenseTarget, ProposalSendState> = emptyMap(),
 ) {
     fun expense(target: ExpenseTarget): LedgerExpense? = ledgers[target.tripId]?.expenses?.firstOrNull { it.id == target.expenseId }
 }
@@ -333,13 +348,74 @@ class RoomController(
                     onSessionExpired()
                 }
 
-                SettlementFailure.Rejected, SettlementFailure.HostOnly, SettlementFailure.NotFound -> {
+                SettlementFailure.Rejected, SettlementFailure.HostOnly, SettlementFailure.NotFound, SettlementFailure.UploaderOnly -> {
                     sentKeeps.remove(target)
                 }
 
                 else -> {}
             }
         }
+    }
+
+    /**
+     * 올린 사람이 동의한 제안을 보낸다(ADR-0011). 서버로 가는 값은 [ShareProposalRequest]뿐이다(품목 정보 없음).
+     * 같은 내용은 같은 요청 키라 다시 보내도 같은 제안으로 수렴한다. 보낸 뒤나 지출·고시값이 바뀌어 거절되면 장부를 새로 불러온다.
+     */
+    fun propose(
+        request: ShareProposalRequest,
+        target: ExpenseTarget,
+    ) {
+        if (state.value.proposalState[target] == ProposalSendState.Sending) return
+        setProposal(target, ProposalSendState.Sending)
+        scope.launch {
+            val result =
+                try {
+                    Result.success(settlement.propose(request, target.tripId))
+                } catch (e: SettlementException) {
+                    Result.failure(e)
+                }
+            val sent = result.getOrNull()
+            if (sent != null) {
+                setProposal(target, ProposalSendState.Sent(sent.replayed))
+                loadLedger(target.tripId)
+                return@launch
+            }
+            val failure = (result.exceptionOrNull() as SettlementException).failure
+            setProposal(target, ProposalSendState.Failed(failure))
+            when (failure) {
+                SettlementFailure.SessionExpired -> {
+                    onSessionExpired()
+                }
+
+                SettlementFailure.Stale, SettlementFailure.QuoteChanged, SettlementFailure.Finalized, SettlementFailure.Rejected -> {
+                    loadLedger(target.tripId)
+                }
+
+                else -> {}
+            }
+        }
+    }
+
+    fun clearProposalState(target: ExpenseTarget) = setProposal(target, null)
+
+    private fun setProposal(
+        target: ExpenseTarget,
+        value: ProposalSendState?,
+    ) = mutable.update {
+        it.copy(proposalState = if (value == null) it.proposalState - target else it.proposalState + (target to value))
+    }
+
+    /** 방장: 올린 사람의 지금 제안을 검토의 "직접 나누기"에 채운다. 서버에는 보내지 않는다(결제자를 고르고 "포함하기"를 눌러야 간다). */
+    fun fillFromProposal(target: ExpenseTarget): Boolean {
+        val now = state.value
+        val ledger = now.ledgers[target.tripId] ?: return false
+        val expense = now.expense(target) ?: return false
+        val proposal = expense.shareProposal ?: return false
+        val form = now.forms[target] ?: return false
+        if (!ledger.isHost || isSaving(target)) return false
+        val filled = form.filledFrom(proposal, expense, ledger.members) ?: return false
+        editForm(target) { filled }
+        return true
     }
 
     private fun send(
@@ -420,7 +496,7 @@ class RoomController(
                         onSessionExpired()
                     }
 
-                    SettlementFailure.Rejected, SettlementFailure.HostOnly, SettlementFailure.NotFound -> {
+                    SettlementFailure.Rejected, SettlementFailure.HostOnly, SettlementFailure.NotFound, SettlementFailure.UploaderOnly -> {
                         sentReviews.remove(target)
                     }
 

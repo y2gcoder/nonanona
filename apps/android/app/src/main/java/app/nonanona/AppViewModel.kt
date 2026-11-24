@@ -44,10 +44,15 @@ import app.nonanona.feature.receiptimport.nextToReview
 import app.nonanona.feature.receiptimport.sharedImageUris
 import app.nonanona.feature.settlement.ExpenseTarget
 import app.nonanona.feature.settlement.LedgerExpense
+import app.nonanona.feature.settlement.MemberId
+import app.nonanona.feature.settlement.ProposalBasis
+import app.nonanona.feature.settlement.ProposalShares
 import app.nonanona.feature.settlement.ReceiptContext
 import app.nonanona.feature.settlement.RoomController
+import app.nonanona.feature.settlement.RoomLedger
 import app.nonanona.feature.settlement.RoomUiState
 import app.nonanona.feature.settlement.ShareMode
+import app.nonanona.feature.settlement.ShareProposalRequest
 import app.nonanona.feature.trip.InviteAcceptFailure
 import app.nonanona.feature.trip.InviteCode
 import app.nonanona.feature.trip.JoinState
@@ -99,6 +104,12 @@ sealed interface Route {
 
     /** 지출 검토 위의 품목별 나누기: 여행방 지출과, 그 지출을 이 기기에서 올린 확인한 영수증(안정 ID). 세 번째 칸에 쌓인다. */
     data class ItemSplit(
+        val target: ExpenseTarget,
+        val receipt: Receipt,
+    ) : Route
+
+    /** 장부 위의 품목 나누기 제안(회원이 이 기기에서 올린 영수증, ADR-0011). 결과 몫만 방장에게 제안으로 보낸다. */
+    data class ItemProposal(
         val target: ExpenseTarget,
         val receipt: Receipt,
     ) : Route
@@ -228,6 +239,10 @@ data class AppUiState(
     val itemPlanSaveFailed: Set<Route.Receipt> = emptySet(),
     /** 저장한 품목 계획을 열지 못했다. 이때는 계획이 없으므로 편집·저장도 없다(디스크의 계획을 덮지 않는다). */
     val itemPlanLoadFailed: Map<Route.Receipt, ItemPlanLoadFailure> = emptyMap(),
+    /** 제안에서 나눠떨어지지 않을 때 남은 원을 낼 사람(올린 사람이 직접 고른다). 저절로 정하지 않는다. */
+    val proposalRemainder: Map<Route.ItemProposal, MemberId> = emptyMap(),
+    /** 보내기 전 확인 창(보낼 값을 그대로 보이고 동의를 받는다). */
+    val proposalConfirmation: Route.ItemProposal? = null,
     val itemTranslation: Map<Route.Receipt, ItemTranslationState> = emptyMap(),
 ) {
     /**
@@ -1031,6 +1046,87 @@ class AppViewModel(
             )
         }
         if (backStack.lastOrNull() == split) back()
+    }
+
+    // 품목 나누기 제안(올린 사람, ADR-0011)
+
+    /** 회원이 이 기기에서 올린 영수증 지출이면 품목으로 나눠 방장에게 제안할 수 있다. 방장 기기는 지금처럼 직접 나눈다. */
+    fun canProposeItems(
+        expense: LedgerExpense,
+        ledger: RoomLedger,
+        app: AppUiState = state.value,
+    ): Boolean =
+        !ledger.isHost && !ledger.isFinalized && expense.uploadedBy == ledger.me && !expense.isManual &&
+            app.localReceipt(expense) != null
+
+    fun openItemProposal(target: ExpenseTarget) {
+        val ledger = rooms.state.value.ledgers[target.tripId] ?: return
+        val expense = rooms.state.value.expense(target) ?: return
+        if (!canProposeItems(expense, ledger)) return
+        val receipt = state.value.localReceipt(expense) ?: return
+        val processor = processors[receipt.draftId] ?: return
+        viewModelScope.launch {
+            loadItemPlan(receipt, processor)
+            rooms.clearProposalState(target)
+            showOnly(Route.Home, Route.Room, Route.ItemProposal(target, receipt))
+            checkTranslation(receipt)
+        }
+    }
+
+    fun proposalBasis(
+        route: Route.ItemProposal,
+        room: RoomUiState = rooms.state.value,
+    ): ProposalBasis {
+        val ledger = room.ledgers[route.target.tripId] ?: return ProposalBasis.Unavailable(ProposalBasis.Reason.Finalized)
+        val expense = room.expense(route.target) ?: return ProposalBasis.Unavailable(ProposalBasis.Reason.Finalized)
+        return ProposalBasis.of(expense, ledger.isFinalized)
+    }
+
+    /** 제안의 원화(묶을 기준의 원화)로 계산한 사람마다 몫. 결제자는 없다(방장이 검토에서 정한다). */
+    fun proposalAllocation(
+        route: Route.ItemProposal,
+        app: AppUiState = state.value,
+        room: RoomUiState = rooms.state.value,
+    ): ItemAllocationResult? {
+        val plan = app.itemPlans[route.receipt] ?: return null
+        val ledger = room.ledgers[route.target.tripId] ?: return null
+        val krw = (proposalBasis(route, room) as? ProposalBasis.Ready)?.krw
+        return ItemAllocator.allocate(plan, krw, null, ledger.members.map { it.id.value })
+    }
+
+    fun chooseProposalRemainder(
+        route: Route.ItemProposal,
+        member: MemberId,
+    ) = mutableState.update { it.copy(proposalRemainder = it.proposalRemainder + (route to member)) }
+
+    /** 서버로 갈 요청 전부. 품목 정보는 들어갈 자리가 없다. 남은 원을 고르지 않았거나 0원 몫이 있으면 null. */
+    fun proposalRequest(
+        route: Route.ItemProposal,
+        app: AppUiState = state.value,
+        room: RoomUiState = rooms.state.value,
+    ): ShareProposalRequest? {
+        val basis = proposalBasis(route, room) as? ProposalBasis.Ready ?: return null
+        val expense = room.expense(route.target) ?: return null
+        val allocation = proposalAllocation(route, app, room)?.allocation ?: return null
+        val shares = ProposalShares.from(allocation, app.proposalRemainder[route]) ?: return null
+        if (shares.sumOf { it.krw } != basis.krw) return null
+        return ShareProposalRequest(expense.id, expense.version, basis.basis, basis.krw, basis.quote?.quoteId, shares)
+    }
+
+    fun requestProposalSend(route: Route.ItemProposal) {
+        if (proposalRequest(route) == null) return
+        mutableState.update { it.copy(proposalConfirmation = route) }
+    }
+
+    fun cancelProposalSend() = mutableState.update { it.copy(proposalConfirmation = null) }
+
+    /** 확인 창에서 "보내기"를 누른 뒤에만 보낸다. 창을 연 뒤 값이 바뀌었으면(장부 새로고침 등) 보내지 않는다. */
+    fun confirmProposalSend(shown: ShareProposalRequest) {
+        val route = state.value.proposalConfirmation ?: return
+        mutableState.update { it.copy(proposalConfirmation = null) }
+        val request = proposalRequest(route) ?: return
+        if (request != shown) return
+        rooms.propose(request, route.target)
     }
 
     /** 목록(홈)에서 고른 화면을 연다. 넓은 창에서는 목록 옆의 상세를 바꾸고, 좁은 창에서는 홈 위에 쌓는다. */

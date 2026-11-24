@@ -8,9 +8,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.adaptive.ExperimentalMaterial3AdaptiveApi
 import androidx.compose.material3.adaptive.navigation3.ListDetailSceneStrategy
 import androidx.compose.material3.adaptive.navigation3.rememberListDetailSceneStrategy
@@ -48,8 +50,14 @@ import app.nonanona.feature.receiptimport.count
 import app.nonanona.feature.settlement.ExpenseReviewScreen
 import app.nonanona.feature.settlement.ExpenseTarget
 import app.nonanona.feature.settlement.FinalizeDialog
+import app.nonanona.feature.settlement.KrwBasis
+import app.nonanona.feature.settlement.MemberId
+import app.nonanona.feature.settlement.ProposalBasis
+import app.nonanona.feature.settlement.RoomLedger
 import app.nonanona.feature.settlement.RoomLedgerScreen
 import app.nonanona.feature.settlement.SettlementScreen
+import app.nonanona.feature.settlement.ShareProposalRequest
+import app.nonanona.feature.settlement.wonText
 import app.nonanona.feature.trip.InviteScreen
 import app.nonanona.feature.trip.TripRoomScreen
 
@@ -210,6 +218,8 @@ fun NonanonaApp(viewModel: AppViewModel) {
                             onSettlement = { viewModel.openSettlement(room.id) },
                             onRefresh = { viewModel.refreshRoom(room.id) },
                             onBack = viewModel::back.takeUnless { twoPane },
+                            canPropose = { viewModel.canProposeItems(it, ledger, state) },
+                            onPropose = { viewModel.openItemProposal(ExpenseTarget(room.id, it)) },
                         )
                     } else if (room != null) {
                         TripRoomScreen(room, state.drafts.size, snackbarFor(Route.Room), onBack = viewModel::back.takeUnless { twoPane })
@@ -240,6 +250,7 @@ fun NonanonaApp(viewModel: AppViewModel) {
                             onApplyEstimate = { viewModel.rooms.applyNewEstimate(target) },
                             itemSplitAvailable = state.localReceipt(expense) != null,
                             onOpenItemSplit = { viewModel.openItemSplit(target) },
+                            onFillProposal = { viewModel.rooms.fillFromProposal(target) },
                         )
                     }
                 }
@@ -272,6 +283,45 @@ fun NonanonaApp(viewModel: AppViewModel) {
                         onBack = viewModel::back.takeUnless { twoPane },
                     )
                 }
+                // 장부 위의 품목 나누기 제안(회원이 이 기기에서 올린 영수증, ADR-0011). 세 번째 칸에 쌓인다.
+                entry<Route.ItemProposal>(metadata = ListDetailSceneStrategy.extraPane()) { route ->
+                    val ledger = rooms.ledgers[route.target.tripId]
+                    val expense = rooms.expense(route.target)
+                    val context = LocalContext.current
+                    val settings = viewModel.translationSettings()
+                    val basis = viewModel.proposalBasis(route, rooms)
+                    ItemSplitScreen(
+                        plan = state.itemPlans[route.receipt],
+                        people = ledger?.members.orEmpty().map { ItemSplitPerson(it.id.value, it.displayName) },
+                        krw = (basis as? ProposalBasis.Ready)?.krw,
+                        allocation = viewModel.proposalAllocation(route, state, rooms),
+                        translation = state.itemTranslation[route.receipt],
+                        translatorIsPreview = viewModel.itemTranslatorIsPreview,
+                        hasTranslationSettings = settings != null,
+                        saveFailed = route.receipt in state.itemPlanSaveFailed,
+                        loadFailure = state.itemPlanLoadFailed[route.receipt],
+                        edit = { change -> viewModel.editItemPlan(route.receipt, change) },
+                        onRetrySave = { viewModel.retryItemPlanSave(route.receipt) },
+                        onRetryLoad = { viewModel.retryItemPlanLoad(route.receipt) },
+                        onTranslate = { viewModel.translateItemNames(route.receipt) },
+                        onOpenTranslationSettings = {
+                            runCatching { settings?.send(context, 0, null) }
+                            viewModel.checkTranslation(route.receipt)
+                        },
+                        onApply = {},
+                        onBack = viewModel::back.takeUnless { twoPane },
+                        proposal =
+                            ItemProposalPanel(
+                                basis = basis,
+                                remainderChoice = state.proposalRemainder[route]?.value,
+                                request = viewModel.proposalRequest(route, state, rooms),
+                                sent = expense?.shareProposal,
+                                sendState = rooms.proposalState[route.target],
+                            ),
+                        onChooseRemainder = { viewModel.chooseProposalRemainder(route, MemberId(it)) },
+                        onPropose = { viewModel.requestProposalSend(route) },
+                    )
+                }
                 entry<Route.Settlement>(metadata = ListDetailSceneStrategy.extraPane()) { route ->
                     SettlementScreen(
                         ledger = rooms.ledgers[route.trip],
@@ -293,6 +343,17 @@ fun NonanonaApp(viewModel: AppViewModel) {
     val debugUploadUi = viewModel.debugUploadUi
     if (confirmation != null && debugUploadUi != null) {
         debugUploadUi.Confirmation(confirmation, viewModel::confirmUpload, viewModel::cancelUploadConfirmation)
+    }
+
+    state.proposalConfirmation?.let { route ->
+        viewModel.proposalRequest(route, state, rooms)?.let { request ->
+            ProposalConsentDialog(
+                request = request,
+                ledger = rooms.ledgers[route.target.tripId],
+                onConfirm = { viewModel.confirmProposalSend(request) },
+                onCancel = viewModel::cancelProposalSend,
+            )
+        }
     }
 
     rooms.finalizeConfirmation?.let { trip ->
@@ -325,4 +386,37 @@ private fun DetailPlaceholder() {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
+}
+
+/** 보낼 값을 그대로 보인다: 사람마다 원, 원화 기준과 합계. 품목 정보는 보내지 않는다는 것을 함께 알린다(ADR-0011). */
+@Composable
+private fun ProposalConsentDialog(
+    request: ShareProposalRequest,
+    ledger: RoomLedger?,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val lines = request.shares.map { "${ledger?.nameOf(it.member).orEmpty()} ${wonText(it.krw)}" }.joinToString(", ")
+    val kind =
+        stringResource(
+            when (request.basis) {
+                KrwBasis.KrwOriginal -> R.string.proposal_kind_krw
+                KrwBasis.ReferenceEstimate -> R.string.proposal_kind_estimate
+                KrwBasis.VerifiedCharge -> R.string.proposal_kind_verified
+                KrwBasis.AcquisitionCost -> R.string.proposal_kind_acquisition
+            },
+        )
+    AlertDialog(
+        onDismissRequest = onCancel,
+        title = { Text(stringResource(R.string.proposal_confirm_title)) },
+        text = { Text(stringResource(R.string.proposal_confirm_body, lines, wonText(request.krwTotal), kind)) },
+        confirmButton = {
+            TextButton(onClick = onConfirm, modifier = Modifier.testTag("proposal_send_confirm")) {
+                Text(stringResource(R.string.proposal_confirm_send))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onCancel) { Text(stringResource(android.R.string.cancel)) }
+        },
+    )
 }

@@ -196,6 +196,8 @@ data class LedgerExpense(
     val fxSuperseded: Boolean = false,
     /** 포함한 예상액의 정정 상태(열린 방만). null이면 정정 없음. */
     val fxCorrection: FxCorrection? = null,
+    /** 올린 사람이 보낸 가장 최근 품목 나누기 제안(ADR-0011). 올린 사람과 방장에게만 온다. */
+    val shareProposal: ShareProposal? = null,
 )
 
 /** 여행방 장부. revision은 방의 입력이 바뀔 때마다 서버가 올리고, 확정은 방장이 본 revision으로만 한다. */
@@ -358,6 +360,9 @@ enum class SettlementFailure {
 
     /** 유지할 정정이 없다(이미 골랐거나 고시값이 다시 같아졌다). 장부를 다시 불러온다. */
     FxNothingToKeep,
+
+    /** 그 지출을 올린 사람만 제안할 수 있다. */
+    UploaderOnly,
     Network,
     Unavailable,
     Unknown,
@@ -393,6 +398,12 @@ interface SettlementGateway {
 
     /** 확정본이 없으면 null. */
     suspend fun finalized(trip: TripId): FinalSettlement?
+
+    /** 올린 사람의 품목 나누기 제안 몫(ADR-0011). 요청의 값(지출·버전·원화 기준·합계·사람마다 원)만 보낸다. */
+    suspend fun propose(
+        proposal: ShareProposalRequest,
+        trip: TripId,
+    ): SubmittedProposal = throw SettlementException(SettlementFailure.Unavailable)
 }
 
 object UnavailableSettlementGateway : SettlementGateway {

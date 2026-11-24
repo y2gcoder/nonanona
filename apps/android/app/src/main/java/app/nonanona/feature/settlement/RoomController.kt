@@ -135,7 +135,13 @@ class RoomController(
         val review: ExpenseReview,
     )
 
-    fun isSaving(target: ExpenseTarget): Boolean = target in inFlight
+    /** 응답을 기다리는 고정 금액 유지(지출마다 하나). 검토 저장과 같은 화면의 저장 중 상태를 쓴다. */
+    private val keeping = mutableSetOf<ExpenseTarget>()
+
+    /** 보낸 고정 금액 유지(응답을 못 받았을 수 있다). 같은 버전·같은 새 고시값이면 같은 요청 키를 쓴다. */
+    private val sentKeeps = mutableMapOf<ExpenseTarget, FxKeep>()
+
+    fun isSaving(target: ExpenseTarget): Boolean = target in inFlight || target in keeping
 
     private val sentFinalize = mutableMapOf<TripId, Pair<Long, UUID>>()
 
@@ -183,7 +189,7 @@ class RoomController(
         val stale =
             state.forms.filter { (target, form) ->
                 target.tripId == ledger.tripId &&
-                    target !in inFlight &&
+                    !isSaving(target) &&
                     ledger.expenses.firstOrNull { it.id == target.expenseId }?.let { it.version != form.baseVersion } == true
             }
         // 이 기기가 방금 저장해서 생긴 버전이면 알리지 않는다.
@@ -192,7 +198,10 @@ class RoomController(
             t.tripId == ledger.tripId && (ledger.expenses.firstOrNull { it.id == t.expenseId }?.version ?: 0) >= v
         }
         if (stale.isEmpty()) return state
-        stale.keys.forEach { sentReviews.remove(it) }
+        stale.keys.forEach {
+            sentReviews.remove(it)
+            sentKeeps.remove(it)
+        }
         val fresh = stale.keys.associateWith { t -> ShareForm.of(ledger.expenses.first { it.id == t.expenseId }, ledger.members) }
         return state.copy(forms = state.forms + fresh, reviewRefreshed = state.reviewRefreshed - mine + (stale.keys - mine))
     }
@@ -206,7 +215,7 @@ class RoomController(
         if (!ledger.isHost || ledger.isFinalized) return false
         val expense = now.expense(target) ?: return false
         // 저장 중이면 같은 작업에 다시 붙는다: 저장 중 상태·보낸 요청·입력을 그대로 두고 화면만 연다.
-        if (target in inFlight) return true
+        if (isSaving(target)) return true
         mutable.update {
             val kept = it.forms[target]
             if (kept != null && kept.baseVersion != expense.version) {
@@ -238,7 +247,7 @@ class RoomController(
         change: (ShareForm) -> ShareForm,
     ) = mutable.update {
         val form = it.forms[target] ?: return@update it
-        if (target in inFlight) return@update it
+        if (isSaving(target)) return@update it
         val failed = it.reviewState[target] is ReviewSaveState.Failed
         it.copy(forms = it.forms + (target to change(form)), reviewState = if (failed) it.reviewState - target else it.reviewState)
     }
@@ -262,12 +271,83 @@ class RoomController(
         send(target, form.baseVersion, ExpenseReview.Decision.Hold(reason))
     }
 
+    /**
+     * 새 예상 금액 적용(ADR-0009): 기준을 기준환율 예상으로 두고 기존 검토로 새 고시값과 지금 입력의 몫을 보낸다.
+     * 몫은 입력 그대로다. 한 사람·둘이 반씩은 새 금액으로 다시 계산되고, 직접 나눈 몫은 고치지 않는다(합이 맞아야 보낸다).
+     */
+    fun applyNewEstimate(target: ExpenseTarget) {
+        if (state.value.expense(target)?.fxCorrection == null) return
+        editForm(target) { it.copy(krwSource = KrwSource.Estimate) }
+        include(target)
+    }
+
+    /** 고정 금액 유지(ADR-0009): 방장이 비교 화면에서 본 새 고시값으로 정정을 확인하고, 포함한 예상액(금액·몫·기준)을 그대로 둔다. */
+    fun keepEstimate(target: ExpenseTarget) {
+        val now = state.value
+        val ledger = now.ledgers[target.tripId] ?: return
+        val expense = now.expense(target) ?: return
+        val quote = (expense.fxProposal as? FxProposal.Proposed)?.quote ?: return
+        if (!ledger.isHost || ledger.isFinalized || expense.fxCorrection != FxCorrection.Required || isSaving(target)) return
+        val keep =
+            sentKeeps[target]?.takeIf { it.expectedVersion == expense.version && it.replacementQuoteId == quote.quoteId }
+                ?: FxKeep(target.expenseId, expense.version, UUID.randomUUID(), quote.quoteId)
+        sentKeeps[target] = keep
+        keeping += target
+        mutable.update { it.copy(reviewState = it.reviewState + (target to ReviewSaveState.Saving)) }
+        scope.launch {
+            val result =
+                try {
+                    Result.success(settlement.keepEstimate(keep, target.tripId))
+                } catch (e: SettlementException) {
+                    Result.failure(e)
+                }
+            keeping -= target
+            val kept = result.getOrNull()
+            if (kept != null) {
+                sentKeeps.remove(target)
+                mutable.update {
+                    val saved = it.forms[target]?.baseVersion == keep.expectedVersion
+                    it.copy(
+                        reviewState = it.reviewState - target,
+                        forms = if (saved) it.forms - target else it.forms,
+                        previews = it.previews - target.tripId,
+                    )
+                }
+                savedVersions[target] = kept.version
+                onReviewSaved(target)
+                loadLedger(target.tripId)
+                return@launch
+            }
+            val failure = (result.exceptionOrNull() as SettlementException).failure
+            mutable.update { it.copy(reviewState = it.reviewState + (target to ReviewSaveState.Failed(failure))) }
+            when (failure) {
+                SettlementFailure.Stale, SettlementFailure.QuoteChanged, SettlementFailure.FxNothingToKeep,
+                SettlementFailure.FxReplacementUnavailable, SettlementFailure.Finalized,
+                -> {
+                    // 그사이 지출·고시값이 바뀌었다. 최신 장부로 비교를 다시 보이고 방장이 다시 고르게 한다(다른 요청 키).
+                    sentKeeps.remove(target)
+                    loadLedger(target.tripId)
+                }
+
+                SettlementFailure.SessionExpired -> {
+                    onSessionExpired()
+                }
+
+                SettlementFailure.Rejected, SettlementFailure.HostOnly, SettlementFailure.NotFound -> {
+                    sentKeeps.remove(target)
+                }
+
+                else -> {}
+            }
+        }
+    }
+
     private fun send(
         target: ExpenseTarget,
         version: Int,
         decision: ExpenseReview.Decision,
     ) {
-        if (target in inFlight) return
+        if (isSaving(target)) return
         // 응답을 못 받은 같은 검토를 다시 보내면 같은 요청 키를 쓴다(서버가 같은 결과를 돌려준다).
         val review =
             sentReviews[target]?.takeIf { it.expectedVersion == version && it.decision == decision }
@@ -466,6 +546,15 @@ class RoomController(
                             mutable.update { it.copy(previews = it.previews + (trip to p)) }
                         }
                         mutable.update { it.copy(finalizeRefreshed = it.finalizeRefreshed + trip) }
+                    }
+
+                    SettlementFailure.FxCorrectionRequired -> {
+                        // 미리보기 뒤 기준환율이 정정됐다(revision은 그대로). 새 미리보기의 "결정이 필요한 지출"을 보이고 확정은 막는다.
+                        sentFinalize.remove(trip)
+                        loadLedger(trip)
+                        runCatching { settlement.preview(trip) }.getOrNull()?.let { p ->
+                            mutable.update { it.copy(previews = it.previews + (trip to p)) }
+                        }
                     }
 
                     SettlementFailure.Finalized -> {

@@ -43,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -193,6 +194,7 @@ fun RoomLedgerScreen(
     onBack: (() -> Unit)?,
 ) {
     val pending = ledger.expenses.count { it.status == ExpenseStatus.Pending }
+    val corrections = ledger.expenses.count { it.fxCorrection?.blocksFinalize == true }
     val canReview = ledger.isHost && !ledger.isFinalized
     Scaffold(
         topBar = {
@@ -228,6 +230,13 @@ fun RoomLedgerScreen(
                                 stringResource(R.string.room_pending, pending),
                                 StatusRole.Attention,
                                 Modifier.testTag("room_pending"),
+                            )
+                        }
+                        if (!ledger.isFinalized && corrections > 0) {
+                            StatusLabel(
+                                stringResource(R.string.room_fx_correction, corrections),
+                                StatusRole.Attention,
+                                Modifier.testTag("room_fx_correction"),
                             )
                         }
                     }
@@ -334,7 +343,14 @@ private fun ExpenseRow(
                     basisDetail(expense.krwBasis, expense.fx, expense.acquisition, expense.currency).forEach {
                         Text(it, style = TextRoles.caption)
                     }
-                    if (expense.fxSuperseded) {
+                    val correction = expense.fxCorrection
+                    if (correction != null) {
+                        Text(
+                            stringResource(correction.rowNoteRes()),
+                            style = TextRoles.caption,
+                            color = if (correction.blocksFinalize) MaterialTheme.colorScheme.error else Color.Unspecified,
+                        )
+                    } else if (expense.fxSuperseded) {
                         Text(
                             stringResource(R.string.expense_fx_superseded),
                             style = TextRoles.caption,
@@ -354,7 +370,9 @@ private fun ExpenseRow(
                 }
 
                 ExpenseStatus.Included -> {
-                    if (expense.krwBasis == KrwBasis.ReferenceEstimate) {
+                    if (expense.fxCorrection?.blocksFinalize == true) {
+                        StatusLabel(stringResource(R.string.expense_status_included_correction), StatusRole.Attention)
+                    } else if (expense.krwBasis == KrwBasis.ReferenceEstimate) {
                         StatusLabel(stringResource(R.string.expense_status_included_estimate), StatusRole.Attention)
                     } else {
                         StatusLabel(stringResource(R.string.expense_status_included), StatusRole.Positive)
@@ -390,11 +408,15 @@ fun ExpenseReviewScreen(
     receipt: ReceiptViewState? = null,
     onShowReceipt: () -> Unit = {},
     onHideReceipt: () -> Unit = {},
+    onKeepEstimate: () -> Unit = {},
+    onApplyEstimate: () -> Unit = {},
 ) {
     var askingReason by rememberSaveable { mutableStateOf(false) }
     val saving = state == ReviewSaveState.Saving
     val result = form.shares(expense, ledger.members)
     val krw = form.krw(expense)
+    // 새 예상 금액 적용으로 보낼 몫(기준을 기준환율 예상으로 둔 입력). 직접 나눈 몫은 고치지 않으므로 맞지 않으면 보낼 수 없다.
+    val canApply = form.copy(krwSource = KrwSource.Estimate).shares(expense, ledger.members) is ShareResult.Valid
     Scaffold(
         topBar = {
             TopAppBar(
@@ -424,6 +446,19 @@ fun ExpenseReviewScreen(
                         ),
                         style = TextRoles.supporting,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            expense.fxCorrection?.let { correction ->
+                item {
+                    FxCorrectionSection(
+                        expense = expense,
+                        correction = correction,
+                        canApply = canApply,
+                        exactMode = form.mode == ShareMode.Exact,
+                        saving = saving,
+                        onKeep = onKeepEstimate,
+                        onApply = onApplyEstimate,
                     )
                 }
             }
@@ -522,7 +557,7 @@ fun ExpenseReviewScreen(
             }
             item {
                 Column(Modifier.padding(Spacing.m), verticalArrangement = Arrangement.spacedBy(Spacing.s)) {
-                    if (expense.fxSuperseded) {
+                    if (expense.fxSuperseded && expense.fxCorrection == null) {
                         Text(
                             stringResource(R.string.review_fx_superseded),
                             style = TextRoles.supporting,
@@ -589,6 +624,123 @@ fun ExpenseReviewScreen(
             confirmButton = {},
             dismissButton = { TextButton(onClick = { askingReason = false }) { Text(stringResource(R.string.action_cancel)) } },
         )
+    }
+}
+
+fun FxCorrection.rowNoteRes(): Int =
+    when (this) {
+        FxCorrection.Required -> R.string.expense_fx_required
+        FxCorrection.Kept -> R.string.expense_fx_kept
+        FxCorrection.Unavailable -> R.string.expense_fx_unavailable
+    }
+
+/** "+9원" / "-9원". */
+@Composable
+private fun signedWon(diff: Long): String = if (diff >= 0) "+${wonText(diff)}" else "-${wonText(-diff)}"
+
+/** 송금표의 결정 필요 줄: "고정 13,554원 → 새 13,563원" 또는 "고정 18,187원 · 쓸 고시값 없음". */
+@Composable
+fun fxCorrectionSummary(expense: LedgerExpense): String {
+    val pinned = expense.krwAmount?.let { wonText(it) }.orEmpty()
+    val new = SharePlan.usableEstimate(expense.fxProposal, expense.amountMinor)
+    return if (new == null) {
+        stringResource(R.string.settlement_fx_summary_none, pinned)
+    } else {
+        stringResource(R.string.settlement_fx_summary, pinned, wonText(new.krw))
+    }
+}
+
+/**
+ * 기준환율 정정(ADR-0009): 고정한 예상 금액과 지금 적용되는 새 예상 금액을 기준·기준일·금액으로 나란히 보이고, 방장이
+ * 고정 금액 유지나 새 예상 금액 적용을 고르게 한다. 새 고시값이 없으면 두 동작 모두 없고 보류·다른 기준으로만 푼다.
+ */
+@Composable
+private fun FxCorrectionSection(
+    expense: LedgerExpense,
+    correction: FxCorrection,
+    canApply: Boolean,
+    exactMode: Boolean,
+    saving: Boolean,
+    onKeep: () -> Unit,
+    onApply: () -> Unit,
+) {
+    val replacement = SharePlan.usableEstimate(expense.fxProposal, expense.amountMinor)
+    Section(stringResource(R.string.review_fx_title), null) {
+        Text(stringResource(R.string.review_fx_pinned), style = TextRoles.caption, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            expense.krwAmount?.let { wonText(it) }.orEmpty(),
+            style = TextRoles.body,
+            modifier = Modifier.testTag("review_fx_pinned_krw"),
+        )
+        expense.fx?.let { fx ->
+            Text(quoteText(fx), style = TextRoles.supporting, modifier = Modifier.testTag("review_fx_pinned_quote"))
+            if (fx.isSynthetic) {
+                Text(
+                    stringResource(R.string.fx_synthetic),
+                    style = TextRoles.caption,
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
+            }
+        }
+        Text(stringResource(R.string.review_fx_current), style = TextRoles.caption, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (replacement != null) {
+            Text(
+                stringResource(R.string.review_fx_new_krw, wonText(replacement.krw)),
+                style = TextRoles.body,
+                modifier = Modifier.testTag("review_fx_new_krw"),
+            )
+            Text(quoteText(replacement.quote), style = TextRoles.supporting, modifier = Modifier.testTag("review_fx_new_quote"))
+            if (replacement.quote.isSynthetic) {
+                Text(stringResource(R.string.fx_synthetic), style = TextRoles.caption, color = MaterialTheme.colorScheme.tertiary)
+            }
+            expense.krwAmount?.let { pinned ->
+                Text(
+                    stringResource(R.string.review_fx_diff, signedWon(replacement.krw - pinned)),
+                    style = TextRoles.caption,
+                    modifier = Modifier.testTag("review_fx_diff"),
+                )
+            }
+        } else {
+            Text(
+                stringResource(R.string.review_fx_new_none),
+                style = TextRoles.body,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.testTag("review_fx_new_none"),
+            )
+        }
+        Text(
+            stringResource(
+                when (correction) {
+                    FxCorrection.Required -> R.string.review_fx_state_required
+                    FxCorrection.Kept -> R.string.review_fx_state_kept
+                    FxCorrection.Unavailable -> R.string.review_fx_state_unavailable
+                },
+            ),
+            style = TextRoles.supporting,
+            color = if (correction.blocksFinalize) MaterialTheme.colorScheme.error else Color.Unspecified,
+            modifier = Modifier.testTag("review_fx_state"),
+        )
+        if (correction == FxCorrection.Required && replacement != null) {
+            OutlinedButton(
+                onClick = onKeep,
+                enabled = !saving,
+                modifier = Modifier.fillMaxWidth().testTag("review_fx_keep"),
+            ) { Text(stringResource(R.string.review_fx_keep)) }
+        }
+        if (correction != FxCorrection.Unavailable && replacement != null) {
+            OutlinedButton(
+                onClick = onApply,
+                enabled = !saving && canApply,
+                modifier = Modifier.fillMaxWidth().testTag("review_fx_apply"),
+            ) { Text(stringResource(R.string.review_fx_apply)) }
+            if (exactMode && !canApply) {
+                Text(
+                    stringResource(R.string.review_fx_apply_hint),
+                    style = TextRoles.caption,
+                    modifier = Modifier.testTag("review_fx_apply_hint"),
+                )
+            }
+        }
     }
 }
 
@@ -917,6 +1069,8 @@ fun SettlementScreen(
     snackbarHostState: SnackbarHostState?,
     onFinalize: () -> Unit,
     onBack: (() -> Unit)?,
+    /** 결정이 필요한 지출을 눌렀다(방장). 그 지출 검토로 간다. */
+    onOpenExpense: (String) -> Unit = {},
 ) {
     Scaffold(
         topBar = {
@@ -978,6 +1132,14 @@ fun SettlementScreen(
                                     modifier = Modifier.testTag("settlement_pending"),
                                 )
                             }
+                            if (preview.fxCorrectionIds.isNotEmpty()) {
+                                Text(
+                                    stringResource(R.string.settlement_fx_blocked, preview.fxCorrectionIds.size),
+                                    style = TextRoles.supporting,
+                                    color = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.testTag("settlement_fx_blocked"),
+                                )
+                            }
                             val failed = (state as? SettlementScreenState.Failed)?.failure
                             if (refreshed) {
                                 Text(
@@ -996,6 +1158,7 @@ fun SettlementScreen(
                             }
                         }
                     }
+                    corrections(preview.fxCorrectionIds, ledger, onOpenExpense)
                     transfers(preview.transfers, preview.includedTotalKrw, preview.estimatedTotalKrw) { ledger.nameOf(it) }
                     converted(
                         ledger.expenses.filter { it.status == ExpenseStatus.Included }.map {
@@ -1044,6 +1207,49 @@ fun SettlementScreen(
                 }
             }
         }
+    }
+}
+
+/** 기준환율 정정으로 방장 결정이 필요한 지출(ADR-0009). 방장은 눌러서 그 지출 검토로 간다. */
+private fun LazyListScope.corrections(
+    ids: List<String>,
+    ledger: RoomLedger,
+    onOpenExpense: (String) -> Unit,
+) {
+    if (ids.isEmpty()) return
+    item {
+        Text(
+            stringResource(R.string.settlement_fx_title),
+            style = TextRoles.sectionTitle,
+            modifier = Modifier.padding(start = Spacing.m, end = Spacing.m, top = Spacing.m, bottom = Spacing.xs),
+        )
+    }
+    itemsIndexed(ids, key = { _, id -> "fx-$id" }) { i, id ->
+        val expense = ledger.expenses.firstOrNull { it.id == id }
+        ListItem(
+            headlineContent = { Text(expense?.merchant ?: stringResource(R.string.expense_no_merchant)) },
+            supportingContent = {
+                Column(verticalArrangement = Arrangement.spacedBy(Spacing.xs)) {
+                    Text(
+                        expense?.let { "${it.date} · ${originalAmount(it.amountMinor, it.currency)}" }.orEmpty(),
+                        style = TextRoles.caption,
+                    )
+                    Text(
+                        expense?.let { fxCorrectionSummary(it) }.orEmpty(),
+                        style = TextRoles.caption,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            },
+            modifier = (if (ledger.isHost) Modifier.clickable { onOpenExpense(id) } else Modifier).testTag("settlement_fx_${i + 1}"),
+        )
+    }
+    item {
+        Text(
+            stringResource(if (ledger.isHost) R.string.settlement_fx_host_hint else R.string.settlement_fx_member_hint),
+            style = TextRoles.supporting,
+            modifier = Modifier.padding(horizontal = Spacing.m, vertical = Spacing.xs),
+        )
     }
 }
 
@@ -1228,6 +1434,9 @@ fun SettlementFailure.messageRes(): Int =
         SettlementFailure.Finalized -> R.string.settle_failure_finalized
         SettlementFailure.Rejected -> R.string.settle_failure_rejected
         SettlementFailure.QuoteChanged -> R.string.settle_failure_quote_changed
+        SettlementFailure.FxCorrectionRequired -> R.string.settle_failure_fx_required
+        SettlementFailure.FxReplacementUnavailable -> R.string.settle_failure_fx_unavailable
+        SettlementFailure.FxNothingToKeep -> R.string.settle_failure_fx_nothing
         SettlementFailure.Network -> R.string.failure_network
         SettlementFailure.Unavailable -> R.string.settle_failure_unavailable
         SettlementFailure.Unknown -> R.string.settle_failure_unknown

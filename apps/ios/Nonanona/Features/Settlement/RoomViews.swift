@@ -60,6 +60,41 @@ enum KRWBasisText {
   }
 }
 
+/// 기준환율 정정(ADR-0009)의 고정 문구. 정정은 금액을 저절로 바꾸지 않고, 방장이 고른다.
+enum FXCorrectionText {
+  /// 장부 지출 줄의 알림.
+  static func rowNote(_ correction: FXCorrection) -> String {
+    switch correction {
+    case .required: "기준환율이 정정됐어요. 고정 금액 유지나 새 예상 금액 적용을 골라야 확정할 수 있어요."
+    case .kept: "기준환율이 정정됐지만 고정 금액 유지를 골랐어요. 예상 금액 그대로예요."
+    case .unavailable: "기준환율 정정 뒤 쓸 고시값이 없어요. 보류하거나 실제 청구액·환전 원가로 다시 포함해야 확정할 수 있어요."
+    }
+  }
+
+  /// 검토 화면 비교 아래의 상태 설명.
+  static func state(_ correction: FXCorrection) -> String {
+    switch correction {
+    case .required: "확정하려면 둘 중 하나를 골라 주세요. 고르기 전에는 포함한 금액이 바뀌지 않아요."
+    case .kept: "고정 금액 유지를 골랐어요. 정산에는 고정한 예상 금액이 쓰이고 예상 금액으로 남아요. 새 예상 금액을 적용할 수도 있어요."
+    case .unavailable:
+      "정정 뒤 이 날짜에 쓸 수 있는 기준환율이 없어 자동으로 다시 계산하지 않아요. 실제 청구액·환전 원가를 골라 다시 포함하거나 보류해 주세요."
+    }
+  }
+
+  static func signed(_ diff: Int) -> String { diff >= 0 ? "+\(Won.text(diff))" : "-\(Won.text(-diff))" }
+
+  /// 송금표의 결정 필요 줄: "고정 13,554원 → 새 13,563원" 또는 "고정 18,187원 · 쓸 고시값 없음".
+  static func summary(_ expense: LedgerExpense) -> String {
+    let pinned = "고정 \(expense.krwAmount.map(Won.text) ?? "")"
+    guard let new = SharePlan.usableEstimate(expense.fxProposal, amountMinor: expense.amountMinor) else {
+      return "\(pinned) · 쓸 고시값 없음"
+    }
+    return "\(pinned) → 새 \(Won.text(new.krw))"
+  }
+
+  static let applyExactHint = "직접 나눈 몫은 자동으로 바꾸지 않아요. 아래 부담 금액을 새 예상 금액에 맞게 고친 뒤 적용해 주세요."
+}
+
 /// 홈의 여행방 목록. 로그인했을 때만 보인다.
 struct TripListSection: View {
   let trips: [TripSummary]
@@ -101,6 +136,7 @@ struct RoomLedgerView: View {
   let onRefresh: () async -> Void
 
   private var pendingCount: Int { ledger.expenses.filter { $0.status == .pending }.count }
+  private var correctionCount: Int { ledger.expenses.filter { $0.fxCorrection?.blocksFinalize == true }.count }
 
   var body: some View {
     List {
@@ -112,6 +148,10 @@ struct RoomLedgerView: View {
               StatusLabel("정산 확정됨", role: .positive).accessibilityIdentifier("room-finalized")
             } else if pendingCount > 0 {
               StatusLabel("확인 필요 \(pendingCount)건", role: .attention).accessibilityIdentifier("room-pending")
+            }
+            if !ledger.isFinalized && correctionCount > 0 {
+              StatusLabel("환율 정정 결정 필요 \(correctionCount)건", role: .attention)
+                .accessibilityIdentifier("room-fx-correction")
             }
           }
           if let failure {
@@ -219,7 +259,10 @@ struct ExpenseRow: View {
         ) { line in
           Text(line).textRole(.caption).foregroundStyle(.secondary)
         }
-        if expense.fxSuperseded {
+        if let correction = expense.fxCorrection {
+          Text(FXCorrectionText.rowNote(correction)).textRole(.caption)
+            .foregroundStyle(correction == .kept ? Color.secondary : Color.orange)
+        } else if expense.fxSuperseded {
           Text("더 새 기준환율 고시값이 있어요. 포함한 금액은 그대로이고 다시 검토할 수 있어요.")
             .textRole(.caption).foregroundStyle(.orange)
         }
@@ -247,7 +290,9 @@ struct ExpenseRow: View {
     switch expense.status {
     case .pending: StatusLabel("확인 필요", role: .attention)
     case .included:
-      if expense.krwBasis == .referenceEstimate {
+      if expense.fxCorrection?.blocksFinalize == true {
+        StatusLabel("포함 · 환율 정정", role: .attention)
+      } else if expense.krwBasis == .referenceEstimate {
         StatusLabel("포함 · 예상", role: .attention)
       } else {
         StatusLabel("포함", role: .positive)
@@ -271,6 +316,8 @@ struct ExpenseReviewView: View {
   var receipt: ReceiptViewState? = nil
   var onShowReceipt: () -> Void = {}
   var onHideReceipt: () -> Void = {}
+  var onKeepEstimate: () -> Void = {}
+  var onApplyEstimate: () -> Void = {}
 
   @State private var askingHoldReason = false
   static let holdReasons = ["원화 청구액 확인 대기", "결제 여부 불명확", "같은 지출일 수 있음"]
@@ -278,6 +325,12 @@ struct ExpenseReviewView: View {
   private var krw: Int? { form.krw(for: expense) }
   private var result: Result<[ShareLine], ShareProblem> { form.shares(for: expense, members: ledger.members) }
   private var saving: Bool { state == .saving }
+  /// 새 예상 금액 적용으로 보낼 몫(기준을 기준환율 예상으로 둔 입력). 직접 나눈 몫은 고치지 않으므로 맞지 않으면 실패다.
+  private var applyResult: Result<[ShareLine], ShareProblem> {
+    var applied = form
+    applied.krwSource = .estimate
+    return applied.shares(for: expense, members: ledger.members)
+  }
 
   var body: some View {
     List {
@@ -289,6 +342,12 @@ struct ExpenseReviewView: View {
           Text("\(ledger.name(of: expense.uploadedBy))이(가) 올림 · \(expense.isManual ? "직접 입력(증빙 없음)" : "가린 사본")")
             .textRole(.supporting).foregroundStyle(.secondary)
         }
+      }
+
+      if let correction = expense.fxCorrection {
+        FXCorrectionSection(
+          expense: expense, correction: correction, canApply: (try? applyResult.get()) != nil,
+          exactMode: form.mode == .exact, saving: saving, onKeep: onKeepEstimate, onApply: onApplyEstimate)
       }
 
       ReceiptAttachmentSection(
@@ -361,7 +420,7 @@ struct ExpenseReviewView: View {
       }
 
       Section {
-        if expense.fxSuperseded {
+        if expense.fxSuperseded && expense.fxCorrection == nil {
           Text("포함한 예상 금액 뒤에 더 새 기준환율 고시값이 들어왔어요. 다시 저장하면 새 값으로 바뀌어요.")
             .textRole(.supporting).foregroundStyle(.orange).accessibilityIdentifier("review-fx-superseded")
         }
@@ -539,6 +598,76 @@ struct KRWSection: View {
   }
 }
 
+/// 기준환율 정정(ADR-0009): 고정한 예상 금액과 지금 적용되는 새 예상 금액을 기준·기준일·금액으로 나란히 보이고, 방장이
+/// 고정 금액 유지나 새 예상 금액 적용을 고르게 한다. 새 고시값이 없으면 두 동작 모두 없고 보류·다른 기준으로만 푼다.
+struct FXCorrectionSection: View {
+  let expense: LedgerExpense
+  let correction: FXCorrection
+  let canApply: Bool
+  let exactMode: Bool
+  let saving: Bool
+  let onKeep: () -> Void
+  let onApply: () -> Void
+
+  private var replacement: (quote: ReferenceQuote, krw: Int)? {
+    SharePlan.usableEstimate(expense.fxProposal, amountMinor: expense.amountMinor)
+  }
+
+  var body: some View {
+    Section {
+      VStack(alignment: .leading, spacing: Spacing.xs) {
+        Text("고정한 예상 금액").textRole(.caption).foregroundStyle(.secondary)
+        Text(expense.krwAmount.map(Won.text) ?? "").textRole(.body).monospacedDigit()
+          .accessibilityIdentifier("review-fx-pinned-krw")
+        if let fx = expense.fx {
+          Text(KRWBasisText.quote(fx)).textRole(.supporting).accessibilityIdentifier("review-fx-pinned-quote")
+          if fx.isSynthetic {
+            Text(KRWBasisText.synthetic).textRole(.caption).foregroundStyle(.orange)
+          }
+        }
+      }
+      VStack(alignment: .leading, spacing: Spacing.xs) {
+        Text("지금 적용되는 기준환율").textRole(.caption).foregroundStyle(.secondary)
+        if let replacement {
+          Text("새 예상 금액 \(Won.text(replacement.krw))").textRole(.body).monospacedDigit()
+            .accessibilityIdentifier("review-fx-new-krw")
+          Text(KRWBasisText.quote(replacement.quote)).textRole(.supporting)
+            .accessibilityIdentifier("review-fx-new-quote")
+          if replacement.quote.isSynthetic {
+            Text(KRWBasisText.synthetic).textRole(.caption).foregroundStyle(.orange)
+          }
+          if let pinned = expense.krwAmount {
+            Text("차이 \(FXCorrectionText.signed(replacement.krw - pinned))").textRole(.caption)
+              .foregroundStyle(.secondary).accessibilityIdentifier("review-fx-diff")
+          }
+        } else {
+          Text("쓸 수 있는 기준환율 고시값이 없어요.").textRole(.body).foregroundStyle(.red)
+            .accessibilityIdentifier("review-fx-new-none")
+        }
+      }
+      Text(FXCorrectionText.state(correction)).textRole(.supporting)
+        .foregroundStyle(correction == .kept ? Color.secondary : Color.orange)
+        .accessibilityIdentifier("review-fx-state")
+      if correction == .required, replacement != nil {
+        Button("고정 금액 유지", action: onKeep)
+          .disabled(saving)
+          .accessibilityIdentifier("review-fx-keep")
+      }
+      if correction != .unavailable, replacement != nil {
+        Button("새 예상 금액 적용", action: onApply)
+          .disabled(saving || !canApply)
+          .accessibilityIdentifier("review-fx-apply")
+        if exactMode && !canApply {
+          Text(FXCorrectionText.applyExactHint).textRole(.caption).foregroundStyle(.secondary)
+            .accessibilityIdentifier("review-fx-apply-hint")
+        }
+      }
+    } header: {
+      Text("기준환율 정정").textRole(.sectionTitle).foregroundStyle(.primary).textCase(nil)
+    }
+  }
+}
+
 /// 검토 화면의 증빙: 공유한 가림 사본을 눌러서 열고, 직접 입력은 증빙 없음. 실패해도 검토는 그대로 할 수 있다.
 struct ReceiptAttachmentSection: View {
   let hasArtifact: Bool
@@ -612,6 +741,8 @@ struct SettlementView: View {
   let refreshed: Bool
   let onFinalize: () -> Void
   let onRefresh: () async -> Void
+  /// 결정이 필요한 지출을 눌렀다(방장). 송금표를 닫고 그 지출 검토를 연다.
+  var onOpenExpense: (String) -> Void = { _ in }
 
   var body: some View {
     List {
@@ -640,6 +771,10 @@ struct SettlementView: View {
           Text("확인 필요 지출 \(preview.pendingCount)건이 있어 확정할 수 없어요. 방장이 포함하거나 보류해야 해요.")
             .textRole(.supporting).accessibilityIdentifier("settlement-pending")
         }
+        if !preview.fxCorrectionIDs.isEmpty {
+          Text("기준환율이 정정된 예상 금액 \(preview.fxCorrectionIDs.count)건이 있어 확정할 수 없어요.")
+            .textRole(.supporting).foregroundStyle(.orange).accessibilityIdentifier("settlement-fx-blocked")
+        }
         if refreshed {
           Text("미리보기 뒤에 바뀐 내용이 있어 확정하지 않았어요. 새 송금표를 확인하고 다시 확정해 주세요.")
             .textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("settlement-refreshed")
@@ -651,6 +786,7 @@ struct SettlementView: View {
     }
     .listRowBackground(Color.clear)
     .listRowInsets(EdgeInsets(top: 0, leading: Spacing.m, bottom: 0, trailing: Spacing.m))
+    correctionSection(preview.fxCorrectionIDs, ledger)
     transfersSection(preview.transfers, total: preview.includedTotalKRW, estimated: preview.estimatedTotalKRW) {
       ledger.name(of: $0)
     }
@@ -677,6 +813,43 @@ struct SettlementView: View {
     } else {
       Section {
         Text("방장이 확정하면 이 송금표가 고정돼요.").textRole(.supporting)
+      }
+    }
+  }
+
+  /// 기준환율 정정으로 방장 결정이 필요한 지출(ADR-0009). 방장은 눌러서 그 지출 검토로 간다.
+  @ViewBuilder private func correctionSection(_ ids: [String], _ ledger: RoomLedger) -> some View {
+    if !ids.isEmpty {
+      Section {
+        ForEach(Array(ids.enumerated()), id: \.element) { index, id in
+          let expense = ledger.expenses.first { $0.id == id }
+          let row = VStack(alignment: .leading, spacing: Spacing.xs) {
+            Text(expense?.merchant ?? "가게 이름 없음").textRole(.body).foregroundStyle(.primary)
+            Text(expense.map { "\($0.date) · \(Won.original($0.amountMinor, $0.currency))" } ?? "")
+              .textRole(.caption).foregroundStyle(.secondary)
+            Text(expense.map(FXCorrectionText.summary) ?? "").textRole(.caption).foregroundStyle(.orange)
+          }
+          if ledger.isHost {
+            Button {
+              onOpenExpense(id)
+            } label: {
+              row
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("settlement-fx-\(index + 1)")
+            .accessibilityHint("검토하기")
+          } else {
+            row.accessibilityElement(children: .combine).accessibilityIdentifier("settlement-fx-\(index + 1)")
+          }
+        }
+      } header: {
+        Text("기준환율 정정 · 결정 필요").textRole(.sectionTitle).foregroundStyle(.primary).textCase(nil)
+      } footer: {
+        Text(
+          ledger.isHost
+            ? "지출을 눌러 고정 금액 유지나 새 예상 금액 적용을 골라 주세요. 쓸 고시값이 없는 지출은 보류하거나 실제 청구액·환전 원가로 포함해 주세요."
+            : "방장이 정해야 확정할 수 있어요."
+        ).textRole(.supporting)
       }
     }
   }
@@ -842,6 +1015,9 @@ extension SettlementFailure {
     case .finalized: "이미 확정된 정산이에요. 확정된 송금표를 확인해 주세요."
     case .rejected: "저장하지 못했어요. 결제자·원화·부담 금액을 다시 확인해 주세요."
     case .quoteChanged: "기준환율 고시값이 새로 들어와 예상 금액이 바뀌었어요. 새 금액을 확인하고 다시 저장해 주세요."
+    case .fxCorrectionRequired: "기준환율이 정정된 예상 금액이 있어 확정하지 않았어요. 지출마다 고정 금액 유지나 새 예상 금액 적용을 골라 주세요."
+    case .fxReplacementUnavailable: "정정 뒤 쓸 수 있는 기준환율이 없어요. 실제 청구액·환전 원가로 포함하거나 보류해 주세요."
+    case .fxNothingToKeep: "이미 정해졌거나 고시값이 다시 바뀌었어요. 최신 내용을 확인해 주세요."
     case .network: "인터넷에 연결할 수 없어요. 연결을 확인하고 다시 시도해 주세요."
     case .unavailable: "지금은 저장할 수 없어요. 잠시 후 다시 시도해 주세요."
     case .unknown: "저장하지 못했어요. 다시 시도해 주세요."

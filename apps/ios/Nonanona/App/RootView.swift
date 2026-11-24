@@ -181,7 +181,9 @@ private struct ExpenseReviewDestination: View {
         onHold: { reason in Task { await rooms.hold(target, reason: reason) } },
         receipt: rooms.receiptViews[target],
         onShowReceipt: { Task { await rooms.showReceipt(target) } },
-        onHideReceipt: { rooms.hideReceipt(target) })
+        onHideReceipt: { rooms.hideReceipt(target) },
+        onKeepEstimate: { Task { await rooms.keepEstimate(target) } },
+        onApplyEstimate: { Task { await rooms.applyNewEstimate(target) } })
     }
   }
 }
@@ -195,7 +197,8 @@ private struct SettlementDestination: View {
       ledger: rooms.ledgers[trip], preview: rooms.previews[trip], final: rooms.finals[trip],
       state: rooms.settlementState[trip], refreshed: rooms.finalizeRefreshed.contains(trip),
       onFinalize: { rooms.requestFinalize(trip) },
-      onRefresh: { await rooms.loadSettlement(trip) })
+      onRefresh: { await rooms.loadSettlement(trip) },
+      onOpenExpense: { rooms.openCorrection(trip, expenseID: $0) })
   }
 }
 

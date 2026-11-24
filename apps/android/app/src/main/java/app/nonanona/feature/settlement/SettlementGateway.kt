@@ -93,6 +93,31 @@ sealed interface KrwConversion {
     ) : KrwConversion
 }
 
+/** 포함한 예상액의 기준환율 정정 상태(ADR-0009). 서버가 열린 방의 장부에 알려 준다. 정정이 없으면 null. */
+enum class FxCorrection(
+    val wire: String,
+) {
+    /**
+     * 고정한 고시값 뒤에 실질적으로 다른 고시값(기준일·고시값·단위·출처 종류)이 적용된다. 확정하려면 방장이 고정 금액
+     * 유지나 새 예상 금액 적용을 골라야 한다. 포함 금액은 저절로 바뀌지 않는다.
+     */
+    Required("required"),
+
+    /** 방장이 고정 금액 유지를 골랐고 그 뒤 다른 정정이 없다. 금액은 그대로 예상 금액이다. */
+    Kept("kept"),
+
+    /** 정정 뒤 그 지출일에 쓸 고시값이 없다. 보류하거나 실제 청구액·환전 원가로 다시 포함해야 확정할 수 있다. */
+    Unavailable("unavailable"),
+    ;
+
+    /** 확정을 막는가(방장 결정이 필요하다). */
+    val blocksFinalize: Boolean get() = this != Kept
+
+    companion object {
+        fun of(wire: String): FxCorrection? = entries.firstOrNull { it.wire == wire }
+    }
+}
+
 sealed interface ExpenseStatus {
     /** 방장 확인 전. 확정할 수 없다. */
     data object Pending : ExpenseStatus
@@ -169,6 +194,8 @@ data class LedgerExpense(
     val fxProposal: FxProposal? = null,
     /** 포함한 예상액 뒤에 더 새 고시값이 들어왔다. 포함 금액은 바뀌지 않는다(다시 검토할 수 있다). */
     val fxSuperseded: Boolean = false,
+    /** 포함한 예상액의 정정 상태(열린 방만). null이면 정정 없음. */
+    val fxCorrection: FxCorrection? = null,
 )
 
 /** 여행방 장부. revision은 방의 입력이 바뀔 때마다 서버가 올리고, 확정은 방장이 본 revision으로만 한다. */
@@ -212,6 +239,17 @@ data class ExpenseReview(
     }
 }
 
+/**
+ * 고정 금액 유지(방장, ADR-0009). [replacementQuoteId]는 방장이 비교 화면에서 본 새 고시값이다.
+ * 응답을 못 받은 같은 결정을 다시 보낼 때 [requestId]를 그대로 쓴다.
+ */
+data class FxKeep(
+    val expenseId: String,
+    val expectedVersion: Int,
+    val requestId: UUID,
+    val replacementQuoteId: String,
+)
+
 data class ReviewedExpense(
     val version: Int,
     val revision: Long,
@@ -243,6 +281,8 @@ data class SettlementPreview(
     val excluded: List<ExcludedExpense>,
     /** 함께 쓴 돈 가운데 기준환율 예상액의 합. */
     val estimatedTotalKrw: Long = 0,
+    /** 기준환율이 정정돼 방장 결정이 필요한 포함 예상액(장부 순서). 비어 있지 않으면 확정할 수 없다. */
+    val fxCorrectionIds: List<String> = emptyList(),
 )
 
 /** 확정한 정산. 서버가 확정 순간의 입력(구성원·지출·몫)과 결과(송금)를 고정한 스냅숏을 그대로 그린다. */
@@ -309,6 +349,15 @@ enum class SettlementFailure {
 
     /** 방장이 본 기준환율 고시값이 바뀌었다(새로 받은 값). 장부를 다시 불러와 새 예상액을 확인한다. */
     QuoteChanged,
+
+    /** 기준환율이 정정된 포함 예상액이 있어 확정하지 않았다. 지출마다 고정 금액 유지나 새 예상 적용을 골라야 한다. */
+    FxCorrectionRequired,
+
+    /** 정정 뒤 쓸 고시값이 없어 고정 금액 유지·새 예상 적용을 할 수 없다. 보류하거나 다른 기준으로 포함한다. */
+    FxReplacementUnavailable,
+
+    /** 유지할 정정이 없다(이미 골랐거나 고시값이 다시 같아졌다). 장부를 다시 불러온다. */
+    FxNothingToKeep,
     Network,
     Unavailable,
     Unknown,
@@ -327,6 +376,12 @@ interface SettlementGateway {
         review: ExpenseReview,
         trip: TripId,
     ): ReviewedExpense
+
+    /** 정정된 포함 예상액의 고정 금액을 유지한다(ADR-0009). 새 예상 적용은 [review]로 한다. */
+    suspend fun keepEstimate(
+        keep: FxKeep,
+        trip: TripId,
+    ): ReviewedExpense = throw SettlementException(SettlementFailure.Unavailable)
 
     suspend fun preview(trip: TripId): SettlementPreview
 

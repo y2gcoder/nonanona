@@ -53,6 +53,20 @@ enum FXProposal: Hashable, Sendable {
   case unavailable
 }
 
+/// 포함한 예상액의 기준환율 정정 상태(ADR-0009). 서버가 열린 방의 장부에 알려 준다. 정정이 없으면 nil.
+enum FXCorrection: String, Sendable {
+  /// 고정한 고시값 뒤에 실질적으로 다른 고시값(기준일·고시값·단위·출처 종류)이 적용된다. 확정하려면 방장이 고정 금액
+  /// 유지나 새 예상 금액 적용을 골라야 한다. 포함 금액은 저절로 바뀌지 않는다.
+  case required
+  /// 방장이 고정 금액 유지를 골랐고 그 뒤 다른 정정이 없다. 금액은 그대로 예상 금액이다.
+  case kept
+  /// 정정 뒤 그 지출일에 쓸 고시값이 없다. 보류하거나 실제 청구액·환전 원가로 다시 포함해야 확정할 수 있다.
+  case unavailable
+
+  /// 확정을 막는가(방장 결정이 필요하다).
+  var blocksFinalize: Bool { self != .kept }
+}
+
 /// 외화 취득 원가: 환전에 쓴 원화와 받은 외화(엔). 지출 원화 = 엔 × 원화 ÷ 받은 엔(원 단위 반올림).
 struct AcquisitionBasis: Hashable, Sendable {
   let krwPaid: Int
@@ -126,6 +140,8 @@ struct LedgerExpense: Hashable, Identifiable, Sendable {
   var fxProposal: FXProposal? = nil
   /// 포함한 예상액 뒤에 더 새 고시값이 들어왔다. 포함 금액은 바뀌지 않는다(다시 검토할 수 있다).
   var fxSuperseded = false
+  /// 포함한 예상액의 정정 상태(열린 방만). nil이면 정정 없음.
+  var fxCorrection: FXCorrection? = nil
 }
 
 /// 여행방 장부. `revision`은 방의 입력이 바뀔 때마다 서버가 올리고, 확정은 방장이 본 revision으로만 한다.
@@ -166,6 +182,15 @@ struct ExpenseReview: Equatable, Sendable {
   let decision: Decision
 }
 
+/// 고정 금액 유지(방장, ADR-0009). `replacementQuoteID`는 방장이 비교 화면에서 본 새 고시값이다.
+/// 응답을 못 받은 같은 결정을 다시 보낼 때 `requestID`를 그대로 쓴다.
+struct FXKeep: Equatable, Sendable {
+  let expenseID: String
+  let expectedVersion: Int
+  let requestID: UUID
+  let replacementQuoteID: String
+}
+
 struct ReviewedExpense: Equatable, Sendable {
   let version: Int
   let revision: Int
@@ -201,6 +226,8 @@ struct SettlementPreview: Equatable, Sendable {
   let excluded: [ExcludedExpense]
   /// 함께 쓴 돈 가운데 기준환율 예상액의 합.
   var estimatedTotalKRW = 0
+  /// 기준환율이 정정돼 방장 결정이 필요한 포함 예상액(장부 순서). 비어 있지 않으면 확정할 수 없다.
+  var fxCorrectionIDs: [String] = []
 }
 
 /// 확정한 정산. 서버가 확정 순간의 입력(구성원·지출·몫)과 결과(송금)를 고정한 스냅숏을 그대로 그린다.
@@ -259,6 +286,12 @@ enum SettlementFailure: Error, Equatable, Sendable {
   case rejected
   /// 방장이 본 기준환율 고시값이 바뀌었다(새로 받은 값). 장부를 다시 불러와 새 예상액을 확인한다.
   case quoteChanged
+  /// 기준환율이 정정된 포함 예상액이 있어 확정하지 않았다. 지출마다 고정 금액 유지나 새 예상 적용을 골라야 한다.
+  case fxCorrectionRequired
+  /// 정정 뒤 쓸 고시값이 없어 고정 금액 유지·새 예상 적용을 할 수 없다. 보류하거나 다른 기준으로 포함한다.
+  case fxReplacementUnavailable
+  /// 유지할 정정이 없다(이미 골랐거나 고시값이 다시 같아졌다). 장부를 다시 불러온다.
+  case fxNothingToKeep
   case network
   case unavailable
   case unknown
@@ -268,10 +301,18 @@ enum SettlementFailure: Error, Equatable, Sendable {
 /// 서버 SDK 호출은 구현체 안에 둔다. 실패는 `SettlementFailure`로만 던지고 취소는 `CancellationError` 그대로다.
 protocol SettlementGateway: Sendable {
   func review(_ review: ExpenseReview, in trip: TripID) async throws -> ReviewedExpense
+  /// 정정된 포함 예상액의 고정 금액을 유지한다(ADR-0009). 새 예상 적용은 `review`로 한다.
+  func keepEstimate(_ keep: FXKeep, in trip: TripID) async throws -> ReviewedExpense
   func preview(_ trip: TripID) async throws -> SettlementPreview
   func finalize(_ trip: TripID, reviewedRevision: Int, requestID: UUID) async throws -> FinalizeResult
   /// 확정본이 없으면 nil.
   func finalized(_ trip: TripID) async throws -> FinalSettlement?
+}
+
+extension SettlementGateway {
+  func keepEstimate(_ keep: FXKeep, in trip: TripID) async throws -> ReviewedExpense {
+    throw SettlementFailure.unavailable
+  }
 }
 
 struct UnavailableSettlementGateway: SettlementGateway {

@@ -12,6 +12,8 @@ import app.nonanona.feature.settlement.ExpenseReview
 import app.nonanona.feature.settlement.ExpenseStatus
 import app.nonanona.feature.settlement.FinalSettlement
 import app.nonanona.feature.settlement.FinalizeResult
+import app.nonanona.feature.settlement.FxCorrection
+import app.nonanona.feature.settlement.FxKeep
 import app.nonanona.feature.settlement.FxProposal
 import app.nonanona.feature.settlement.KrwBasis
 import app.nonanona.feature.settlement.KrwConversion
@@ -50,6 +52,7 @@ import app.nonanona.feature.trip.TripSummary
 import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
+import java.time.LocalDate
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -448,6 +451,23 @@ class LocalSettlementGateway(
         return parse { JSONObject(raw).let { ReviewedExpense(it.getInt("version"), it.getLong("revision"), it.getBoolean("replayed")) } }
     }
 
+    /** 고정 금액 유지(ADR-0009). 같은 요청 키로 다시 보내면 서버가 같은 결과를 돌려준다. */
+    override suspend fun keepEstimate(
+        keep: FxKeep,
+        trip: TripId,
+    ): ReviewedExpense {
+        val raw =
+            call(
+                "keep_fx_estimate",
+                JSONObject()
+                    .put("p_expense", keep.expenseId)
+                    .put("p_expected_version", keep.expectedVersion)
+                    .put("p_request_id", keep.requestId.toString())
+                    .put("p_replacement_quote_id", keep.replacementQuoteId),
+            )
+        return parse { JSONObject(raw).let { ReviewedExpense(it.getInt("version"), it.getLong("revision"), it.getBoolean("replayed")) } }
+    }
+
     override suspend fun preview(trip: TripId): SettlementPreview {
         val raw = call("preview_settlement", JSONObject().put("p_trip", trip.value))
         return parse {
@@ -461,6 +481,10 @@ class LocalSettlementGateway(
                 transfers = LocalJson.transfers(json.getJSONArray("transfers")),
                 excluded = LocalJson.excluded(json.getJSONArray("excluded")) ?: throw JSONException("excluded"),
                 estimatedTotalKrw = if (json.has("estimated_total_krw")) json.getLong("estimated_total_krw") else 0,
+                // 정정 정책(ADR-0009) 전 서버에는 없다.
+                fxCorrectionIds =
+                    json.optJSONArray("fx_correction_expense_ids")?.let { a -> (0 until a.length()).map { a.getString(it) } }
+                        ?: emptyList(),
             )
         }
     }
@@ -549,6 +573,18 @@ class LocalSettlementGateway(
                     SettlementFailure.QuoteChanged
                 }
 
+                http.code == "fx_correction_required" -> {
+                    SettlementFailure.FxCorrectionRequired
+                }
+
+                http.code == "fx_replacement_unavailable" -> {
+                    SettlementFailure.FxReplacementUnavailable
+                }
+
+                http.code == "fx_not_superseded" -> {
+                    SettlementFailure.FxNothingToKeep
+                }
+
                 http.code in rejectedCodes -> {
                     SettlementFailure.Rejected
                 }
@@ -571,6 +607,8 @@ class LocalSettlementGateway(
 
 /** 로컬 RPC 응답 모양을 앱 타입으로 옮긴다. 모르는 값이면 null(→ Unknown)이다. */
 internal object LocalJson {
+    private const val ITEM_NAME = "원/일본엔(100엔)"
+
     private fun JSONObject.stringOrNull(name: String): String? = if (isNull(name)) null else getString(name)
 
     private fun JSONObject.longOrNull(name: String): Long? = if (isNull(name)) null else getLong(name)
@@ -593,17 +631,22 @@ internal object LocalJson {
 
     private val isoDate = Regex("^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
 
+    /** "YYYY-MM-DD" 모양이고 실제로 있는 날짜인가. */
+    fun isCalendarDate(text: String): Boolean =
+        isoDate.matches(text) && runCatching { LocalDate.parse(text).toString() == text }.getOrDefault(false)
+
     /** 고정했거나 제안한 기준환율 고시값. 출처·항목·단위·형식이 하나라도 다르면 null(→ 장부 전체 Unknown). */
     fun quote(json: JSONObject?): ReferenceQuote? {
         json ?: return null
         val origin = json.strict("data_origin")
         if (json.strict("source") != "bok_ecos" || json.strict("stat_code") != "731Y001" || json.strict("item_code") != "0000002" ||
+            json.strict("item_name") != ITEM_NAME || json.strict("unit_name") != "원" ||
             json.strict("currency") != "JPY" || json.wholeNumber("quote_unit") != 100L || (origin != "ecos_live" && origin != "fixture")
         ) {
             return null
         }
         val rate = json.strict("rate")?.takeIf { SharePlan.scaledRate(it) != null } ?: return null
-        val rateDate = json.strict("rate_date")?.takeIf { isoDate.matches(it) } ?: return null
+        val rateDate = json.strict("rate_date")?.takeIf { isCalendarDate(it) } ?: return null
         return ReferenceQuote(
             quoteId = json.strict("quote_id") ?: return null,
             rate = rate,
@@ -650,7 +693,7 @@ internal object LocalJson {
                 if (isEstimate != true || hasAcq || !jpy) return null
                 val q = quote(json.optJSONObject("fx")) ?: return null
                 val date = json.getString("expense_date")
-                if (!isoDate.matches(date) || q.rateDate > date) return null
+                if (!isCalendarDate(date) || q.rateDate > date) return null
                 Basis(basis, q, null)
             }
 
@@ -691,6 +734,16 @@ internal object LocalJson {
         if (entry != "receipt" && entry != "manual") return null
         val basis = basis(json) ?: return null
         val proposal = if (json.present("fx_proposal")) proposal(json.optJSONObject("fx_proposal")) ?: return null else null
+        // 제안의 고시일도 지출일 뒤일 수 없다(서버는 지출일에서 거슬러만 간다).
+        if (proposal is FxProposal.Proposed && proposal.quote.rateDate > json.getString("expense_date")) return null
+        val correction =
+            if (json.present("fx_correction")) {
+                val c = json.strict("fx_correction")?.let(FxCorrection::of) ?: return null
+                if (!correctionMatches(c, proposal, basis, status)) return null
+                c
+            } else {
+                null
+            }
         val shares = json.getJSONArray("shares")
         return LedgerExpense(
             id = json.getString("expense_id"),
@@ -717,7 +770,33 @@ internal object LocalJson {
             acquisition = basis.acquisition,
             fxProposal = proposal,
             fxSuperseded = json.optBoolean("fx_superseded", false),
+            fxCorrection = correction,
         )
+    }
+
+    /**
+     * 정정 상태가 지출·제안과 맞는가. 포함한 예상액만 정정 상태가 있고, 유지·결정 필요는 고정한 고시값과 실질적으로
+     * 다른(기준일·고시값·출처 종류) 새 고시값이, 쓸 수 없음은 고시값 없는 제안이 함께 와야 한다.
+     */
+    private fun correctionMatches(
+        correction: FxCorrection,
+        proposal: FxProposal?,
+        basis: Basis,
+        status: ExpenseStatus,
+    ): Boolean {
+        val pinned = basis.fx
+        if (status != ExpenseStatus.Included || basis.basis != KrwBasis.ReferenceEstimate || pinned == null) return false
+        return when (correction) {
+            FxCorrection.Required, FxCorrection.Kept -> {
+                val new = (proposal as? FxProposal.Proposed)?.quote ?: return false
+                new.rateDate != pinned.rateDate || SharePlan.scaledRate(new.rate) != SharePlan.scaledRate(pinned.rate) ||
+                    new.isSynthetic != pinned.isSynthetic || new.quoteUnit != pinned.quoteUnit
+            }
+
+            FxCorrection.Unavailable -> {
+                proposal == FxProposal.Undetermined || proposal == FxProposal.Unavailable
+            }
+        }
     }
 
     fun ledger(json: JSONObject): RoomLedger? {

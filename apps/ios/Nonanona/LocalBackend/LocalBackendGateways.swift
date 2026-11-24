@@ -309,6 +309,20 @@
       return ReviewedExpense(version: r.version, revision: r.revision, replayed: r.replayed)
     }
 
+    /// 고정 금액 유지(ADR-0009). 같은 요청 키로 다시 보내면 서버가 같은 결과를 돌려준다.
+    func keepEstimate(_ keep: FXKeep, in trip: TripID) async throws -> ReviewedExpense {
+      let data = try await call(
+        "keep_fx_estimate",
+        [
+          "p_expense": keep.expenseID, "p_expected_version": keep.expectedVersion,
+          "p_request_id": keep.requestID.uuidString.lowercased(), "p_replacement_quote_id": keep.replacementQuoteID,
+        ])
+      guard let r = try? LocalJSON.decoder.decode(LocalJSON.Reviewed.self, from: data) else {
+        throw SettlementFailure.unknown
+      }
+      return ReviewedExpense(version: r.version, revision: r.revision, replayed: r.replayed)
+    }
+
     func preview(_ trip: TripID) async throws -> SettlementPreview {
       let data = try await call("preview_settlement", ["p_trip": trip.value])
       guard let p = try? LocalJSON.decoder.decode(LocalJSON.Preview.self, from: data) else {
@@ -318,7 +332,8 @@
         revision: p.revision, isFinalized: p.status == "finalized", ready: p.ready,
         pendingCount: p.pendingExpenseIds.count,
         includedTotalKRW: p.includedTotalKrw, transfers: p.transfers.map(\.value),
-        excluded: p.excluded.compactMap(\.value), estimatedTotalKRW: p.estimatedTotalKrw ?? 0)
+        excluded: p.excluded.compactMap(\.value), estimatedTotalKRW: p.estimatedTotalKrw ?? 0,
+        fxCorrectionIDs: p.fxCorrectionExpenseIds ?? [])
     }
 
     func finalize(_ trip: TripID, reviewedRevision: Int, requestID: UUID) async throws -> FinalizeResult {
@@ -367,6 +382,9 @@
       case .http(_, "pending_review"): return .pendingReview
       case .http(_, "trip_finalized"): return .finalized
       case .http(_, "stale_quote"): return .quoteChanged
+      case .http(_, "fx_correction_required"): return .fxCorrectionRequired
+      case .http(_, "fx_replacement_unavailable"): return .fxReplacementUnavailable
+      case .http(_, "fx_not_superseded"): return .fxNothingToKeep
       case .http(_, let code?) where rejectedCodes.contains(code): return .rejected
       case .http(_, "not_authenticated"): return .sessionExpired
       case .http(_, let code?) where LocalTripGateway.sessionEndedCodes.contains(code): return .sessionExpired
@@ -385,6 +403,18 @@
 
   /// 로컬 RPC 응답 모양. 앱 타입으로 옮길 때 값을 하나씩 검사하고, 모르는 값이면 nil(→ `.unknown`)이다.
   enum LocalJSON {
+    /// "YYYY-MM-DD" 모양이고 실제로 있는 날짜(그레고리력)인가.
+    static func isCalendarDate(_ text: String) -> Bool {
+      guard text.range(of: "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", options: .regularExpression) != nil else { return false }
+      let parts = text.split(separator: "-").compactMap { Int($0) }
+      var calendar = Calendar(identifier: .gregorian)
+      calendar.timeZone = TimeZone(identifier: "UTC")!
+      let components = DateComponents(year: parts[0], month: parts[1], day: parts[2])
+      guard let date = calendar.date(from: components) else { return false }
+      let back = calendar.dateComponents([.year, .month, .day], from: date)
+      return back.year == parts[0] && back.month == parts[1] && back.day == parts[2]
+    }
+
     static var decoder: JSONDecoder {
       let decoder = JSONDecoder()
       decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -424,6 +454,7 @@
       let statCode: String
       let itemCode: String
       let itemName: String
+      let unitName: String?
       let currency: String
       let quoteUnit: Int
       let rate: String
@@ -431,8 +462,9 @@
       let dataOrigin: String
 
       var value: ReferenceQuote? {
-        guard source == "bok_ecos", statCode == "731Y001", itemCode == "0000002", currency == "JPY", quoteUnit == 100,
-          dataOrigin == "ecos_live" || dataOrigin == "fixture", SharePlan.scaledRate(rate) != nil
+        guard source == "bok_ecos", statCode == "731Y001", itemCode == "0000002", itemName == "원/일본엔(100엔)",
+          unitName == "원", currency == "JPY", quoteUnit == 100, dataOrigin == "ecos_live" || dataOrigin == "fixture",
+          SharePlan.scaledRate(rate) != nil, LocalJSON.isCalendarDate(rateDate)
         else { return nil }
         return ReferenceQuote(
           quoteID: quoteId, rate: rate, quoteUnit: quoteUnit, rateDate: rateDate, itemName: itemName,
@@ -447,6 +479,7 @@
       let statCode: String?
       let itemCode: String?
       let itemName: String?
+      let unitName: String?
       let currency: String?
       let quoteUnit: Int?
       let rate: String?
@@ -464,7 +497,8 @@
             let rateDate, let dataOrigin, let krw,
             let quote = Quote(
               quoteId: quoteId, source: source, statCode: statCode, itemCode: itemCode, itemName: itemName,
-              currency: currency, quoteUnit: quoteUnit, rate: rate, rateDate: rateDate, dataOrigin: dataOrigin
+              unitName: unitName, currency: currency, quoteUnit: quoteUnit, rate: rate, rateDate: rateDate,
+              dataOrigin: dataOrigin
             ).value
           else { return nil }
           return .proposed(quote, krw: krw)
@@ -502,6 +536,8 @@
       let acquisition: Acquisition?
       let fxProposal: Proposal?
       let fxSuperseded: Bool?
+      /// 열린 방 장부에만 있다(ADR-0009). null이면 정정 없음.
+      let fxCorrection: String?
 
       /// 원화 기준과 그 근거가 서로 맞을 때만 값. 모르는 기준, 근거 없는 예상액·취득 원가, 예상 표시가 기준과 다른 값은
       /// nil이다(예상액을 실제 청구액처럼 그리지 않는다).
@@ -525,9 +561,24 @@
       }
 
       private func rateDateIsNotAfterExpense(_ rateDate: String) -> Bool {
-        let iso = "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
-        return rateDate.range(of: iso, options: .regularExpression) != nil
-          && expenseDate.range(of: iso, options: .regularExpression) != nil && rateDate <= expenseDate
+        LocalJSON.isCalendarDate(rateDate) && LocalJSON.isCalendarDate(expenseDate) && rateDate <= expenseDate
+      }
+
+      /// 정정 상태가 지출·제안과 맞는가. 포함한 예상액만 정정 상태가 있고, 유지·결정 필요는 고정한 고시값과 실질적으로
+      /// 다른(기준일·고시값·출처 종류) 새 고시값이, 쓸 수 없음은 고시값 없는 제안이 함께 와야 한다.
+      private static func correctionMatches(
+        _ correction: FXCorrection, _ proposal: FXProposal?, pinned: ReferenceQuote?, basis: KRWBasis?,
+        state: ExpenseStatus
+      ) -> Bool {
+        guard state == .included, basis == .referenceEstimate, let pinned else { return false }
+        switch (correction, proposal) {
+        case (.required, .proposed(let new, _)?), (.kept, .proposed(let new, _)?):
+          return new.rateDate != pinned.rateDate || SharePlan.scaledRate(new.rate) != SharePlan.scaledRate(pinned.rate)
+            || new.isSynthetic != pinned.isSynthetic || new.quoteUnit != pinned.quoteUnit
+        case (.unavailable, .undetermined?), (.unavailable, .unavailable?):
+          return true
+        default: return false
+        }
       }
 
       var value: LedgerExpense? {
@@ -543,10 +594,21 @@
         guard entry == "receipt" || entry == "manual", let basis else { return nil }
         let proposal: FXProposal?
         if let fxProposal {
+          // 제안의 고시일도 지출일 뒤일 수 없다(서버는 지출일에서 거슬러만 간다).
           guard let parsed = fxProposal.value else { return nil }
+          if case .proposed(let q, _) = parsed, !rateDateIsNotAfterExpense(q.rateDate) { return nil }
           proposal = parsed
         } else {
           proposal = nil
+        }
+        let correction = fxCorrection.flatMap(FXCorrection.init(rawValue:))
+        if fxCorrection != nil {
+          guard let correction,
+            Self.correctionMatches(
+              correction, proposal, pinned: basis.1, basis: basis.0, state: state)
+          else {
+            return nil
+          }
         }
         return LedgerExpense(
           id: expenseId, version: version, isManual: entry == "manual", uploadedBy: MemberID(value: uploadedBy),
@@ -554,7 +616,8 @@
           payer: payerId.map(MemberID.init), krwAmount: krwAmount, krwBasis: basis.0,
           shares: shares.map { ShareLine(member: MemberID(value: $0.userId), krw: $0.krw) },
           artifact: artifactPath.flatMap { path in artifactSha256.map { ReceiptArtifactRef(path: path, sha256: $0) } },
-          fx: basis.1, acquisition: basis.2, fxProposal: proposal, fxSuperseded: fxSuperseded ?? false)
+          fx: basis.1, acquisition: basis.2, fxProposal: proposal, fxSuperseded: fxSuperseded ?? false,
+          fxCorrection: correction)
       }
     }
 
@@ -608,6 +671,8 @@
       let transfers: [TransferRow]
       let excluded: [ExcludedRow]
       let estimatedTotalKrw: Int?
+      /// 정정 정책(ADR-0009) 전 서버에는 없다.
+      let fxCorrectionExpenseIds: [String]?
     }
 
     struct Finalized: Decodable {

@@ -99,7 +99,12 @@ final class RoomModel {
     let review: ExpenseReview
   }
 
-  func isSaving(_ target: ExpenseTarget) -> Bool { inFlight[target] != nil }
+  /// 응답을 기다리는 고정 금액 유지(지출마다 하나). 검토 저장과 같은 화면의 저장 중 상태를 쓴다.
+  private var keeping: Set<ExpenseTarget> = []
+  /// 보낸 고정 금액 유지(응답을 못 받았을 수 있다). 같은 버전·같은 새 고시값이면 같은 요청 키를 쓴다.
+  private var sentKeeps: [ExpenseTarget: FXKeep] = [:]
+
+  func isSaving(_ target: ExpenseTarget) -> Bool { inFlight[target] != nil || keeping.contains(target) }
   /// 검토 중 다른 변경이 먼저 저장돼 최신 값으로 다시 연 지출.
   private(set) var reviewRefreshed: Set<ExpenseTarget> = []
 
@@ -147,12 +152,13 @@ final class RoomModel {
   /// 새 장부에서 버전이 바뀐 지출의 검토 입력은 최신 값으로 다시 채우고 알린다(옛 버전 입력을 새 버전에 보내지 않는다).
   /// 저장 중인 입력은 건드리지 않는다(그 결과가 같은 처리를 한다).
   private func rebaseForms(in ledger: RoomLedger) {
-    for (target, form) in forms where target.tripID == ledger.tripID && inFlight[target] == nil {
+    for (target, form) in forms where target.tripID == ledger.tripID && !isSaving(target) {
       guard let expense = ledger.expenses.first(where: { $0.id == target.expenseID }),
         expense.version != form.baseVersion
       else { continue }
       forms[target] = ShareForm(expense: expense, members: ledger.members)
       sentReviews[target] = nil
+      sentKeeps[target] = nil
       noteRebase(target, to: expense.version)
     }
     for (target, version) in savedVersions where target.tripID == ledger.tripID {
@@ -185,7 +191,7 @@ final class RoomModel {
       let expense = ledger.expenses.first(where: { $0.id == target.expenseID })
     else { return }
     // 저장 중이면 같은 작업에 다시 붙는다: 저장 중 상태·보낸 요청·입력을 그대로 두고 화면만 연다.
-    if inFlight[target] != nil {
+    if isSaving(target) {
       reviewing = target
       return
     }
@@ -208,7 +214,7 @@ final class RoomModel {
   }
 
   func editForm(_ target: ExpenseTarget, _ change: (inout ShareForm) -> Void) {
-    guard var form = forms[target], inFlight[target] == nil else { return }
+    guard var form = forms[target], !isSaving(target) else { return }
     change(&form)
     forms[target] = form
     if case .failed = reviewState[target] { reviewState[target] = nil }
@@ -230,8 +236,65 @@ final class RoomModel {
     await send(target, version: form.baseVersion, .hold(reason: reason))
   }
 
+  /// 새 예상 금액 적용(ADR-0009): 기준을 기준환율 예상으로 두고 기존 검토로 새 고시값과 지금 입력의 몫을 보낸다.
+  /// 몫은 입력 그대로다. 한 사람·둘이 반씩은 새 금액으로 다시 계산되고, 직접 나눈 몫은 고치지 않는다(합이 맞아야 보낸다).
+  func applyNewEstimate(_ target: ExpenseTarget) async {
+    guard expense(target)?.fxCorrection != nil else { return }
+    editForm(target) { $0.krwSource = .estimate }
+    await include(target)
+  }
+
+  /// 고정 금액 유지(ADR-0009): 방장이 비교 화면에서 본 새 고시값으로 정정을 확인하고, 포함한 예상액(금액·몫·기준)을 그대로 둔다.
+  func keepEstimate(_ target: ExpenseTarget) async {
+    guard let ledger = ledgers[target.tripID], ledger.isHost, !ledger.isFinalized, let expense = expense(target),
+      expense.fxCorrection == .required, case .proposed(let quote, _) = expense.fxProposal, !isSaving(target)
+    else { return }
+    let keep =
+      sentKeeps[target].flatMap {
+        $0.expectedVersion == expense.version && $0.replacementQuoteID == quote.quoteID ? $0 : nil
+      }
+      ?? FXKeep(
+        expenseID: target.expenseID, expectedVersion: expense.version, requestID: UUID(),
+        replacementQuoteID: quote.quoteID)
+    sentKeeps[target] = keep
+    keeping.insert(target)
+    reviewState[target] = .saving
+    let result: Result<ReviewedExpense, Error>
+    do {
+      result = .success(try await settlement.keepEstimate(keep, in: target.tripID))
+    } catch {
+      result = .failure(error)
+    }
+    keeping.remove(target)
+    switch result {
+    case .success(let kept):
+      sentKeeps[target] = nil
+      reviewState[target] = nil
+      if forms[target]?.baseVersion == keep.expectedVersion { forms[target] = nil }
+      previews[target.tripID] = nil
+      savedVersions[target] = kept.version
+      if reviewing == target { reviewing = nil }
+      await loadLedger(target.tripID)
+    case .failure(let error):
+      let failure = error as? SettlementFailure ?? .unknown
+      reviewState[target] = .failed(failure)
+      switch failure {
+      case .stale, .quoteChanged, .fxNothingToKeep, .fxReplacementUnavailable, .finalized:
+        // 그사이 지출·고시값이 바뀌었다. 최신 장부로 비교를 다시 보이고 방장이 다시 고르게 한다(다른 요청 키).
+        sentKeeps[target] = nil
+        await loadLedger(target.tripID)
+      case .sessionExpired:
+        await onSessionExpired()
+      case .rejected, .hostOnly, .notFound:
+        sentKeeps[target] = nil
+      default:
+        break
+      }
+    }
+  }
+
   private func send(_ target: ExpenseTarget, version: Int, _ decision: ExpenseReview.Decision) async {
-    guard inFlight[target] == nil else { return }
+    guard !isSaving(target) else { return }
     // 응답을 못 받은 같은 검토를 다시 보내면 같은 요청 키를 쓴다(서버가 같은 결과를 돌려준다).
     let previous = sentReviews[target]
     let review =
@@ -286,7 +349,8 @@ final class RoomModel {
         await onSessionExpired()
       case .rejected, .hostOnly, .notFound:
         sentReviews[target] = nil
-      case .network, .unavailable, .unknown, .pendingReview:
+      case .network, .unavailable, .unknown, .pendingReview, .fxCorrectionRequired, .fxReplacementUnavailable,
+        .fxNothingToKeep:
         break
       }
     }
@@ -340,6 +404,12 @@ final class RoomModel {
   }
 
   // MARK: - 미리보기와 확정
+
+  /// 송금표의 "결정이 필요한 지출"에서 그 지출 검토로 간다(송금표를 닫고 장부 위에 검토를 연다).
+  func openCorrection(_ trip: TripID, expenseID: String) {
+    settlementShown = nil
+    openReview(ExpenseTarget(tripID: trip, expenseID: expenseID))
+  }
 
   func openSettlement(_ trip: TripID) {
     finalizeRefreshed.remove(trip)
@@ -403,6 +473,11 @@ final class RoomModel {
         await loadLedger(trip)
         if let preview = try? await settlement.preview(trip) { previews[trip] = preview }
         finalizeRefreshed.insert(trip)
+      case .fxCorrectionRequired:
+        // 미리보기 뒤 기준환율이 정정됐다(revision은 그대로). 새 미리보기의 "결정이 필요한 지출"을 보이고 확정은 막는다.
+        sentFinalize[trip] = nil
+        await loadLedger(trip)
+        if let preview = try? await settlement.preview(trip) { previews[trip] = preview }
       case .finalized:
         sentFinalize[trip] = nil
         await loadLedger(trip)

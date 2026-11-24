@@ -140,4 +140,31 @@
     <string name="settlement_converted">원화 환산 근거</string>
     <string name="settlement_converted_hint">실제 청구액이 아닌 지출이에요. 예상 금액은 확정해도 예상으로 남아요.</string>
     <string name="settle_failure_quote_changed">기준환율 고시값이 새로 들어와 예상 금액이 바뀌었어요. 새 금액을 확인하고 다시 저장해 주세요.</string>
+    <!-- 기준환율 정정(ADR-0009) -->
+    <string name="room_fx_correction">환율 정정 결정 필요 %1$d건</string>
+    <string name="expense_status_included_correction">포함 · 환율 정정</string>
+    <string name="expense_fx_required">기준환율이 정정됐어요. 고정 금액 유지나 새 예상 금액 적용을 골라야 확정할 수 있어요.</string>
+    <string name="expense_fx_kept">기준환율이 정정됐지만 고정 금액 유지를 골랐어요. 예상 금액 그대로예요.</string>
+    <string name="expense_fx_unavailable">기준환율 정정 뒤 쓸 고시값이 없어요. 보류하거나 실제 청구액·환전 원가로 다시 포함해야 확정할 수 있어요.</string>
+    <string name="review_fx_title">기준환율 정정</string>
+    <string name="review_fx_pinned">고정한 예상 금액</string>
+    <string name="review_fx_current">지금 적용되는 기준환율</string>
+    <string name="review_fx_new_krw">새 예상 금액 %1$s</string>
+    <string name="review_fx_diff">차이 %1$s</string>
+    <string name="review_fx_new_none">쓸 수 있는 기준환율 고시값이 없어요.</string>
+    <string name="review_fx_state_required">확정하려면 둘 중 하나를 골라 주세요. 고르기 전에는 포함한 금액이 바뀌지 않아요.</string>
+    <string name="review_fx_state_kept">고정 금액 유지를 골랐어요. 정산에는 고정한 예상 금액이 쓰이고 예상 금액으로 남아요. 새 예상 금액을 적용할 수도 있어요.</string>
+    <string name="review_fx_state_unavailable">정정 뒤 이 날짜에 쓸 수 있는 기준환율이 없어 자동으로 다시 계산하지 않아요. 실제 청구액·환전 원가를 골라 다시 포함하거나 보류해 주세요.</string>
+    <string name="review_fx_keep">고정 금액 유지</string>
+    <string name="review_fx_apply">새 예상 금액 적용</string>
+    <string name="review_fx_apply_hint">직접 나눈 몫은 자동으로 바꾸지 않아요. 아래 부담 금액을 새 예상 금액에 맞게 고친 뒤 적용해 주세요.</string>
+    <string name="settlement_fx_blocked">기준환율이 정정된 예상 금액 %1$d건이 있어 확정할 수 없어요.</string>
+    <string name="settlement_fx_title">기준환율 정정 · 결정 필요</string>
+    <string name="settlement_fx_host_hint">지출을 눌러 고정 금액 유지나 새 예상 금액 적용을 골라 주세요. 쓸 고시값이 없는 지출은 보류하거나 실제 청구액·환전 원가로 포함해 주세요.</string>
+    <string name="settlement_fx_member_hint">방장이 정해야 확정할 수 있어요.</string>
+    <string name="settlement_fx_summary">고정 %1$s → 새 %2$s</string>
+    <string name="settlement_fx_summary_none">고정 %1$s · 쓸 고시값 없음</string>
+    <string name="settle_failure_fx_required">기준환율이 정정된 예상 금액이 있어 확정하지 않았어요. 지출마다 고정 금액 유지나 새 예상 금액 적용을 골라 주세요.</string>
+    <string name="settle_failure_fx_unavailable">정정 뒤 쓸 수 있는 기준환율이 없어요. 실제 청구액·환전 원가로 포함하거나 보류해 주세요.</string>
+    <string name="settle_failure_fx_nothing">이미 정해졌거나 고시값이 다시 바뀌었어요. 최신 내용을 확인해 주세요.</string>
 </resources>

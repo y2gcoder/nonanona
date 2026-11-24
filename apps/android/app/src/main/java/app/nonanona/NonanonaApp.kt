@@ -235,6 +235,8 @@ fun NonanonaApp(viewModel: AppViewModel) {
                             receipt = rooms.receiptViews[target],
                             onShowReceipt = { viewModel.rooms.showReceipt(target) },
                             onHideReceipt = { viewModel.rooms.hideReceipt(target) },
+                            onKeepEstimate = { viewModel.rooms.keepEstimate(target) },
+                            onApplyEstimate = { viewModel.rooms.applyNewEstimate(target) },
                         )
                     }
                 }
@@ -248,6 +250,7 @@ fun NonanonaApp(viewModel: AppViewModel) {
                         snackbarHostState = snackbarFor(route),
                         onFinalize = { viewModel.rooms.requestFinalize(route.trip) },
                         onBack = viewModel::back.takeUnless { twoPane },
+                        onOpenExpense = { viewModel.openExpense(ExpenseTarget(route.trip, it)) },
                     )
                 }
             },

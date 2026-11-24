@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""엔화 원화 기준 마이그레이션(20261124130000) 업그레이드 검사. 로컬 DB를 바로 앞 마이그레이션까지 되돌려 예전 규칙(v1)으로
+"""엔화 원화 기준 마이그레이션(20261124130000 이후 전부: 정정 정책 20261124150000, 확정 재시도 null-safe 20261124160000 포함) 업그레이드 검사. 로컬 DB를 바로 앞 마이그레이션까지 되돌려 예전 규칙(v1)으로
 확정본과 검토 요청을 만든 뒤, 새 마이그레이션을 올리고 예전 자료가 그대로인지 본다. 끝나면 local:reset 상태로 되돌린다.
 
 사용(저장소 루트, local:up 뒤): python3 -I scripts/fx-upgrade-check.py [결과 JSON 경로]
@@ -53,7 +53,8 @@ def main():
     include(submit(trip_a, "2026-11-03", 1408, "JPY"), 13377)
     include(submit(trip_a, "2026-11-08", 38000, "KRW"), 38000)
     rev = host.rpc("get_room_ledger", p_trip=trip_a)[1]["revision"]
-    st, _, _ = host.rpc("finalize_settlement", p_trip=trip_a, p_expected_revision=rev, p_request_id=str(uuid.uuid4()))
+    fin_req = dict(p_trip=trip_a, p_expected_revision=rev, p_request_id=str(uuid.uuid4()))
+    st, fin_body, _ = host.rpc("finalize_settlement", **fin_req)
     check("v1 finalize before the migration", st == 200)
     f_before = member.rpc("get_finalized_settlement", p_trip=trip_a)[1]
     row_before = psql(f"select md5(snapshot::text) || '|' || snapshot_sha256 || '|' || rule_version || '|' || included_total_krw "
@@ -75,6 +76,14 @@ def main():
     check("v1 finalized settlement reads back identically (rule_version v1, no new keys)",
           f_after == f_before and f_after["rule_version"] == "explicit-krw-shares-v1"
           and all("is_estimate" not in e and "fx" not in e for e in f_after["snapshot"]["inputs"]["expenses"]))
+    st, fin_replay, _ = host.rpc("finalize_settlement", **fin_req)
+    check("v1 finalize key/revision sent before both FX migrations replays exactly after them",
+          st == 200 and fin_replay == {"finalization_id": fin_body["finalization_id"], "version": fin_body["version"],
+                                       "replayed": True}, got=fin_replay if st == 200 else st)
+    for label, revision in (("a null revision", None), ("a different revision", rev + 1)):
+        st, code, _ = host.rpc("finalize_settlement", **{**fin_req, "p_expected_revision": revision})
+        check(f"that v1 key with {label} -> idempotency_conflict (no replay)", st == 409 and code == "idempotency_conflict",
+              code=code)
     st, replay, _ = host.rpc("review_expense", **old_req)
     check("review sent before the migration replays with the same result after it",
           st == 200 and replay["replayed"] and replay["version"] == old_resp["version"])

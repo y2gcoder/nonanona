@@ -85,7 +85,11 @@ def main():
     check("finalized settlement reads back identically", member.rpc("get_finalized_settlement", p_trip=trip_a)[1] == f_before)
     st, replay, _ = host.rpc("finalize_settlement", **fin_req)
     check("finalize sent before the migration replays with the same result after it",
-          st == 200 and replay["replayed"] and replay["finalization_id"] == fin_body["finalization_id"])
+          st == 200 and replay == {"finalization_id": fin_body["finalization_id"], "version": fin_body["version"],
+                                   "replayed": True})
+    st, code, _ = host.rpc("finalize_settlement", **{**fin_req, "p_expected_revision": None})
+    check("that v2 key with a null revision -> idempotency_conflict (no replay)", st == 409 and code == "idempotency_conflict",
+          code=code)
     st, replay, _ = host.rpc("review_expense", **old_review)
     check("estimate review sent before the migration replays with the same result after it",
           st == 200 and replay["replayed"] and replay["version"] == old_resp["version"])

@@ -181,6 +181,9 @@ def main():
           and detail(body) == {"expense_ids": [ids["keep"], ids["apply"], ids["manual"], ids["repeat"]]}, status=st, code=code)
     st, code, _ = host.rpc("finalize_settlement", p_trip=trip, p_expected_revision=rev0 - 1, p_request_id=str(uuid.uuid4()))
     check("an older revision is still rejected as stale_revision first", st == 409 and code == "stale_revision", code=code)
+    st, code, _ = host.rpc("finalize_settlement", p_trip=trip, p_expected_revision=None, p_request_id=str(uuid.uuid4()))
+    check("a null revision is also stale_revision before the correction check", st == 409 and code == "stale_revision",
+          code=code)
     st, code, _ = member.rpc("finalize_settlement", p_trip=trip, p_expected_revision=rev0, p_request_id=str(uuid.uuid4()))
     check("member finalize -> host_only", st == 403 and code == "host_only", code=code)
 
@@ -343,6 +346,26 @@ def main():
     st, _, _ = keep("race")
     check("keep with the current replacement", st == 200 and state("race") == "kept")
 
+    # ------------------------------------------------------------ 동시성 2b: 검토(예상)도 받기를 기다렸다가 그 값으로 본다
+    st, body, _ = member.rpc("submit_manual_expense", p_trip=trip, p_request_id=str(uuid.uuid4()), p_expense_date=d(14),
+                             p_amount_minor=1000, p_currency="JPY", p_merchant="가상 rv")
+    ids["rv"] = body["expense_id"]
+    rv = exp("rv")
+    proc = run_background("begin; " + ingest_sql({d(14): "904.10"}, d(14), d(14)) + " select pg_sleep(3); commit;")
+    time.sleep(1.0)
+    t = time.monotonic()
+    st, code, body = include_estimate("rv")
+    waited = time.monotonic() - t
+    proc.wait(timeout=30)
+    check("estimate review with the old quote racing an in-flight correction waits, then -> stale_quote",
+          proc.returncode == 0 and st == 409 and code == "stale_quote" and waited >= 1.2
+          and (detail(body) or {}).get("fx_proposal", {}).get("rate") == "904.10"
+          and rv["fx_proposal"]["rate"] == "904.00", code=code, waited=round(waited, 2))
+    check("the raced review changed nothing", exp("rv")["version"] == rv["version"] and exp("rv")["status"] == "pending")
+    st, _, _ = include_estimate("rv")
+    check("review with the corrected quote is included", st == 200 and exp("rv")["krw_amount"] == 9041
+          and exp("rv")["fx"]["rate"] == "904.10")
+
     # ------------------------------------------------------------ 동시성 3: 확정이 먼저 잠그면 받기는 그 뒤에 들어간다
     p = preview()
     check("preview ready again", p["ready"])
@@ -377,6 +400,13 @@ def main():
           st == 200 and body["replayed"] and body["finalization_id"] == f1["finalization_id"])
     st, code, _ = host.rpc("finalize_settlement", p_trip=trip, p_expected_revision=p["revision"] - 1, p_request_id=final_req)
     check("same finalize key with a different revision -> idempotency_conflict", st == 409 and code == "idempotency_conflict")
+    st, code, _ = host.rpc("finalize_settlement", p_trip=trip, p_expected_revision=None, p_request_id=final_req)
+    check("same finalize key with a null revision is not a replay -> idempotency_conflict",
+          st == 409 and code == "idempotency_conflict", status=st, code=code)
+    st, code, _ = host.rpc("finalize_settlement", p_trip=trip, p_expected_revision=None, p_request_id=str(uuid.uuid4()))
+    check("a new key with a null revision -> trip_finalized (no second finalization)", st == 409 and code == "trip_finalized",
+          code=code)
+    check("still exactly one finalization", psql(f"select count(*) from public.finalizations where trip_id = '{trip}'") == "1")
     st, f2, _ = member.rpc("get_finalized_settlement", p_trip=trip)
     check("the finalized snapshot is unchanged by the later ingestion", f2 == f1)
     led, raw = ledger()

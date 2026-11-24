@@ -29,6 +29,11 @@ class ReceiptStorageException(
     cause: Throwable? = null,
 ) : IOException("write failed", cause)
 
+/** 파일은 있는데 읽지 못했다(보호된 파일·입출력 오류). 없는 파일과 구분한다. */
+class ReceiptReadException(
+    cause: Throwable? = null,
+) : IOException("read failed", cause)
+
 /**
  * 초안 폴더를 다룬다. 사진과 목록 파일을 숨긴 임시 폴더에 다 쓴 뒤 이름을 바꿔서,
  * 쓰는 도중 프로세스가 끝나도 반쯤 쓴 초안이 목록에 보이지 않게 한다.
@@ -37,6 +42,8 @@ class ReceiptDraftStore(
     root: File,
     /** 검증용 쓰기 실패 주입(테스트와 debug 빌드만 넘긴다). true를 돌려주면 그 파일 쓰기가 실패한다. */
     private val writeFault: ((File) -> Boolean)? = null,
+    /** 검증용 읽기 실패 주입(테스트와 debug 빌드만 넘긴다). true를 돌려주면 있는 파일 읽기가 실패한다. */
+    private val readFault: ((File) -> Boolean)? = null,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     private val draftsDir = File(root, "drafts")
@@ -136,6 +143,17 @@ class ReceiptDraftStore(
         processingFile(id).takeIf { it.isFile }?.let { ProcessingManifest.fromJson(it.readText(Charsets.UTF_8)) }
 
     fun saveProcessing(manifest: ProcessingManifest) = writeAtomic(processingFile(manifest.draftId), manifest.toJson().toByteArray())
+
+    /** 파일이 없으면 null. 있는데 읽지 못하면 [ReceiptReadException](없는 파일로 여겨 새로 만들어 덮지 않게). */
+    fun readIfPresent(file: File): String? {
+        if (!file.exists()) return null
+        if (readFault?.invoke(file) == true) throw ReceiptReadException()
+        return try {
+            file.readText(Charsets.UTF_8)
+        } catch (e: IOException) {
+            throw ReceiptReadException(e)
+        }
+    }
 
     /** 임시 파일에 다 쓴 뒤 이름을 바꿔, 쓰는 도중 끝나도 반쯤 쓴 파일이 남지 않게 한다. */
     fun writeAtomic(

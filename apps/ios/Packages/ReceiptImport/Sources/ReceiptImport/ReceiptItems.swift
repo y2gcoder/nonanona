@@ -316,9 +316,13 @@ public struct ItemPlan: Codable, Equatable, Sendable {
   }
 
   /// 번역 결과를 이름이 없거나 기계가 채운 줄에만 넣는다. 사용자가 적은 이름은 덮지 않는다.
-  public mutating func applyTranslations(_ names: [String: String], source: ItemPlanLine.NameSource) {
+  /// `originals`를 주면 번역한 원문이 지금 줄의 원문과 같은 줄에만 넣는다(늦게 도착한 결과가 다른 계획에 들어가지 않게).
+  public mutating func applyTranslations(
+    _ names: [String: String], source: ItemPlanLine.NameSource, originals: [String: String]? = nil
+  ) {
     for index in lines.indices {
       guard lines[index].nameSource != .user, let name = names[lines[index].id], !name.isEmpty else { continue }
+      if let originals, originals[lines[index].id] != lines[index].originalName { continue }
       lines[index].name = name
       lines[index].nameSource = source
     }

@@ -22,11 +22,14 @@ struct ItemSplitContent {
   let translatorLabel: String
   let translatorIsPreview: Bool
   let saveFailed: Bool
+  /// 저장한 계획을 열지 못했다(통화를 받지 않는 경우와 다르다). 계획 파일은 그대로 있다.
+  let loadFailure: ItemPlanLoadFailure?
 }
 
 struct ItemSplitActions {
   let edit: ((inout ItemPlan) -> Void) -> Void
   let retrySave: () -> Void
+  let retryLoad: () -> Void
   let translate: () -> Void
   let recheckTranslation: () -> Void
   let apply: () -> Void
@@ -53,6 +56,12 @@ struct ItemSplitView: View {
         addSection
         summarySection(plan)
         resultSection(plan)
+      } else if let failure = content.loadFailure {
+        Section {
+          Text(Self.loadFailureMessage(failure))
+            .textRole(.body).accessibilityIdentifier("items-load-failed")
+          Button("다시 불러오기", action: actions.retryLoad).accessibilityIdentifier("items-load-retry")
+        }
       } else {
         Section {
           Text("이 영수증의 통화는 아직 품목별로 나눌 수 없어요. 지출 검토에서 직접 나눠 주세요.")
@@ -74,6 +83,15 @@ struct ItemSplitView: View {
     .navigationTitle("품목별로 나누기")
     .navigationBarTitleDisplayMode(.inline)
     .accessibilityIdentifier("item-split-screen")
+  }
+
+  static func loadFailureMessage(_ failure: ItemPlanLoadFailure) -> String {
+    switch failure {
+    case .unreadable:
+      return "저장한 품목 계획을 이 기기에서 읽지 못했어요. 계획은 지우거나 바꾸지 않았어요. 다시 불러와 주세요."
+    case .invalid:
+      return "저장한 품목 계획이 손상됐거나 이 영수증과 맞지 않아 열 수 없어요. 계획은 지우거나 바꾸지 않았어요. 지출 검토에서 직접 나눌 수 있어요."
+    }
   }
 
   // MARK: 번역

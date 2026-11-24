@@ -259,8 +259,10 @@ fun NonanonaApp(viewModel: AppViewModel) {
                         translatorIsPreview = viewModel.itemTranslatorIsPreview,
                         hasTranslationSettings = settings != null,
                         saveFailed = route.receipt in state.itemPlanSaveFailed,
+                        loadFailure = state.itemPlanLoadFailed[route.receipt],
                         edit = { change -> viewModel.editItemPlan(route.receipt, change) },
                         onRetrySave = { viewModel.retryItemPlanSave(route.receipt) },
+                        onRetryLoad = { viewModel.retryItemPlanLoad(route.receipt) },
                         onTranslate = { viewModel.translateItemNames(route.receipt) },
                         onOpenTranslationSettings = {
                             runCatching { settings?.send(context, 0, null) }

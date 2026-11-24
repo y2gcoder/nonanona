@@ -71,6 +71,14 @@ struct ItemSplitTarget: Hashable {
 }
 
 /// 품목 이름 기기 번역 상태(영수증마다).
+/// 저장한 품목 계획을 열지 못한 이유. 계획 파일은 지우거나 OCR로 다시 만들어 덮지 않는다. 화면은 다시 불러오기를 둔다.
+enum ItemPlanLoadFailure: Equatable {
+  /// 파일이 있는데 기기 저장소에서 읽지 못했다(보호된 파일·입출력 오류).
+  case unreadable
+  /// 읽었지만 풀 수 없거나 확인한 영수증 합계·통화와 맞지 않는다.
+  case invalid
+}
+
 enum ItemTranslationState: Equatable {
   case checking
   case available(ItemTranslationAvailability)
@@ -148,6 +156,8 @@ final class AppModel {
   private(set) var itemPlans: [ReviewTarget: ItemPlan] = [:]
   /// 품목 계획을 기기에 쓰지 못했다(가장 최근 저장의 결과).
   private(set) var itemPlanSaveFailed: Set<ReviewTarget> = []
+  /// 저장한 품목 계획을 열지 못했다. 이때는 계획이 없으므로 편집·저장도 없다(디스크의 계획을 덮지 않는다).
+  private(set) var itemPlanLoadFailed: [ReviewTarget: ItemPlanLoadFailure] = [:]
   private(set) var itemTranslation: [ReviewTarget: ItemTranslationState] = [:]
   private var itemPlanRevision = 0
   private var itemPlanSettled: [ReviewTarget: Int] = [:]
@@ -670,12 +680,30 @@ final class AppModel {
       let processor = processors[receipt.draftID]
     else { return }
     Task {
-      // 화면에 있던(아직 쓰는 중일 수 있는) 입력을 디스크 값으로 덮지 않는다.
-      if itemPlans[receipt] == nil, let plan = try? await processor.itemPlan(receipt.itemID) {
-        itemPlans[receipt] = plan
-      }
+      await loadItemPlan(receipt, with: processor)
       itemSplit = ItemSplitTarget(expense: expense, receipt: receipt)
       await checkTranslation(receipt)
+    }
+  }
+
+  /// 읽지 못했던 계획을 다시 읽는다. 실패하면 같은 안내를 그대로 둔다.
+  func retryItemPlanLoad(_ target: ReviewTarget) {
+    guard let processor = processors[target.draftID] else { return }
+    Task { await loadItemPlan(target, with: processor) }
+  }
+
+  /// 화면에 있던(아직 쓰는 중일 수 있는) 입력을 디스크 값으로 덮지 않는다. 파일이 없을 때만 OCR로 새로 만든 계획이 온다.
+  /// 읽지 못하거나 풀 수 없으면 계획을 비워 두고 이유를 남긴다(새로 만든 계획으로 바꾸지 않는다).
+  private func loadItemPlan(_ target: ReviewTarget, with processor: ReceiptProcessor) async {
+    guard itemPlans[target] == nil else { return }
+    do {
+      let plan = try await processor.itemPlan(target.itemID)
+      if itemPlans[target] == nil { itemPlans[target] = plan }
+      itemPlanLoadFailed[target] = nil
+    } catch ProcessorError.itemPlanInvalid {
+      itemPlanLoadFailed[target] = .invalid
+    } catch {
+      itemPlanLoadFailed[target] = .unreadable
     }
   }
 
@@ -728,7 +756,9 @@ final class AppModel {
       let names = try await translator.translate(lines.map(\.originalName))
       guard names.count == lines.count else { throw ItemTranslationError.failed }
       let byID = Dictionary(uniqueKeysWithValues: zip(lines.map(\.id), names))
-      editItemPlan(target) { $0.applyTranslations(byID, source: translator.source) }
+      let originals = Dictionary(uniqueKeysWithValues: lines.map { ($0.id, $0.originalName) })
+      // 번역하는 동안 사용자가 적은 이름은 덮지 않고, 번역한 원문과 다른 줄에는 넣지 않는다(지금 계획 기준으로 다시 본다).
+      editItemPlan(target) { $0.applyTranslations(byID, source: translator.source, originals: originals) }
       itemTranslation[target] = .translated(count: names.filter { !$0.isEmpty }.count)
     } catch {
       itemTranslation[target] = .failed

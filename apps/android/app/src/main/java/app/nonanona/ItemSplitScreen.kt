@@ -69,8 +69,10 @@ fun ItemSplitScreen(
     translatorIsPreview: Boolean,
     hasTranslationSettings: Boolean,
     saveFailed: Boolean,
+    loadFailure: ItemPlanLoadFailure?,
     edit: ((ItemPlan) -> ItemPlan) -> Unit,
     onRetrySave: () -> Unit,
+    onRetryLoad: () -> Unit,
     onTranslate: () -> Unit,
     onOpenTranslationSettings: () -> Unit,
     onApply: () -> Unit,
@@ -101,6 +103,28 @@ fun ItemSplitScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(Spacing.m).testTag("items_privacy"),
                 )
+            }
+            if (plan == null && loadFailure != null) {
+                // 저장한 계획을 열지 못했다(통화를 받지 않는 경우와 다르다). 파일은 지우거나 덮지 않았다.
+                item {
+                    Column(Modifier.padding(Spacing.m)) {
+                        Text(
+                            stringResource(
+                                when (loadFailure) {
+                                    ItemPlanLoadFailure.Unreadable -> R.string.items_load_unreadable
+                                    ItemPlanLoadFailure.Invalid -> R.string.items_load_invalid
+                                },
+                            ),
+                            style = TextRoles.body,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.testTag("items_load_failed"),
+                        )
+                        TextButton(onClick = onRetryLoad, modifier = Modifier.testTag("items_load_retry")) {
+                            Text(stringResource(R.string.items_load_retry))
+                        }
+                    }
+                }
+                return@LazyColumn
             }
             if (plan == null) {
                 item {

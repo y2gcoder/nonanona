@@ -33,6 +33,8 @@ class Adapters(
     val debugUploadUi: DebugUploadUi? = null,
     /** 검증용 저장 실패 주입. release는 null. */
     val writeFault: ((File) -> Boolean)? = null,
+    /** 검증용 읽기 실패 주입. release는 null. */
+    val readFault: ((File) -> Boolean)? = null,
     /** 품목 이름 번역. null이면 기기 번역 서비스(release와 debug 기본값). debug는 미리보기 대역을 고를 수 있다. */
     val itemTranslator: ItemNameTranslator? = null,
 )
@@ -85,7 +87,12 @@ class AppGraph(
     private val appContext = context.applicationContext
     val adapters: Adapters = createAdapters(appContext)
     val contentResolver: ContentResolver = appContext.contentResolver
-    val drafts = ReceiptDraftStore(File(appContext.filesDir, "receipt-import"), writeFault = adapters.writeFault)
+    val drafts =
+        ReceiptDraftStore(
+            File(appContext.filesDir, "receipt-import"),
+            writeFault = adapters.writeFault,
+            readFault = adapters.readFault,
+        )
 
     /** ML Kit 번들 일본어 모델. 처음 쓸 때 만든다. */
     val recognizer: ReceiptRecognizer by lazy { MlKitReceiptRecognizer() }

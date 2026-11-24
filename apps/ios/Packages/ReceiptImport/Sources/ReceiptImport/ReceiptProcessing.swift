@@ -84,6 +84,8 @@ public enum ProcessorError: Error, Equatable {
   case itemNotFound
   case wrongState
   case invalidFields
+  /// 저장한 품목 계획 파일이 있는데 풀 수 없거나 확인한 영수증(합계·통화)과 맞지 않는다. 파일은 그대로 둔다.
+  case itemPlanInvalid
 }
 
 /// 기기 밖으로 내보내기 직전 검사에서 걸린 이유. 하나라도 걸리면 아무것도 내보내지 않는다.

@@ -38,6 +38,7 @@ internal fun createAdapters(context: Context): Adapters {
             debugUploadUi = DebugUploadSection,
             debugReceiptConfirm = confirmWithSuggestions(context),
             writeFault = writeFault(context),
+            readFault = writeFault(context, "debug-fail-reads"),
             itemTranslator = itemTranslator(context),
         )
     }
@@ -53,6 +54,7 @@ internal fun createAdapters(context: Context): Adapters {
         debugReceiptConfirm = confirmWithSuggestions(context),
         debugUploadUi = DebugUploadSection,
         writeFault = writeFault(context),
+        readFault = writeFault(context, "debug-fail-reads"),
         itemTranslator = itemTranslator(context),
     )
 }
@@ -72,9 +74,13 @@ private fun itemTranslator(context: Context) =
 /**
  * 검증용 저장 실패 주입: files/receipt-import/debug-fail-writes에 적힌 경로 조각(줄마다, 예: processing.json, reviews/)이
  * 들어간 파일 쓰기를 실패시킨다. 파일을 지우면 바로 돌아온다(iOS와 같은 규칙, E2E가 run-as로 만들고 지운다).
+ * [listName]이 debug-fail-reads이면 같은 방식으로 있는 파일 읽기를 실패시킨다(품목 계획 읽기 실패 검증).
  */
-private fun writeFault(context: Context): (File) -> Boolean {
-    val flag = File(context.filesDir, "receipt-import/debug-fail-writes")
+private fun writeFault(
+    context: Context,
+    listName: String = "debug-fail-writes",
+): (File) -> Boolean {
+    val flag = File(context.filesDir, "receipt-import/$listName")
     return { file ->
         flag.isFile && flag.readLines().any { it.isNotBlank() && file.path.contains(it.trim()) }
     }

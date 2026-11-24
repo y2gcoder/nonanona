@@ -156,13 +156,18 @@ public actor ReceiptProcessor {
     return try Data(contentsOf: store.artifactURL(draftID, name))
   }
 
-  /// 확인한 영수증(가린 사본이 있는 것)의 품목별 나누기 계획. 저장한 것이 없으면 제안의 OCR 위치로 새로 만든다(쓰지는 않는다).
+  /// 확인한 영수증(가린 사본이 있는 것)의 품목별 나누기 계획. 저장한 파일이 **없을 때만** 제안의 OCR 위치로 새로 만든다(쓰지는 않는다).
+  /// 파일이 있는데 읽지 못하면 `ReceiptStorageError.readFailed`, 풀 수 없거나 확인한 합계·통화와 다르면
+  /// `ProcessorError.itemPlanInvalid`를 던진다. 어느 쪽도 OCR로 새로 만들지 않아, 다음 저장이 사용자가 고친 계획을 덮지 않는다.
   /// 소수 자릿수가 있는 통화는 nil. OCR 글자·품목 이름을 담으므로 기기 안에서만 쓴다.
   public func itemPlan(_ id: String) throws -> ItemPlan? {
     let index = try indexOf(id, in: [.confirmed])
     guard let receipt = manifest.items[index].confirmed, !receipt.isManualEntry else { return nil }
-    if let data = try? Data(contentsOf: store.itemPlanURL(draftID, id)) {
-      return try JSONDecoder().decode(ItemPlan.self, from: data)
+    if let data = try store.readIfPresent(store.itemPlanURL(draftID, id)) {
+      guard let plan = try? JSONDecoder().decode(ItemPlan.self, from: data),
+        plan.receiptTotalMinor == receipt.fields.amountMinor, plan.currency == receipt.fields.currency
+      else { throw ProcessorError.itemPlanInvalid }
+      return plan
     }
     return ItemPlan.seed(fields: receipt.fields, ocr: try proposal(id).ocr)
   }

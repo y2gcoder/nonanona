@@ -18,6 +18,7 @@ import app.nonanona.feature.receiptimport.ProcessorException
 import app.nonanona.feature.receiptimport.ReceiptDraftStore
 import app.nonanona.feature.receiptimport.ReceiptFlattener
 import app.nonanona.feature.receiptimport.ReceiptProcessor
+import app.nonanona.feature.receiptimport.ReceiptReadException
 import app.nonanona.feature.receiptimport.ReceiptStorageException
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -273,6 +274,80 @@ class ReceiptItemsTest {
             } catch (_: ReceiptStorageException) {
             }
             assertEquals("정식", processor.itemPlan(id)?.line("ocr-3")?.name)
+        }
+
+    /** 저장한 계획이 있는데 읽지 못하면 OCR로 새로 만들지 않고 던진다. 디스크 파일은 그대로이고, 다시 읽으면 같은 계획이 온다. */
+    @Test
+    fun unreadablePlanIsNotReseededAndRetryLoadsIt() =
+        runBlocking {
+            var failing = false
+            val root = tmp.newFolder()
+            val store = ReceiptDraftStore(root, readFault = { it.path.contains("/items/") && failing })
+            val (processor, id) = confirmedProcessor(store)
+            val plan = processor.itemPlan(id)!!.setName("ocr-3", "정식").setAssignee("ocr-3", "host", true)
+            processor.saveItemPlan(id, plan)
+            val file = File(root, "drafts/${store.list().single().id}/items/$id.json")
+            val saved = file.readBytes()
+
+            failing = true
+            for (p in listOf(processor, ReceiptProcessor(store, store.list().single(), { rowsOcr }, flattener))) {
+                try {
+                    p.itemPlan(id)
+                    fail("읽지 못한 계획을 OCR로 새로 만들지 않는다")
+                } catch (_: ReceiptReadException) {
+                }
+            }
+            assertTrue(saved.contentEquals(file.readBytes()))
+            failing = false
+            assertEquals(plan, processor.itemPlan(id))
+        }
+
+    /** 풀 수 없는 파일, 확인한 합계·통화와 다른 파일은 ItemPlanInvalid로 던지고 지우거나 덮지 않는다. 파일이 없을 때만 새로 만든다. */
+    @Test
+    fun invalidPlanFileIsKeptAndOnlyAbsentSeeds() =
+        runBlocking {
+            val root = tmp.newFolder()
+            val store = ReceiptDraftStore(root)
+            val (processor, id) = confirmedProcessor(store)
+            val file = File(root, "drafts/${store.list().single().id}/items/$id.json")
+            val seeded = processor.itemPlan(id)!!
+            assertTrue(!file.exists()) // 새로 만든 계획은 쓰지 않는다
+
+            file.parentFile.mkdirs()
+            for (bad in listOf("{\"extractor\":", seeded.copy(receiptTotalMinor = seeded.receiptTotalMinor + 1).toJson())) {
+                file.writeText(bad)
+                try {
+                    processor.itemPlan(id)
+                    fail("손상되거나 맞지 않는 계획을 열지 않는다")
+                } catch (e: ProcessorException) {
+                    assertEquals(ProcessorError.ItemPlanInvalid, e.error)
+                }
+                assertEquals(bad, file.readText())
+            }
+            file.delete()
+            assertEquals(seeded, processor.itemPlan(id))
+        }
+
+    /** 늦게 도착한 번역은 그사이 사용자가 적은 이름을 덮지 않고, 원문이 다른 줄(다른 계획)에는 들어가지 않는다. */
+    @Test
+    fun delayedTranslationKeepsManualEditsAndIdentity() =
+        runBlocking {
+            val (processor, id) = confirmedProcessor(ReceiptDraftStore(tmp.newFolder()))
+            var plan = processor.itemPlan(id)!!
+            val requested = plan.lines.filter { it.originalName.isNotEmpty() && it.nameSource != ItemPlanLine.NameSource.User }
+            assertTrue(requested.size >= 2)
+            val names = requested.associate { it.id to "번역-${it.id}" }
+            val originals = requested.associate { it.id to it.originalName } + (requested[1].id to "다른 원문")
+            plan = plan.setName(requested[0].id, "직접 적음")
+            plan = plan.applyTranslations(names, ItemPlanLine.NameSource.OnDevice, originals)
+            assertEquals("직접 적음", plan.line(requested[0].id)?.name)
+            assertEquals(ItemPlanLine.NameSource.User, plan.line(requested[0].id)?.nameSource)
+            assertEquals("", plan.line(requested[1].id)?.name)
+            assertEquals(ItemPlanLine.NameSource.None, plan.line(requested[1].id)?.nameSource)
+            requested.drop(2).forEach {
+                assertEquals("번역-${it.id}", plan.line(it.id)?.name)
+                assertEquals(ItemPlanLine.NameSource.OnDevice, plan.line(it.id)?.nameSource)
+            }
         }
 }
 

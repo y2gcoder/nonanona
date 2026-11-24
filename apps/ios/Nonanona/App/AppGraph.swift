@@ -44,13 +44,16 @@ struct AppGraph: Sendable {
     #endif
     // App Group은 공유 확장과 초안을 주고받는 데 필요하다. 없으면(서명 설정 누락) 앱 폴더로 대신한다.
     #if DEBUG
-      let writeFault = Self.debugWriteFault()
+      let writeFault = Self.debugFileFault()
+      let readFault = Self.debugFileFault(listName: "debug-fail-reads")
     #else
       let writeFault: (@Sendable (URL) -> Bool)? = nil
+      let readFault: (@Sendable (URL) -> Bool)? = nil
     #endif
     let drafts =
-      (try? ReceiptDraftStore.inAppGroup(appGroup, writeFault: writeFault))
-      ?? ReceiptDraftStore(root: support.appending(path: "receipt-import"), writeFault: writeFault)
+      (try? ReceiptDraftStore.inAppGroup(appGroup, writeFault: writeFault, readFault: readFault))
+      ?? ReceiptDraftStore(
+        root: support.appending(path: "receipt-import"), writeFault: writeFault, readFault: readFault)
     let pending = PendingInviteStore(file: support.appending(path: "account/pending-invite.json"))
     #if DEBUG
       let hooks = Self.debugProcessingHooks()
@@ -75,13 +78,14 @@ struct AppGraph: Sendable {
   #if DEBUG
     /// 검증용 저장 실패 주입: 초안 저장소 폴더의 `debug-fail-writes` 파일에 적힌 경로 조각(줄마다, 예: `processing.json`,
     /// `reviews/`)이 들어간 파일 쓰기를 실패시킨다. 파일을 지우면 바로 돌아온다. E2E가 호스트에서 만들고 지운다(debug 빌드만).
-    static func debugWriteFault() -> @Sendable (URL) -> Bool {
+    /// `listName`이 `debug-fail-reads`이면 같은 방식으로 있는 파일 읽기를 실패시킨다(품목 계획 읽기 실패 검증).
+    static func debugFileFault(listName: String = "debug-fail-writes") -> @Sendable (URL) -> Bool {
       { url in
         var root = url.deletingLastPathComponent()
         while root.lastPathComponent != "receipt-import", root.pathComponents.count > 1 {
           root = root.deletingLastPathComponent()
         }
-        guard let text = try? String(contentsOf: root.appending(path: "debug-fail-writes"), encoding: .utf8) else {
+        guard let text = try? String(contentsOf: root.appending(path: listName), encoding: .utf8) else {
           return false
         }
         return text.split(whereSeparator: \.isNewline).contains { !$0.isEmpty && url.path.contains($0) }

@@ -32,6 +32,8 @@ public struct IncomingPhoto: Sendable {
 /// 기기 저장소에 쓰지 못했다(공간 부족, 보호된 파일 등). 화면은 "저장하지 못했어요"로 알리고 이전 상태를 지킨다.
 public enum ReceiptStorageError: Error, Equatable {
   case writeFailed
+  /// 파일은 있는데 읽지 못했다(보호된 파일, 입출력 오류 등). 없는 파일과 구분한다.
+  case readFailed
 }
 
 public enum ReceiptDraftError: Error, Equatable {
@@ -50,25 +52,30 @@ public struct ReceiptDraftStore: Sendable {
   private let now: @Sendable () -> Date
   /// 검증용 쓰기 실패 주입(테스트와 debug 빌드만 넘긴다). true를 돌려주면 그 파일 쓰기가 실패한다.
   private let writeFault: (@Sendable (URL) -> Bool)?
+  /// 검증용 읽기 실패 주입(테스트와 debug 빌드만 넘긴다). true를 돌려주면 있는 파일 읽기가 실패한다.
+  private let readFault: (@Sendable (URL) -> Bool)?
 
   public init(
-    root: URL, now: @escaping @Sendable () -> Date = { Date() }, writeFault: (@Sendable (URL) -> Bool)? = nil
+    root: URL, now: @escaping @Sendable () -> Date = { Date() }, writeFault: (@Sendable (URL) -> Bool)? = nil,
+    readFault: (@Sendable (URL) -> Bool)? = nil
   ) {
     self.root = root
     self.now = now
     self.writeFault = writeFault
+    self.readFault = readFault
   }
 
   /// App Group 컨테이너 안의 저장소.
-  public static func inAppGroup(_ identifier: String, writeFault: (@Sendable (URL) -> Bool)? = nil) throws
-    -> ReceiptDraftStore
-  {
+  public static func inAppGroup(
+    _ identifier: String, writeFault: (@Sendable (URL) -> Bool)? = nil, readFault: (@Sendable (URL) -> Bool)? = nil
+  ) throws -> ReceiptDraftStore {
     guard
       let container = FileManager.default.containerURL(
         forSecurityApplicationGroupIdentifier: identifier)
     else { throw ReceiptDraftError.noContainer }
     return ReceiptDraftStore(
-      root: container.appending(path: "receipt-import", directoryHint: .isDirectory), writeFault: writeFault)
+      root: container.appending(path: "receipt-import", directoryHint: .isDirectory), writeFault: writeFault,
+      readFault: readFault)
   }
 
   private var draftsDirectory: URL { root.appending(path: "drafts", directoryHint: .isDirectory) }
@@ -147,6 +154,17 @@ public struct ReceiptDraftStore: Sendable {
 
   func saveProcessing(_ manifest: ProcessingManifest) throws {
     try writeProtected(try JSONEncoder().encode(manifest), to: processingURL(manifest.draftID))
+  }
+
+  /// 파일이 없으면 nil. 있는데 읽지 못하면 `readFailed`를 던진다(없는 파일로 여겨 새로 만들어 덮지 않게).
+  func readIfPresent(_ url: URL) throws -> Data? {
+    guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+    if let readFault, readFault(url) { throw ReceiptStorageError.readFailed }
+    do {
+      return try Data(contentsOf: url)
+    } catch {
+      throw ReceiptStorageError.readFailed
+    }
   }
 
   /// 원자적으로 쓰고, iOS에서는 기기 잠금 해제 전에는 읽을 수 없게 보호한다.

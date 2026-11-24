@@ -358,16 +358,21 @@ data class ItemPlan(
         on: Boolean,
     ) = update(id) { line -> line.copy(assignees = line.assignees.filter { it != member } + if (on) listOf(member) else emptyList()) }
 
-    /** 번역 결과를 이름이 없거나 기계가 채운 줄에만 넣는다. 사용자가 적은 이름은 덮지 않는다. */
+    /**
+     * 번역 결과를 이름이 없거나 기계가 채운 줄에만 넣는다. 사용자가 적은 이름은 덮지 않는다.
+     * [originals]를 주면 번역한 원문이 지금 줄의 원문과 같은 줄에만 넣는다(늦게 도착한 결과가 다른 계획에 들어가지 않게).
+     */
     fun applyTranslations(
         names: Map<String, String>,
         source: ItemPlanLine.NameSource,
+        originals: Map<String, String>? = null,
     ) = copy(
         lines =
             lines.map { line ->
                 val name = names[line.id]
                 if (line.nameSource == ItemPlanLine.NameSource.User ||
-                    name.isNullOrEmpty()
+                    name.isNullOrEmpty() ||
+                    (originals != null && originals[line.id] != line.originalName)
                 ) {
                     line
                 } else {

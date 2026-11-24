@@ -162,7 +162,14 @@ data class ProcessingHooks(
     val dropSuggestionsAtPosition: Int? = null,
 )
 
-enum class ProcessorError { ItemNotFound, WrongState, InvalidFields }
+enum class ProcessorError {
+    ItemNotFound,
+    WrongState,
+    InvalidFields,
+
+    /** 저장한 품목 계획 파일이 있는데 풀 수 없거나 확인한 영수증(합계·통화)과 맞지 않는다. 파일은 그대로 둔다. */
+    ItemPlanInvalid,
+}
 
 class ProcessorException(
     val error: ProcessorError,

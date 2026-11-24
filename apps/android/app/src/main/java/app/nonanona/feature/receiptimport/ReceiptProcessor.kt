@@ -197,13 +197,22 @@ class ReceiptProcessor(
         }
 
     /**
-     * 확인한 영수증(가린 사본이 있는 것)의 품목별 나누기 계획. 저장한 것이 없으면 제안의 OCR 위치로 새로 만든다(쓰지는 않는다).
+     * 확인한 영수증(가린 사본이 있는 것)의 품목별 나누기 계획. 저장한 파일이 **없을 때만** 제안의 OCR 위치로 새로 만든다(쓰지는 않는다).
+     * 파일이 있는데 읽지 못하면 [ReceiptReadException], 풀 수 없거나 확인한 합계·통화와 다르면
+     * [ProcessorError.ItemPlanInvalid]를 던진다. 어느 쪽도 OCR로 새로 만들지 않아, 다음 저장이 사용자가 고친 계획을 덮지 않는다.
      * 소수 자릿수가 있는 통화는 null. OCR 글자·품목 이름을 담으므로 기기 안에서만 쓴다.
      */
     suspend fun itemPlan(id: String): ItemPlan? =
         mutex.withLock {
             val receipt = find(id, ItemState.Confirmed).confirmed?.takeUnless { it.isManualEntry } ?: return@withLock null
-            store.itemPlanFile(draftId, id).takeIf { it.isFile }?.let { return@withLock ItemPlan.fromJson(it.readText()) }
+            store.readIfPresent(store.itemPlanFile(draftId, id))?.let { text ->
+                val plan =
+                    runCatching { ItemPlan.fromJson(text) }
+                        .getOrNull()
+                        ?.takeIf { it.receiptTotalMinor == receipt.fields.amountMinor && it.currency == receipt.fields.currency }
+                        ?: throw ProcessorException(ProcessorError.ItemPlanInvalid)
+                return@withLock plan
+            }
             ItemPlan.seed(receipt.fields, OcrProposal.fromJson(store.proposalFile(draftId, id).readText()).ocr)
         }
 

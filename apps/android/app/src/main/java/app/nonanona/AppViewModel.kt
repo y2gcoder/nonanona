@@ -29,6 +29,8 @@ import app.nonanona.feature.receiptimport.OutboundManualEntry
 import app.nonanona.feature.receiptimport.OutboundReceipt
 import app.nonanona.feature.receiptimport.ProcessingItem
 import app.nonanona.feature.receiptimport.ProcessingManifest
+import app.nonanona.feature.receiptimport.ProcessorError
+import app.nonanona.feature.receiptimport.ProcessorException
 import app.nonanona.feature.receiptimport.ReceiptDraft
 import app.nonanona.feature.receiptimport.ReceiptDraftStore
 import app.nonanona.feature.receiptimport.ReceiptProcessor
@@ -100,6 +102,15 @@ sealed interface Route {
         val target: ExpenseTarget,
         val receipt: Receipt,
     ) : Route
+}
+
+/** 저장한 품목 계획을 열지 못한 이유. 계획 파일은 지우거나 OCR로 다시 만들어 덮지 않는다. 화면은 다시 불러오기를 둔다. */
+enum class ItemPlanLoadFailure {
+    /** 파일이 있는데 기기 저장소에서 읽지 못했다(보호된 파일·입출력 오류). */
+    Unreadable,
+
+    /** 읽었지만 풀 수 없거나 확인한 영수증 합계·통화와 맞지 않는다. */
+    Invalid,
 }
 
 /** 품목 이름 기기 번역 상태(영수증마다). */
@@ -215,6 +226,8 @@ data class AppUiState(
     /** 품목별 나누기 계획(기기 안 초안 폴더에만 있다), 저장 실패, 번역 상태. 키는 확인한 영수증. */
     val itemPlans: Map<Route.Receipt, ItemPlan> = emptyMap(),
     val itemPlanSaveFailed: Set<Route.Receipt> = emptySet(),
+    /** 저장한 품목 계획을 열지 못했다. 이때는 계획이 없으므로 편집·저장도 없다(디스크의 계획을 덮지 않는다). */
+    val itemPlanLoadFailed: Map<Route.Receipt, ItemPlanLoadFailure> = emptyMap(),
     val itemTranslation: Map<Route.Receipt, ItemTranslationState> = emptyMap(),
 ) {
     /**
@@ -870,14 +883,44 @@ class AppViewModel(
         val receipt = state.value.localReceipt(expense) ?: return
         val processor = processors[receipt.draftId] ?: return
         viewModelScope.launch {
-            // 화면에 있던(아직 쓰는 중일 수 있는) 입력을 디스크 값으로 덮지 않는다.
-            if (receipt !in state.value.itemPlans) {
-                runCatching { processor.itemPlan(receipt.itemId) }.getOrNull()?.let { plan ->
-                    mutableState.update { if (receipt in it.itemPlans) it else it.copy(itemPlans = it.itemPlans + (receipt to plan)) }
-                }
-            }
+            loadItemPlan(receipt, processor)
             showOnly(Route.Home, Route.Room, Route.Expense(target), Route.ItemSplit(target, receipt))
             checkTranslation(receipt)
+        }
+    }
+
+    /** 읽지 못했던 계획을 다시 읽는다. 실패하면 같은 안내를 그대로 둔다. */
+    fun retryItemPlanLoad(receipt: Route.Receipt) {
+        val processor = processors[receipt.draftId] ?: return
+        viewModelScope.launch { loadItemPlan(receipt, processor) }
+    }
+
+    /**
+     * 화면에 있던(아직 쓰는 중일 수 있는) 입력을 디스크 값으로 덮지 않는다. 파일이 없을 때만 OCR로 새로 만든 계획이 온다.
+     * 읽지 못하거나 풀 수 없으면 계획을 비워 두고 이유를 남긴다(새로 만든 계획으로 바꾸지 않는다).
+     */
+    private suspend fun loadItemPlan(
+        receipt: Route.Receipt,
+        processor: ReceiptProcessor,
+    ) {
+        if (receipt in state.value.itemPlans) return
+        val result = runCatching { processor.itemPlan(receipt.itemId) }
+        mutableState.update { s ->
+            result.fold(
+                onSuccess = { plan ->
+                    val plans = if (receipt in s.itemPlans || plan == null) s.itemPlans else s.itemPlans + (receipt to plan)
+                    s.copy(itemPlans = plans, itemPlanLoadFailed = s.itemPlanLoadFailed - receipt)
+                },
+                onFailure = { e ->
+                    val failure =
+                        if ((e as? ProcessorException)?.error == ProcessorError.ItemPlanInvalid) {
+                            ItemPlanLoadFailure.Invalid
+                        } else {
+                            ItemPlanLoadFailure.Unreadable
+                        }
+                    s.copy(itemPlanLoadFailed = s.itemPlanLoadFailed + (receipt to failure))
+                },
+            )
         }
     }
 
@@ -942,7 +985,9 @@ class AppViewModel(
             val names = runCatching { translator.translate(lines.map { it.originalName }) }.getOrNull()
             if (names == null || names.size != lines.size) return@launch setTranslation(receipt, ItemTranslationState.Failed)
             val byId = lines.map { it.id }.zip(names).toMap()
-            editItemPlan(receipt) { it.applyTranslations(byId, translator.source) }
+            val originals = lines.associate { it.id to it.originalName }
+            // 번역하는 동안 사용자가 적은 이름은 덮지 않고, 번역한 원문과 다른 줄에는 넣지 않는다(지금 계획 기준으로 다시 본다).
+            editItemPlan(receipt) { it.applyTranslations(byId, translator.source, originals) }
             setTranslation(receipt, ItemTranslationState.Translated(names.count { it.isNotEmpty() }))
         }
     }

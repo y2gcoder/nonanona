@@ -216,10 +216,12 @@ private struct ItemSplitDestination: View {
         translation: model.itemTranslation[split.receipt],
         translatorLabel: model.graph.itemTranslator.label,
         translatorIsPreview: model.graph.itemTranslator.source == .preview,
-        saveFailed: model.itemPlanSaveFailed.contains(split.receipt)),
+        saveFailed: model.itemPlanSaveFailed.contains(split.receipt),
+        loadFailure: model.itemPlanLoadFailed[split.receipt]),
       actions: ItemSplitActions(
         edit: { model.editItemPlan(split.receipt, $0) },
         retrySave: { model.retryItemPlanSave(split.receipt) },
+        retryLoad: { model.retryItemPlanLoad(split.receipt) },
         translate: { Task { await model.translateItemNames(split.receipt) } },
         recheckTranslation: { Task { await model.checkTranslation(split.receipt) } },
         apply: { model.applyItemSplit(split) }))

@@ -315,6 +315,82 @@ struct ReceiptItemsTests {
     #expect(try await processor.itemPlan(item.id)?.line("ocr-3")?.name == "정식")
   }
 
+  /// 저장한 계획이 있는데 읽지 못하면(읽기 실패) OCR로 새로 만들지 않고 던진다. 디스크 파일은 그대로이고, 다시 읽으면 같은 계획이 온다.
+  @Test func unreadablePlanIsNotReseededAndRetryLoadsIt() async throws {
+    let root = tempRoot()
+    let failing = LockedFlag()
+    let store = ReceiptDraftStore(root: root, readFault: { url in url.path.contains("/items/") && failing.value })
+    let (processor, item, draft) = try await confirmedItemReceipt(store)
+    var plan = try #require(try await processor.itemPlan(item.id))
+    plan.setName("ocr-3", "정식")
+    plan.setAssignee("ocr-3", member: "host", on: true)
+    try await processor.saveItemPlan(item.id, plan)
+    let file = root.appending(path: "drafts/\(draft.id)/items/\(item.id).json")
+    let saved = try Data(contentsOf: file)
+
+    failing.value = true
+    await #expect(throws: ReceiptStorageError.readFailed) { _ = try await processor.itemPlan(item.id) }
+    // 새 처리기(앱 다시 열기)도 같다. OCR 후보로 돌아가지 않는다.
+    let reopened = try ReceiptProcessor(store: store, draft: draft, recognizer: RowsRecognizer())
+    await #expect(throws: ReceiptStorageError.readFailed) { _ = try await reopened.itemPlan(item.id) }
+    #expect(try Data(contentsOf: file) == saved)
+
+    failing.value = false
+    #expect(try await reopened.itemPlan(item.id) == plan)
+  }
+
+  /// 풀 수 없는 파일, 확인한 합계·통화와 다른 파일은 `itemPlanInvalid`로 던지고 지우거나 덮지 않는다. 파일이 없을 때만 새로 만든다.
+  @Test func invalidPlanFileIsKeptAndOnlyAbsentSeeds() async throws {
+    let root = tempRoot()
+    let store = ReceiptDraftStore(root: root)
+    let (processor, item, draft) = try await confirmedItemReceipt(store)
+    let file = root.appending(path: "drafts/\(draft.id)/items/\(item.id).json")
+    #expect(!FileManager.default.fileExists(atPath: file.path))
+    let seeded = try #require(try await processor.itemPlan(item.id))
+    #expect(!FileManager.default.fileExists(atPath: file.path))  // 새로 만든 계획은 쓰지 않는다
+
+    let garbage = Data("{\"extractor\":".utf8)
+    try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try garbage.write(to: file)
+    await #expect(throws: ProcessorError.itemPlanInvalid) { _ = try await processor.itemPlan(item.id) }
+    #expect(try Data(contentsOf: file) == garbage)
+
+    let other = ItemPlan(
+      extractor: seeded.extractor, currency: seeded.currency, receiptTotalMinor: seeded.receiptTotalMinor + 1,
+      ocrTotalMinor: nil, summary: [], lines: [], nextManualNumber: 1)
+    let mismatched = try JSONEncoder().encode(other)
+    try mismatched.write(to: file)
+    await #expect(throws: ProcessorError.itemPlanInvalid) { _ = try await processor.itemPlan(item.id) }
+    #expect(try Data(contentsOf: file) == mismatched)
+
+    try FileManager.default.removeItem(at: file)
+    #expect(try await processor.itemPlan(item.id) == seeded)
+  }
+
+  /// 늦게 도착한 번역은 그사이 사용자가 적은 이름을 덮지 않고, 원문이 다른 줄(다른 계획)에는 들어가지 않는다.
+  @Test func delayedTranslationKeepsManualEditsAndIdentity() async throws {
+    let (processor, item, _) = try await confirmedItemReceipt(ReceiptDraftStore(root: tempRoot()))
+    var plan = try #require(try await processor.itemPlan(item.id))
+    // 번역을 요청할 때의 줄(원문 있음, 사용자 이름 아님).
+    let requested = plan.lines.filter { !$0.originalName.isEmpty && $0.nameSource != .user }
+    #expect(requested.count >= 2)
+    let names = Dictionary(uniqueKeysWithValues: requested.map { ($0.id, "번역-\($0.id)") })
+    var originals = Dictionary(uniqueKeysWithValues: requested.map { ($0.id, $0.originalName) })
+    // 번역을 기다리는 동안 사용자가 첫 줄 이름을 적었다.
+    plan.setName(requested[0].id, "직접 적음")
+    // 둘째 줄은 원문이 다른 계획에서 온 결과라고 가정한다(늦게 온 다른 계획의 결과).
+    originals[requested[1].id] = "다른 원문"
+    plan.applyTranslations(names, source: .onDevice, originals: originals)
+    #expect(plan.line(requested[0].id)?.name == "직접 적음")
+    #expect(plan.line(requested[0].id)?.nameSource == .user)
+    #expect(plan.line(requested[1].id)?.name == "")
+    #expect(plan.line(requested[1].id)?.nameSource == ItemPlanLine.NameSource.none)
+    for line in requested.dropFirst(2) {
+      #expect(plan.line(line.id)?.name == "번역-\(line.id)")
+      #expect(plan.line(line.id)?.nameSource == .onDevice)
+    }
+  }
+
   /// 직접 입력(사본 없음)은 OCR이 없어 품목 계획이 없다.
   @Test func manualEntryHasNoPlan() async throws {
     let store = ReceiptDraftStore(root: tempRoot())
@@ -327,6 +403,23 @@ struct ReceiptItemsTests {
       item.id, fields: AllowedReceiptFields(date: "2026-11-05", amountMinor: 3500, currency: "JPY", merchant: nil))
     #expect(try await processor.itemPlan(item.id) == nil)
   }
+}
+
+private func confirmedItemReceipt(_ store: ReceiptDraftStore) async throws -> (
+  ReceiptProcessor, ProcessingItem, ReceiptDraft
+) {
+  let draft = try store.create(
+    source: .share,
+    photos: [
+      IncomingPhoto(
+        fileExtension: "png", content: .data(try Data(contentsOf: itemFixtures.appending(path: "receipt-i02.png"))))
+    ])
+  let processor = try ReceiptProcessor(store: store, draft: draft, recognizer: RowsRecognizer())
+  await processor.run()
+  let item = try #require(await processor.snapshot().items.first)
+  let proposal = try await processor.proposal(item.id)
+  try await processor.confirm(item.id, fields: proposal.fields, maskLineIDs: [])
+  return (processor, item, draft)
 }
 
 private final class LockedFlag: @unchecked Sendable {

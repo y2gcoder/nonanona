@@ -1,0 +1,1186 @@
+{
+ "_note": "품목 나누기 공통 예제(가상 값). iOS ReceiptImport 테스트와 Android JVM 테스트가 같이 읽는다. 기대값은 손으로 계산했다(examples 아래 note).",
+ "extractor": "receipt-items-v1",
+ "extraction": [
+  {
+   "name": "single_line_rows",
+   "receiptTotal": 1408,
+   "lines": [
+    {
+     "id": 0,
+     "text": "さくら食堂",
+     "x": 0.05,
+     "y": 0.05,
+     "width": 0.3,
+     "height": 0.04
+    },
+    {
+     "id": 1,
+     "text": "TEL 03-5550-0101",
+     "x": 0.05,
+     "y": 0.12,
+     "width": 0.3,
+     "height": 0.03
+    },
+    {
+     "id": 2,
+     "text": "2026年11月3日 12:41",
+     "x": 0.05,
+     "y": 0.17,
+     "width": 0.3,
+     "height": 0.03
+    },
+    {
+     "id": 3,
+     "text": "日替わり定食  980円",
+     "x": 0.05,
+     "y": 0.3,
+     "width": 0.3,
+     "height": 0.03
+    },
+    {
+     "id": 4,
+     "text": "緑茶  300円",
+     "x": 0.05,
+     "y": 0.35,
+     "width": 0.3,
+     "height": 0.03
+    },
+    {
+     "id": 5,
+     "text": "小計 1,280円",
+     "x": 0.05,
+     "y": 0.4,
+     "width": 0.3,
+     "height": 0.03
+    },
+    {
+     "id": 6,
+     "text": "消費税等 128円",
+     "x": 0.05,
+     "y": 0.45,
+     "width": 0.3,
+     "height": 0.03
+    },
+    {
+     "id": 7,
+     "text": "合計 1,408円",
+     "x": 0.05,
+     "y": 0.5,
+     "width": 0.3,
+     "height": 0.03
+    },
+    {
+     "id": 8,
+     "text": "カード番号 **** 4821",
+     "x": 0.05,
+     "y": 0.55,
+     "width": 0.3,
+     "height": 0.03
+    }
+   ],
+   "items": [
+    {
+     "id": "ocr-3",
+     "name": "日替わり定食",
+     "amount": 980,
+     "flags": []
+    },
+    {
+     "id": "ocr-4",
+     "name": "緑茶",
+     "amount": 300,
+     "flags": []
+    }
+   ],
+   "summary": [
+    {
+     "id": "ocr-5",
+     "kind": "subtotal",
+     "amount": 1280
+    },
+    {
+     "id": "ocr-6",
+     "kind": "tax",
+     "amount": 128
+    },
+    {
+     "id": "ocr-7",
+     "kind": "total",
+     "amount": 1408
+    }
+   ],
+   "ocrTotal": 1408
+  },
+  {
+   "name": "flags_and_boundaries",
+   "receiptTotal": 1250,
+   "lines": [
+    {
+     "id": 0,
+     "text": "架空カフェ",
+     "x": 0.05,
+     "y": 0.05,
+     "width": 0.3,
+     "height": 0.04
+    },
+    {
+     "id": 1,
+     "text": "架空県みどり市1-2",
+     "x": 0.05,
+     "y": 0.1,
+     "width": 0.3,
+     "height": 0.03
+    },
+    {
+     "id": 2,
+     "text": "ランチ 2個 @600",
+     "x": 0.05,
+     "y": 0.2,
+     "width": 0.3,
+     "height": 0.03
+    },
+    {
+     "id": 3,
+     "text": "¥1,200",
+     "x": 0.8,
+     "y": 0.201,
+     "width": 0.12,
+     "height": 0.03
+    },
+    {
+     "id": 4,
+     "text": "コーヒー 3OO円",
+     "x": 0.05,
+     "y": 0.25,
+     "width": 0.3,
+     "height": 0.03
+    },
+    {
+     "id": 5,
+     "text": "¥500",
+     "x": 0.8,
+     "y": 0.3,
+     "width": 0.1,
+     "height": 0.03
+    },
+    {
+     "id": 6,
+     "text": "ケーキ １，２８０円",
+     "x": 0.05,
+     "y": 0.35,
+     "width": 0.3,
+     "height": 0.03
+    },
+    {
+     "id": 7,
+     "text": "スープ 1,28円",
+     "x": 0.05,
+     "y": 0.4,
+     "width": 0.3,
+     "height": 0.03
+    },
+    {
+     "id": 8,
+     "text": "割引 -¥100",
+     "x": 0.05,
+     "y": 0.45,
+     "width": 0.3,
+     "height": 0.03
+    },
+    {
+     "id": 12,
+     "text": "サービス -¥100",
+     "x": 0.05,
+     "y": 0.48,
+     "width": 0.3,
+     "height": 0.01
+    },
+    {
+     "id": 9,
+     "text": "合計 ¥1,250",
+     "x": 0.05,
+     "y": 0.5,
+     "width": 0.3,
+     "height": 0.03
+    },
+    {
+     "id": 10,
+     "text": "おまけ ¥50",
+     "x": 0.05,
+     "y": 0.55,
+     "width": 0.3,
+     "height": 0.03
+    },
+    {
+     "id": 11,
+     "text": "お預り ¥2,000",
+     "x": 0.05,
+     "y": 0.6,
+     "width": 0.3,
+     "height": 0.03
+    }
+   ],
+   "items": [
+    {
+     "id": "ocr-2",
+     "name": "ランチ 2個 @600",
+     "amount": 1200,
+     "flags": [
+      "quantity"
+     ]
+    },
+    {
+     "id": "ocr-4",
+     "name": "コーヒー",
+     "amount": null,
+     "flags": [
+      "amountUnreadable"
+     ]
+    },
+    {
+     "id": "ocr-5",
+     "name": "",
+     "amount": 500,
+     "flags": [
+      "nameMissing"
+     ]
+    },
+    {
+     "id": "ocr-6",
+     "name": "ケーキ",
+     "amount": 1280,
+     "flags": [
+      "exceedsTotal"
+     ]
+    },
+    {
+     "id": "ocr-7",
+     "name": "スープ",
+     "amount": null,
+     "flags": [
+      "amountUnreadable"
+     ]
+    }
+   ],
+   "summary": [
+    {
+     "id": "ocr-8",
+     "kind": "discount",
+     "amount": 100
+    },
+    {
+     "id": "ocr-12",
+     "kind": "discount",
+     "amount": 100
+    },
+    {
+     "id": "ocr-9",
+     "kind": "total",
+     "amount": 1250
+    },
+    {
+     "id": "ocr-11",
+     "kind": "payment",
+     "amount": 2000
+    }
+   ],
+   "ocrTotal": 1250
+  }
+ ],
+ "real_ocr": [
+  {
+   "file": "receipt-i01.png",
+   "date": "2026-11-05",
+   "total": 3500,
+   "items": [
+    {
+     "id_text": "枝豆",
+     "amount": 418,
+     "flags": []
+    },
+    {
+     "id_text": "鶏の唐揚げ",
+     "amount": 748,
+     "flags": []
+    },
+    {
+     "id_text": "生ビール 2杯",
+     "amount": 1320,
+     "flags": [
+      "quantity"
+     ]
+    },
+    {
+     "id_text": "ウーロン茶",
+     "amount": 385,
+     "flags": []
+    },
+    {
+     "id_text": "だし巻き玉子",
+     "amount": 629,
+     "flags": []
+    }
+   ],
+   "summaryKinds": [
+    "total",
+    "tax",
+    "payment",
+    "payment"
+   ]
+  },
+  {
+   "file": "receipt-i02.png",
+   "date": "2026-11-06",
+   "total": 699,
+   "items": [
+    {
+     "id_text": "おにぎり鮭",
+     "amount": 160,
+     "flags": []
+    },
+    {
+     "id_text": "緑茶ボトル",
+     "amount": 140,
+     "flags": []
+    },
+    {
+     "id_text": "サンドイッチ",
+     "amount": 398,
+     "flags": []
+    }
+   ],
+   "summaryKinds": [
+    "discount",
+    "subtotal",
+    "tax",
+    "total",
+    "payment"
+   ]
+  }
+ ],
+ "allocation": [
+  {
+   "name": "i01_mixed_exact",
+   "note": "공유 3명 1795엔(598.33씩)+맥주 둘 1320엔(660씩)+우롱차 1명. 31,500원(엔당 9원)이면 11325·11325·8850으로 나눠떨어진다",
+   "currency": "JPY",
+   "total": 3500,
+   "krw": 31500,
+   "payer": "host",
+   "members": [
+    "host",
+    "m1",
+    "m2"
+   ],
+   "lines": [
+    {
+     "id": "ocr-4",
+     "kind": "item",
+     "amount": "418",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1",
+      "m2"
+     ]
+    },
+    {
+     "id": "ocr-6",
+     "kind": "item",
+     "amount": "748",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1",
+      "m2"
+     ]
+    },
+    {
+     "id": "ocr-8",
+     "kind": "item",
+     "amount": "1320",
+     "flags": [
+      "quantity"
+     ],
+     "checked": true,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1"
+     ]
+    },
+    {
+     "id": "ocr-10",
+     "kind": "item",
+     "amount": "385",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "m2"
+     ]
+    },
+    {
+     "id": "ocr-12",
+     "kind": "item",
+     "amount": "629",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1",
+      "m2"
+     ]
+    }
+   ],
+   "expect": {
+    "kind": "exact",
+    "shares": {
+     "host": 11325,
+     "m1": 11325,
+     "m2": 8850
+    }
+   }
+  },
+  {
+   "name": "i01_mixed_remainder",
+   "note": "D=6, 분자 7550·7550·5900. 31,234원이면 11229.37·11229.37·8775.27 → 내림 합 31233, 남은 1원은 방장이 정한다",
+   "currency": "JPY",
+   "total": 3500,
+   "krw": 31234,
+   "payer": "host",
+   "members": [
+    "host",
+    "m1",
+    "m2"
+   ],
+   "lines": [
+    {
+     "id": "ocr-4",
+     "kind": "item",
+     "amount": "418",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1",
+      "m2"
+     ]
+    },
+    {
+     "id": "ocr-6",
+     "kind": "item",
+     "amount": "748",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1",
+      "m2"
+     ]
+    },
+    {
+     "id": "ocr-8",
+     "kind": "item",
+     "amount": "1320",
+     "flags": [
+      "quantity"
+     ],
+     "checked": true,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1"
+     ]
+    },
+    {
+     "id": "ocr-10",
+     "kind": "item",
+     "amount": "385",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "m2"
+     ]
+    },
+    {
+     "id": "ocr-12",
+     "kind": "item",
+     "amount": "629",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1",
+      "m2"
+     ]
+    }
+   ],
+   "expect": {
+    "kind": "remainder",
+    "shares": {
+     "host": 11229,
+     "m1": 11229,
+     "m2": 8775
+    },
+    "remaining": 1
+   }
+  },
+  {
+   "name": "i01_unchecked_quantity",
+   "currency": "JPY",
+   "total": 3500,
+   "krw": 31500,
+   "payer": "host",
+   "members": [
+    "host",
+    "m1",
+    "m2"
+   ],
+   "lines": [
+    {
+     "id": "ocr-4",
+     "kind": "item",
+     "amount": "418",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1",
+      "m2"
+     ]
+    },
+    {
+     "id": "ocr-6",
+     "kind": "item",
+     "amount": "748",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1",
+      "m2"
+     ]
+    },
+    {
+     "id": "ocr-8",
+     "kind": "item",
+     "amount": "1320",
+     "flags": [
+      "quantity"
+     ],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1"
+     ]
+    },
+    {
+     "id": "ocr-10",
+     "kind": "item",
+     "amount": "385",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "m2"
+     ]
+    },
+    {
+     "id": "ocr-12",
+     "kind": "item",
+     "amount": "629",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1",
+      "m2"
+     ]
+    }
+   ],
+   "expect": {
+    "kind": "problem",
+    "problem": "needsCheck",
+    "line": "ocr-8"
+   }
+  },
+  {
+   "name": "i01_unassigned",
+   "currency": "JPY",
+   "total": 3500,
+   "krw": 31500,
+   "payer": "host",
+   "members": [
+    "host",
+    "m1",
+    "m2"
+   ],
+   "lines": [
+    {
+     "id": "ocr-4",
+     "kind": "item",
+     "amount": "418",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1",
+      "m2"
+     ]
+    },
+    {
+     "id": "ocr-6",
+     "kind": "item",
+     "amount": "748",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1",
+      "m2"
+     ]
+    },
+    {
+     "id": "ocr-8",
+     "kind": "item",
+     "amount": "1320",
+     "flags": [
+      "quantity"
+     ],
+     "checked": true,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1"
+     ]
+    },
+    {
+     "id": "ocr-10",
+     "kind": "item",
+     "amount": "385",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": []
+    },
+    {
+     "id": "ocr-12",
+     "kind": "item",
+     "amount": "629",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1",
+      "m2"
+     ]
+    }
+   ],
+   "expect": {
+    "kind": "problem",
+    "problem": "unassigned",
+    "line": "ocr-10"
+   }
+  },
+  {
+   "name": "i01_krw_missing",
+   "currency": "JPY",
+   "total": 3500,
+   "krw": null,
+   "payer": "host",
+   "members": [
+    "host",
+    "m1",
+    "m2"
+   ],
+   "lines": [
+    {
+     "id": "ocr-4",
+     "kind": "item",
+     "amount": "418",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1",
+      "m2"
+     ]
+    },
+    {
+     "id": "ocr-6",
+     "kind": "item",
+     "amount": "748",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1",
+      "m2"
+     ]
+    },
+    {
+     "id": "ocr-8",
+     "kind": "item",
+     "amount": "1320",
+     "flags": [
+      "quantity"
+     ],
+     "checked": true,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1"
+     ]
+    },
+    {
+     "id": "ocr-10",
+     "kind": "item",
+     "amount": "385",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "m2"
+     ]
+    },
+    {
+     "id": "ocr-12",
+     "kind": "item",
+     "amount": "629",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1",
+      "m2"
+     ]
+    }
+   ],
+   "expect": {
+    "kind": "problem",
+    "problem": "krwMissing"
+   }
+  },
+  {
+   "name": "i02_tax_discount_mismatch",
+   "note": "외세 영수증: 품목 698엔, 합계 699엔(할인 -50, 세금 51). 저절로 나누지 않는다",
+   "currency": "JPY",
+   "total": 699,
+   "krw": 6990,
+   "payer": "host",
+   "members": [
+    "host",
+    "m1",
+    "m2"
+   ],
+   "lines": [
+    {
+     "id": "ocr-2",
+     "kind": "item",
+     "amount": "160",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host"
+     ]
+    },
+    {
+     "id": "ocr-4",
+     "kind": "item",
+     "amount": "140",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "m1"
+     ]
+    },
+    {
+     "id": "ocr-6",
+     "kind": "item",
+     "amount": "398",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1"
+     ]
+    }
+   ],
+   "expect": {
+    "kind": "problem",
+    "problem": "totalMismatch",
+    "difference": 1
+   }
+  },
+  {
+   "name": "i02_explicit_adjustments",
+   "note": "방장이 할인 -50(방장)·세금 51(둘)을 직접 더했다. D=2, 분자 669·729, 6,990원이면 3345·3645",
+   "currency": "JPY",
+   "total": 699,
+   "krw": 6990,
+   "payer": "host",
+   "members": [
+    "host",
+    "m1",
+    "m2"
+   ],
+   "lines": [
+    {
+     "id": "ocr-2",
+     "kind": "item",
+     "amount": "160",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host"
+     ]
+    },
+    {
+     "id": "ocr-4",
+     "kind": "item",
+     "amount": "140",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "m1"
+     ]
+    },
+    {
+     "id": "ocr-6",
+     "kind": "item",
+     "amount": "398",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1"
+     ]
+    },
+    {
+     "id": "manual-1",
+     "kind": "adjustment",
+     "amount": "-50",
+     "flags": [],
+     "checked": true,
+     "excluded": false,
+     "assignees": [
+      "host"
+     ]
+    },
+    {
+     "id": "manual-2",
+     "kind": "adjustment",
+     "amount": "51",
+     "flags": [],
+     "checked": true,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1"
+     ]
+    }
+   ],
+   "expect": {
+    "kind": "exact",
+    "shares": {
+     "host": 3345,
+     "m1": 3645
+    }
+   }
+  },
+  {
+   "name": "krw_pair_rule",
+   "note": "ADR-0007 예: 13,377원을 둘이 똑같이, 결제자 m1이 1원 더",
+   "currency": "KRW",
+   "total": 13377,
+   "krw": null,
+   "payer": "m1",
+   "members": [
+    "host",
+    "m1",
+    "m2"
+   ],
+   "lines": [
+    {
+     "id": "manual-1",
+     "kind": "item",
+     "amount": "13377",
+     "flags": [],
+     "checked": true,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1"
+     ]
+    }
+   ],
+   "expect": {
+    "kind": "pairRule",
+    "shares": {
+     "host": 6688,
+     "m1": 6689
+    }
+   }
+  },
+  {
+   "name": "krw_pair_payer_outside",
+   "currency": "KRW",
+   "total": 13377,
+   "krw": null,
+   "payer": "m2",
+   "members": [
+    "host",
+    "m1",
+    "m2"
+   ],
+   "lines": [
+    {
+     "id": "manual-1",
+     "kind": "item",
+     "amount": "13377",
+     "flags": [],
+     "checked": true,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1"
+     ]
+    }
+   ],
+   "expect": {
+    "kind": "remainder",
+    "shares": {
+     "host": 6688,
+     "m1": 6688
+    },
+    "remaining": 1
+   }
+  },
+  {
+   "name": "krw_three_way",
+   "currency": "KRW",
+   "total": 1000,
+   "krw": null,
+   "payer": "host",
+   "members": [
+    "host",
+    "m1",
+    "m2"
+   ],
+   "lines": [
+    {
+     "id": "manual-1",
+     "kind": "item",
+     "amount": "1000",
+     "flags": [],
+     "checked": true,
+     "excluded": false,
+     "assignees": [
+      "host",
+      "m1",
+      "m2"
+     ]
+    }
+   ],
+   "expect": {
+    "kind": "remainder",
+    "shares": {
+     "host": 333,
+     "m1": 333,
+     "m2": 333
+    },
+    "remaining": 1
+   }
+  },
+  {
+   "name": "discount_nonpositive",
+   "currency": "KRW",
+   "total": 500,
+   "krw": null,
+   "payer": "host",
+   "members": [
+    "host",
+    "m1",
+    "m2"
+   ],
+   "lines": [
+    {
+     "id": "manual-1",
+     "kind": "item",
+     "amount": "500",
+     "flags": [],
+     "checked": true,
+     "excluded": false,
+     "assignees": [
+      "host"
+     ]
+    },
+    {
+     "id": "manual-2",
+     "kind": "adjustment",
+     "amount": "-100",
+     "flags": [],
+     "checked": true,
+     "excluded": false,
+     "assignees": [
+      "m1"
+     ]
+    },
+    {
+     "id": "manual-3",
+     "kind": "adjustment",
+     "amount": "100",
+     "flags": [],
+     "checked": true,
+     "excluded": false,
+     "assignees": [
+      "m1"
+     ]
+    }
+   ],
+   "expect": {
+    "kind": "problem",
+    "problem": "nonPositiveShare",
+    "member": "m1"
+   }
+  },
+  {
+   "name": "excluded_and_invalid",
+   "currency": "KRW",
+   "total": 500,
+   "krw": null,
+   "payer": "host",
+   "members": [
+    "host",
+    "m1",
+    "m2"
+   ],
+   "lines": [
+    {
+     "id": "ocr-1",
+     "kind": "item",
+     "amount": "500",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host"
+     ]
+    },
+    {
+     "id": "ocr-2",
+     "kind": "item",
+     "amount": "3OO",
+     "flags": [],
+     "checked": false,
+     "excluded": true,
+     "assignees": [
+      "m1"
+     ]
+    }
+   ],
+   "expect": {
+    "kind": "exact",
+    "shares": {
+     "host": 500
+    }
+   }
+  },
+  {
+   "name": "amount_invalid",
+   "currency": "KRW",
+   "total": 500,
+   "krw": null,
+   "payer": "host",
+   "members": [
+    "host",
+    "m1",
+    "m2"
+   ],
+   "lines": [
+    {
+     "id": "ocr-1",
+     "kind": "item",
+     "amount": "200",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "host"
+     ]
+    },
+    {
+     "id": "ocr-2",
+     "kind": "item",
+     "amount": "3OO",
+     "flags": [],
+     "checked": false,
+     "excluded": false,
+     "assignees": [
+      "m1"
+     ]
+    }
+   ],
+   "expect": {
+    "kind": "problem",
+    "problem": "amountInvalid",
+    "line": "ocr-2"
+   }
+  },
+  {
+   "name": "no_lines",
+   "currency": "KRW",
+   "total": 500,
+   "krw": null,
+   "payer": "host",
+   "members": [
+    "host",
+    "m1",
+    "m2"
+   ],
+   "lines": [
+    {
+     "id": "ocr-1",
+     "kind": "item",
+     "amount": "500",
+     "flags": [],
+     "checked": false,
+     "excluded": true,
+     "assignees": [
+      "host"
+     ]
+    }
+   ],
+   "expect": {
+    "kind": "problem",
+    "problem": "noLines"
+   }
+  }
+ ]
+}

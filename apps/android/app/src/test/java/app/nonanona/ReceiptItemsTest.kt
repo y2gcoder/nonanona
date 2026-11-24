@@ -1,0 +1,286 @@
+package app.nonanona
+
+import app.nonanona.feature.receiptimport.DraftSource
+import app.nonanona.feature.receiptimport.IncomingPhoto
+import app.nonanona.feature.receiptimport.ItemAllocation
+import app.nonanona.feature.receiptimport.ItemAllocationProblem
+import app.nonanona.feature.receiptimport.ItemAllocationResult
+import app.nonanona.feature.receiptimport.ItemAllocator
+import app.nonanona.feature.receiptimport.ItemExtractor
+import app.nonanona.feature.receiptimport.ItemFlag
+import app.nonanona.feature.receiptimport.ItemMemberShare
+import app.nonanona.feature.receiptimport.ItemPlan
+import app.nonanona.feature.receiptimport.ItemPlanLine
+import app.nonanona.feature.receiptimport.OcrLine
+import app.nonanona.feature.receiptimport.OcrResult
+import app.nonanona.feature.receiptimport.ProcessorError
+import app.nonanona.feature.receiptimport.ProcessorException
+import app.nonanona.feature.receiptimport.ReceiptDraftStore
+import app.nonanona.feature.receiptimport.ReceiptFlattener
+import app.nonanona.feature.receiptimport.ReceiptProcessor
+import app.nonanona.feature.receiptimport.ReceiptStorageException
+import kotlinx.coroutines.runBlocking
+import org.json.JSONArray
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
+import org.junit.Rule
+import org.junit.Test
+import org.junit.rules.TemporaryFolder
+import java.io.ByteArrayOutputStream
+import java.io.File
+import javax.imageio.ImageIO
+
+/** 품목 나누기 공통 예제(apps/fixtures/items/examples.json). iOS ReceiptImport 테스트가 같은 파일을 읽는다. */
+class ReceiptItemsTest {
+    @get:Rule val tmp = TemporaryFolder()
+
+    private val dir = File(System.getProperty("user.dir").orEmpty()).resolve("../../fixtures/items").canonicalFile
+    private val examples = JSONObject(File(dir, "examples.json").readText())
+
+    private fun JSONArray.objects() = (0 until length()).map { getJSONObject(it) }
+
+    private fun JSONArray.strings() = (0 until length()).map { getString(it) }
+
+    private fun ocr(lines: JSONArray) =
+        OcrResult(
+            1000,
+            1000,
+            lines.objects().map {
+                OcrLine(
+                    it.getInt("id"),
+                    it.getString("text"),
+                    it.getDouble("x"),
+                    it.getDouble("y"),
+                    it.getDouble("width"),
+                    it.getDouble("height"),
+                )
+            },
+        )
+
+    @Test
+    fun sharedExtractionExamples() {
+        assertEquals(ItemExtractor.VERSION, examples.getString("extractor"))
+        for (e in examples.getJSONArray("extraction").objects()) {
+            val name = e.getString("name")
+            val result = ItemExtractor.extract(ocr(e.getJSONArray("lines")), e.getLong("receiptTotal"))
+            val items = e.getJSONArray("items").objects()
+            assertEquals(name, items.map { it.getString("id") }, result.candidates.map { it.id })
+            for ((got, want) in result.candidates.zip(items)) {
+                assertEquals("$name ${got.id}", want.getString("name"), got.originalName)
+                assertEquals("$name ${got.id}", if (want.isNull("amount")) null else want.getLong("amount"), got.amountMinor)
+                assertEquals("$name ${got.id}", want.getJSONArray("flags").strings(), got.flags.map { it.wire })
+            }
+            val summary = e.getJSONArray("summary").objects()
+            assertEquals(name, summary.map { it.getString("id") }, result.summary.map { it.id })
+            assertEquals(name, summary.map { it.getString("kind") }, result.summary.map { it.kind.wire })
+            assertEquals(
+                name,
+                summary.map { if (it.isNull("amount")) null else it.getLong("amount") },
+                result.summary.map { it.amountMinor },
+            )
+            assertEquals(name, if (e.isNull("ocrTotal")) null else e.getLong("ocrTotal"), result.ocrTotalMinor)
+        }
+    }
+
+    private fun plan(a: JSONObject) =
+        ItemPlan(
+            ItemExtractor.VERSION,
+            a.getString("currency"),
+            a.getLong("total"),
+            null,
+            emptyList(),
+            a.getJSONArray("lines").objects().map {
+                ItemPlanLine(
+                    it.getString("id"),
+                    ItemPlanLine.Kind.entries.first { k -> k.wire == it.getString("kind") },
+                    emptyList(),
+                    "",
+                    "",
+                    it.getString("id"),
+                    ItemPlanLine.NameSource.User,
+                    it.getString("amount"),
+                    it.getJSONArray("flags").strings().map { f -> ItemFlag.of(f) },
+                    it.getBoolean("checked"),
+                    it.getBoolean("excluded"),
+                    it.getJSONArray("assignees").strings(),
+                )
+            },
+            10,
+        )
+
+    /** 결과를 예제의 expect 모양으로 바꾼다. */
+    private fun describe(r: ItemAllocationResult): JSONObject {
+        fun shares(s: List<ItemMemberShare>) = JSONObject().also { o -> s.forEach { o.put(it.member, it.krw) } }
+        val o = JSONObject()
+        when (val a = r.allocation) {
+            is ItemAllocation.Exact -> {
+                o.put("kind", "exact").put("shares", shares(a.shares))
+            }
+
+            is ItemAllocation.PairRule -> {
+                o.put("kind", "pairRule").put("shares", shares(a.shares))
+            }
+
+            is ItemAllocation.Remainder -> {
+                o.put("kind", "remainder").put("shares", shares(a.floors)).put("remaining", a.remaining)
+            }
+
+            null -> {
+                o.put("kind", "problem")
+                when (val p = r.problem!!) {
+                    ItemAllocationProblem.NoLines -> o.put("problem", "noLines")
+                    ItemAllocationProblem.UnsupportedCurrency -> o.put("problem", "unsupportedCurrency")
+                    is ItemAllocationProblem.AmountInvalid -> o.put("problem", "amountInvalid").put("line", p.lineId)
+                    is ItemAllocationProblem.NeedsCheck -> o.put("problem", "needsCheck").put("line", p.lineId)
+                    is ItemAllocationProblem.Unassigned -> o.put("problem", "unassigned").put("line", p.lineId)
+                    is ItemAllocationProblem.TotalMismatch -> o.put("problem", "totalMismatch").put("difference", p.difference)
+                    ItemAllocationProblem.KrwMissing -> o.put("problem", "krwMissing")
+                    is ItemAllocationProblem.NonPositiveShare -> o.put("problem", "nonPositiveShare").put("member", p.member)
+                    ItemAllocationProblem.TooLarge -> o.put("problem", "tooLarge")
+                }
+            }
+        }
+        return o
+    }
+
+    @Test
+    fun sharedAllocationExamples() {
+        for (a in examples.getJSONArray("allocation").objects()) {
+            val got =
+                describe(
+                    ItemAllocator.allocate(
+                        plan(a),
+                        if (a.isNull("krw")) null else a.getLong("krw"),
+                        if (a.isNull("payer")) null else a.getString("payer"),
+                        a.getJSONArray("members").strings(),
+                    ),
+                )
+            val want = a.getJSONObject("expect")
+            assertEquals(a.getString("name"), want.toMap(), got.toMap())
+            if (want.getString("kind") == "exact") {
+                val krw = if (a.getString("currency") == "KRW") a.getLong("total") else a.getLong("krw")
+                val s = want.getJSONObject("shares")
+                assertEquals(a.getString("name"), krw, s.keys().asSequence().sumOf { s.getLong(it) })
+            }
+        }
+    }
+
+    @Test
+    fun editsKeepStableIdsAndUserNames() {
+        val a = examples.getJSONArray("allocation").objects().first { it.getString("name") == "i02_tax_discount_mismatch" }
+        var p = plan(a).copy(lines = plan(a).lines.map { it.copy(nameSource = ItemPlanLine.NameSource.None, name = "") })
+        p = p.setName("ocr-4", "녹차")
+        p = p.applyTranslations(mapOf("ocr-2" to "주먹밥 연어", "ocr-4" to "다른 번역"), ItemPlanLine.NameSource.OnDevice)
+        assertEquals("녹차", p.line("ocr-4")?.name)
+        assertEquals("주먹밥 연어", p.line("ocr-2")?.name)
+        assertEquals(ItemPlanLine.NameSource.OnDevice, p.line("ocr-2")?.nameSource)
+
+        val (p1, first) = p.addLine(ItemPlanLine.Kind.Adjustment, "할인", "-50")
+        val (p2, second) = p1.addLine(ItemPlanLine.Kind.Adjustment, "세금", "51")
+        assertEquals("manual-10", first)
+        assertEquals("manual-11", second)
+        val (p3, third) = p2.removeManual(first).addLine(ItemPlanLine.Kind.Item, "봉투", "3")
+        assertEquals("manual-12", third)
+        val p4 = p3.removeManual("ocr-2").setExcluded("ocr-2", true)
+        assertNotNull(p4.line("ocr-2"))
+        assertEquals(listOf("ocr-4", "ocr-6", "manual-11", "manual-12"), p4.activeLines.map { it.id })
+        assertNull(ItemPlan.parseAmount("-50", allowNegative = false))
+        assertEquals(-50L, ItemPlan.parseAmount("▲５０", allowNegative = true))
+        assertEquals(1320L, ItemPlan.parseAmount("1,320", allowNegative = false))
+        assertNull(ItemPlan.parseAmount("0", allowNegative = true))
+        // 저장 형식을 오가도 같다.
+        assertEquals(p4, ItemPlan.fromJson(p4.toJson()))
+    }
+
+    private val flattener =
+        ReceiptFlattener { original, _ ->
+            val source = ImageIO.read(original)
+            val image = java.awt.image.BufferedImage(source.width, source.height, java.awt.image.BufferedImage.TYPE_INT_RGB)
+            image.createGraphics().apply { drawImage(source, 0, 0, null) }.dispose()
+            ByteArrayOutputStream().also { ImageIO.write(image, "png", it) }.toByteArray()
+        }
+
+    /** 공통 예제 single_line_rows의 OCR 줄(r01과 같은 글자)을 돌려주는 대역. 실제 ML Kit은 에뮬레이터 E2E에서 확인한다. */
+    private val rowsOcr = ocr(examples.getJSONArray("extraction").getJSONObject(0).getJSONArray("lines"))
+
+    private fun confirmedProcessor(store: ReceiptDraftStore): Pair<ReceiptProcessor, String> =
+        runBlocking {
+            store.create(DraftSource.Share, listOf(IncomingPhoto("png") { File(dir, "receipt-i02.png").inputStream() }))
+            val processor = ReceiptProcessor(store, store.list().single(), { rowsOcr }, flattener)
+            processor.run()
+            val item = processor.snapshot().items.single()
+            try {
+                processor.itemPlan(item.id)
+                fail("확인 전에는 계획이 없다")
+            } catch (e: ProcessorException) {
+                assertEquals(ProcessorError.WrongState, e.error)
+            }
+            val proposal = processor.proposal(item.id)
+            processor.confirm(item.id, proposal.fields, proposal.suggestedMaskLineIds.toSet())
+            processor to item.id
+        }
+
+    /** 확인한 영수증의 계획은 초안 폴더에만 쓰고, 다시 열어도 같으며, 늦게 온 옛 입력이 덮지 않는다. 경계 값은 그대로다. */
+    @Test
+    fun planIsDurableLocalAndOutsideTheBoundary() =
+        runBlocking {
+            val root = tmp.newFolder()
+            val store = ReceiptDraftStore(root)
+            val (processor, id) = confirmedProcessor(store)
+            val before = processor.outboundReceipts()
+            var plan = processor.itemPlan(id)!!
+            assertEquals(listOf("ocr-3", "ocr-4"), plan.lines.map { it.id })
+            assertEquals(128L + 0, plan.difference) // 외세: 품목 1,280엔, 합계 1,408엔
+            plan =
+                plan
+                    .setAssignee("ocr-3", "host", true)
+                    .setName("ocr-3", "오늘의 정식")
+                    .addLine(ItemPlanLine.Kind.Adjustment, "소비세", "128")
+                    .first
+            processor.saveItemPlan(id, plan, 2)
+            processor.saveItemPlan(id, plan.setName("ocr-3", "옛 입력"), 1)
+
+            val reopened = ReceiptProcessor(store, store.list().single(), { rowsOcr }, flattener)
+            assertEquals(plan, reopened.itemPlan(id))
+            try {
+                reopened.saveItemPlan(id, plan.copy(receiptTotalMinor = 1))
+                fail("합계가 다른 계획은 쓰지 않는다")
+            } catch (e: ProcessorException) {
+                assertEquals(ProcessorError.InvalidFields, e.error)
+            }
+            val after = reopened.outboundReceipts()
+            assertEquals(before.map { it.receipt }, after.map { it.receipt })
+            assertTrue(after.zip(before).all { (a, b) -> a.artifactPng.contentEquals(b.artifactPng) })
+            assertTrue(File(root, "drafts/${store.list().single().id}/items/$id.json").isFile)
+        }
+
+    @Test
+    fun failedPlanWriteThrowsAndKeepsLastSaved() =
+        runBlocking {
+            var failing = false
+            val store = ReceiptDraftStore(tmp.newFolder(), writeFault = { it.path.contains("/items/") && failing })
+            val (processor, id) = confirmedProcessor(store)
+            val plan = processor.itemPlan(id)!!.setName("ocr-3", "정식")
+            processor.saveItemPlan(id, plan)
+            failing = true
+            try {
+                processor.saveItemPlan(id, plan.setName("ocr-3", "저장 안 됨"))
+                fail("쓰기 실패를 숨기지 않는다")
+            } catch (_: ReceiptStorageException) {
+            }
+            assertEquals("정식", processor.itemPlan(id)?.line("ocr-3")?.name)
+        }
+}
+
+private fun JSONObject.toMap(): Map<String, Any?> =
+    keys().asSequence().associateWith { k ->
+        when (val v = get(k)) {
+            is JSONObject -> v.toMap()
+            is Number -> v.toLong()
+            else -> v
+        }
+    }

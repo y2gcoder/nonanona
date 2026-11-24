@@ -196,6 +196,39 @@ class ReceiptProcessor(
             store.artifactFile(draftId, name).readBytes()
         }
 
+    /**
+     * 확인한 영수증(가린 사본이 있는 것)의 품목별 나누기 계획. 저장한 것이 없으면 제안의 OCR 위치로 새로 만든다(쓰지는 않는다).
+     * 소수 자릿수가 있는 통화는 null. OCR 글자·품목 이름을 담으므로 기기 안에서만 쓴다.
+     */
+    suspend fun itemPlan(id: String): ItemPlan? =
+        mutex.withLock {
+            val receipt = find(id, ItemState.Confirmed).confirmed?.takeUnless { it.isManualEntry } ?: return@withLock null
+            store.itemPlanFile(draftId, id).takeIf { it.isFile }?.let { return@withLock ItemPlan.fromJson(it.readText()) }
+            ItemPlan.seed(receipt.fields, OcrProposal.fromJson(store.proposalFile(draftId, id).readText()).ocr)
+        }
+
+    /**
+     * 고칠 때마다 원자적으로 쓴다. [revision]이 이미 쓴 것보다 오래되면 쓰지 않는다(늦게 도착한 옛 입력이 새 입력을 덮지 않게).
+     * 영수증 합계·통화가 확인한 값과 다르면 쓰지 않는다. 쓰지 못하면 던지고, 디스크에는 마지막으로 쓴 계획이 남는다.
+     */
+    suspend fun saveItemPlan(
+        id: String,
+        plan: ItemPlan,
+        revision: Long? = null,
+    ) = mutex.withLock {
+        val receipt = find(id, ItemState.Confirmed).confirmed
+        if (receipt == null || receipt.isManualEntry || plan.receiptTotalMinor != receipt.fields.amountMinor ||
+            plan.currency != receipt.fields.currency
+        ) {
+            throw ProcessorException(ProcessorError.InvalidFields)
+        }
+        val key = "items/$id"
+        val saved = savedRevisions[key]
+        if (revision != null && saved != null && revision <= saved) return@withLock
+        store.writeAtomic(store.itemPlanFile(draftId, id), plan.toJson().toByteArray())
+        if (revision != null) savedRevisions[key] = revision
+    }
+
     private fun check(fields: AllowedReceiptFields) {
         val valid =
             ReviewForm.validate(

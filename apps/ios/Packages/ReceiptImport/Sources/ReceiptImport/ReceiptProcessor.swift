@@ -156,6 +156,30 @@ public actor ReceiptProcessor {
     return try Data(contentsOf: store.artifactURL(draftID, name))
   }
 
+  /// 확인한 영수증(가린 사본이 있는 것)의 품목별 나누기 계획. 저장한 것이 없으면 제안의 OCR 위치로 새로 만든다(쓰지는 않는다).
+  /// 소수 자릿수가 있는 통화는 nil. OCR 글자·품목 이름을 담으므로 기기 안에서만 쓴다.
+  public func itemPlan(_ id: String) throws -> ItemPlan? {
+    let index = try indexOf(id, in: [.confirmed])
+    guard let receipt = manifest.items[index].confirmed, !receipt.isManualEntry else { return nil }
+    if let data = try? Data(contentsOf: store.itemPlanURL(draftID, id)) {
+      return try JSONDecoder().decode(ItemPlan.self, from: data)
+    }
+    return ItemPlan.seed(fields: receipt.fields, ocr: try proposal(id).ocr)
+  }
+
+  /// 고칠 때마다 원자적으로 쓴다. `revision`이 이미 쓴 것보다 오래되면 쓰지 않는다(늦게 도착한 옛 입력이 새 입력을 덮지 않게).
+  /// 영수증 합계·통화가 확인한 값과 다르면 쓰지 않는다. 쓰지 못하면 던지고, 디스크에는 마지막으로 쓴 계획이 남는다.
+  public func saveItemPlan(_ id: String, _ plan: ItemPlan, revision: Int? = nil) throws {
+    let index = try indexOf(id, in: [.confirmed])
+    guard let receipt = manifest.items[index].confirmed, !receipt.isManualEntry,
+      plan.receiptTotalMinor == receipt.fields.amountMinor, plan.currency == receipt.fields.currency
+    else { throw ProcessorError.invalidFields }
+    let key = "items/" + id
+    if let revision, let saved = savedRevisions[key], revision <= saved { return }
+    try store.writeProtected(JSONEncoder().encode(plan), to: store.itemPlanURL(draftID, id))
+    if let revision { savedRevisions[key] = revision }
+  }
+
   private static func check(_ fields: AllowedReceiptFields) throws {
     let valid = ReviewForm.validate(
       date: fields.date, amount: ReviewForm.amountText(minor: fields.amountMinor, currency: fields.currency),

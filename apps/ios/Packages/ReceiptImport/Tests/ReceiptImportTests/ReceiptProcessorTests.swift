@@ -101,7 +101,8 @@ struct ReceiptProcessorTests {
         let mid = Double(s.rect[1] + s.rect[3]) / 2 / Double(t.height)
         #expect(suggested.contains { $0.y <= mid && mid <= $0.y + $0.height }, "\(t.ref) \(s.text)")
       }
-    }
+    }  // 품목 나누기용 가상 영수증 2장(같은 테스트 안에서 이어서 읽어 Vision 요청이 동시에 늘지 않게 한다).
+    try checkRealVisionItemReceipts()
   }
 
   @Test func tenPhotosAtMostTwoAtATimeAndBadPhotoIsIsolated() async throws {

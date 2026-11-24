@@ -135,6 +135,7 @@ public struct ReceiptDraftStore: Sendable {
   func photoURL(_ id: String, _ fileName: String) -> URL { draftURL(id).appending(path: fileName) }
   func proposalURL(_ id: String, _ itemID: String) -> URL { draftURL(id).appending(path: "proposals/\(itemID).json") }
   func reviewURL(_ id: String, _ itemID: String) -> URL { draftURL(id).appending(path: "reviews/\(itemID).json") }
+  func itemPlanURL(_ id: String, _ itemID: String) -> URL { draftURL(id).appending(path: "items/\(itemID).json") }
   func artifactURL(_ id: String, _ fileName: String) -> URL { draftURL(id).appending(path: "confirmed/\(fileName)") }
   private func processingURL(_ id: String) -> URL { draftURL(id).appending(path: "processing.json") }
 

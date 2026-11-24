@@ -1,0 +1,245 @@
+{
+ "expenses": [
+  {
+   "acquisition": null,
+   "amount_minor": 10001,
+   "artifact_path": "000b4d7f-0ecf-4cb2-9286-663979b40c80/00000000-0000-4000-8000-00000000000b/ccc49d41-5737-4600-9ca3-ad95741fcf44.png",
+   "artifact_sha256": "5d69818612568cb63bb4c24b0200a56b48d2d35c844b5f03910eacdade710f7f",
+   "currency": "KRW",
+   "entry": "receipt",
+   "expense_date": "2026-11-03",
+   "expense_id": "42afa0b9-53a2-452b-bef9-de93fdbcf40c",
+   "fx": null,
+   "fx_correction": null,
+   "fx_proposal": null,
+   "fx_superseded": false,
+   "has_artifact": true,
+   "hold_reason": null,
+   "is_estimate": false,
+   "krw_amount": null,
+   "krw_basis": null,
+   "merchant": "가상 분식",
+   "payer_id": null,
+   "share_proposal": {
+    "expense_version": 1,
+    "fx_quote_id": null,
+    "krw_basis": "krw_original",
+    "krw_total": 10001,
+    "proposal_id": "9a18ac87-9071-4071-b233-acf1cbfa2a92",
+    "proposed_at": "2026-11-24T13:28:21Z",
+    "proposed_by": "00000000-0000-4000-8000-00000000000b",
+    "shares": [
+     {
+      "krw": 6000,
+      "user_id": "00000000-0000-4000-8000-00000000000a"
+     },
+     {
+      "krw": 1000,
+      "user_id": "00000000-0000-4000-8000-00000000000c"
+     },
+     {
+      "krw": 3001,
+      "user_id": "00000000-0000-4000-8000-00000000000b"
+     }
+    ],
+    "state": "current"
+   },
+   "shares": [],
+   "status": "pending",
+   "uploaded_by": "00000000-0000-4000-8000-00000000000b",
+   "version": 1
+  },
+  {
+   "acquisition": null,
+   "amount_minor": 1408,
+   "artifact_path": "000b4d7f-0ecf-4cb2-9286-663979b40c80/00000000-0000-4000-8000-00000000000b/43169d4f-80aa-479f-879f-0d5284e66d6a.png",
+   "artifact_sha256": "600618a4dd1815cb309c2398c400539970df625aba7159ebdc693764315d30ef",
+   "currency": "JPY",
+   "entry": "receipt",
+   "expense_date": "2026-11-03",
+   "expense_id": "98f21d30-6a2c-402a-be80-334dee9e3e61",
+   "fx": null,
+   "fx_correction": null,
+   "fx_proposal": {
+    "currency": "JPY",
+    "data_origin": "fixture",
+    "determined_at": "2026-11-24T13:01:06Z",
+    "item_code": "0000002",
+    "item_name": "원/일본엔(100엔)",
+    "krw": 12746,
+    "quote_id": "1165b1ee-dfa4-4b78-8f6c-8f90706bf6d4",
+    "quote_unit": 100,
+    "rate": "905.25",
+    "rate_date": "2026-11-02",
+    "source": "bok_ecos",
+    "stat_code": "731Y001",
+    "status": "proposed",
+    "unit_name": "원"
+   },
+   "fx_superseded": false,
+   "has_artifact": true,
+   "hold_reason": null,
+   "is_estimate": false,
+   "krw_amount": null,
+   "krw_basis": null,
+   "merchant": "さくら食堂",
+   "payer_id": null,
+   "share_proposal": {
+    "expense_version": 1,
+    "fx_quote_id": "1165b1ee-dfa4-4b78-8f6c-8f90706bf6d4",
+    "krw_basis": "reference_rate_estimate",
+    "krw_total": 12746,
+    "proposal_id": "b4e50cee-1151-490e-8b66-dfa5097efee7",
+    "proposed_at": "2026-11-24T13:28:21Z",
+    "proposed_by": "00000000-0000-4000-8000-00000000000b",
+    "shares": [
+     {
+      "krw": 6373,
+      "user_id": "00000000-0000-4000-8000-00000000000a"
+     },
+     {
+      "krw": 6373,
+      "user_id": "00000000-0000-4000-8000-00000000000b"
+     }
+    ],
+    "state": "current"
+   },
+   "shares": [],
+   "status": "pending",
+   "uploaded_by": "00000000-0000-4000-8000-00000000000b",
+   "version": 1
+  },
+  {
+   "acquisition": null,
+   "amount_minor": 9000,
+   "artifact_path": "000b4d7f-0ecf-4cb2-9286-663979b40c80/00000000-0000-4000-8000-00000000000b/2080510f-0a5e-40e5-b9b0-9c29b71c994c.png",
+   "artifact_sha256": "7f3b9d9331e50315e69d19d6207254c2f7f549ac88dd11ea03bd350f50d8d5c7",
+   "currency": "KRW",
+   "entry": "receipt",
+   "expense_date": "2026-11-04",
+   "expense_id": "7796a8c6-f59c-4036-91bb-71f6885da8ef",
+   "fx": null,
+   "fx_correction": null,
+   "fx_proposal": null,
+   "fx_superseded": false,
+   "has_artifact": true,
+   "hold_reason": null,
+   "is_estimate": false,
+   "krw_amount": 9000,
+   "krw_basis": "krw_original",
+   "merchant": "가상 카페",
+   "payer_id": "00000000-0000-4000-8000-00000000000a",
+   "share_proposal": {
+    "expense_version": 1,
+    "fx_quote_id": null,
+    "krw_basis": "krw_original",
+    "krw_total": 9000,
+    "proposal_id": "d43f77b2-f434-4da5-b754-99ad7e7ff483",
+    "proposed_at": "2026-11-24T13:28:21Z",
+    "proposed_by": "00000000-0000-4000-8000-00000000000b",
+    "shares": [
+     {
+      "krw": 4500,
+      "user_id": "00000000-0000-4000-8000-00000000000a"
+     },
+     {
+      "krw": 4500,
+      "user_id": "00000000-0000-4000-8000-00000000000b"
+     }
+    ],
+    "state": "applied"
+   },
+   "shares": [
+    {
+     "krw": 4500,
+     "user_id": "00000000-0000-4000-8000-00000000000a"
+    },
+    {
+     "krw": 4500,
+     "user_id": "00000000-0000-4000-8000-00000000000b"
+    }
+   ],
+   "status": "included",
+   "uploaded_by": "00000000-0000-4000-8000-00000000000b",
+   "version": 2
+  },
+  {
+   "acquisition": null,
+   "amount_minor": 7000,
+   "artifact_path": "000b4d7f-0ecf-4cb2-9286-663979b40c80/00000000-0000-4000-8000-00000000000b/e9ce5edc-d78e-4fba-b8d3-08fbd7e1ecfc.png",
+   "artifact_sha256": "b30bd16b240edda42454a5f8c5d4edce2ccebe91aabba1a03a9c600ff43cf392",
+   "currency": "KRW",
+   "entry": "receipt",
+   "expense_date": "2026-11-04",
+   "expense_id": "5aa3dea3-c5c4-4685-9e77-a6f9e45781d9",
+   "fx": null,
+   "fx_correction": null,
+   "fx_proposal": null,
+   "fx_superseded": false,
+   "has_artifact": true,
+   "hold_reason": null,
+   "is_estimate": false,
+   "krw_amount": 7000,
+   "krw_basis": "krw_original",
+   "merchant": "가상 편의점",
+   "payer_id": "00000000-0000-4000-8000-00000000000a",
+   "share_proposal": {
+    "expense_version": 1,
+    "fx_quote_id": null,
+    "krw_basis": "krw_original",
+    "krw_total": 7000,
+    "proposal_id": "8a58546e-de6b-4cea-a20f-06feaff3aaee",
+    "proposed_at": "2026-11-24T13:28:21Z",
+    "proposed_by": "00000000-0000-4000-8000-00000000000b",
+    "shares": [
+     {
+      "krw": 3500,
+      "user_id": "00000000-0000-4000-8000-00000000000a"
+     },
+     {
+      "krw": 3500,
+      "user_id": "00000000-0000-4000-8000-00000000000b"
+     }
+    ],
+    "state": "stale_expense"
+   },
+   "shares": [
+    {
+     "krw": 6000,
+     "user_id": "00000000-0000-4000-8000-00000000000a"
+    },
+    {
+     "krw": 1000,
+     "user_id": "00000000-0000-4000-8000-00000000000b"
+    }
+   ],
+   "status": "included",
+   "uploaded_by": "00000000-0000-4000-8000-00000000000b",
+   "version": 2
+  }
+ ],
+ "finalization_id": null,
+ "me": "00000000-0000-4000-8000-00000000000b",
+ "members": [
+  {
+   "display_name": "다라",
+   "role": "host",
+   "user_id": "00000000-0000-4000-8000-00000000000a"
+  },
+  {
+   "display_name": "가나",
+   "role": "member",
+   "user_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+   "display_name": "라마",
+   "role": "member",
+   "user_id": "00000000-0000-4000-8000-00000000000c"
+  }
+ ],
+ "my_role": "member",
+ "revision": 7,
+ "status": "open",
+ "trip_id": "000b4d7f-0ecf-4cb2-9286-663979b40c80",
+ "trip_name": "가상 계약 시험 abec5a"
+}

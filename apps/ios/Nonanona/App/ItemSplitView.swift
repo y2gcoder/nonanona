@@ -24,6 +24,17 @@ struct ItemSplitContent {
   let saveFailed: Bool
   /// 저장한 계획을 열지 못했다(통화를 받지 않는 경우와 다르다). 계획 파일은 그대로 있다.
   let loadFailure: ItemPlanLoadFailure?
+  /// 올린 사람(회원)의 제안 화면이면 값이 있다(ADR-0011). nil이면 방장 검토(직접 나누기에 채우기).
+  var proposal: ItemProposalPanel? = nil
+}
+
+/// 제안 화면에 그릴 값: 묶을 원화 기준, 남은 원을 낼 사람, 보낼 요청(전부), 장부의 가장 최근 제안과 보내기 상태.
+struct ItemProposalPanel {
+  let basis: ProposalBasis
+  let remainderChoice: String?
+  let request: ShareProposalRequest?
+  let sent: ShareProposal?
+  let sendState: ProposalSendState?
 }
 
 struct ItemSplitActions {
@@ -33,6 +44,8 @@ struct ItemSplitActions {
   let translate: () -> Void
   let recheckTranslation: () -> Void
   let apply: () -> Void
+  var chooseRemainder: (String) -> Void = { _ in }
+  var propose: () -> Void = {}
 }
 
 /// 영수증 품목으로 사람마다 몫을 계산해 지출 검토의 "직접 나누기"에 채운다. 품목 이름·OCR 글자는 이 기기에만 있고,
@@ -46,16 +59,24 @@ struct ItemSplitView: View {
   var body: some View {
     List {
       Section {
-        Text("품목 이름과 영수증 글자는 이 기기에만 있어요. 여행방에는 사람마다 부담 금액(원)만 \"직접 나누기\"로 올라가요.")
-          .textRole(.supporting).foregroundStyle(.secondary)
-          .accessibilityIdentifier("items-privacy")
+        Text(
+          content.proposal == nil
+            ? "품목 이름과 영수증 글자는 이 기기에만 있어요. 여행방에는 사람마다 부담 금액(원)만 \"직접 나누기\"로 올라가요."
+            : "품목 이름과 영수증 글자는 이 기기에만 있어요. 방장에게는 사람마다 부담 금액(원)만 제안으로 가고, 방장이 확인해야 정산에 들어가요."
+        )
+        .textRole(.supporting).foregroundStyle(.secondary)
+        .accessibilityIdentifier("items-privacy")
       }
       if let plan = content.plan {
         translationSection
         linesSection(plan)
         addSection
         summarySection(plan)
-        resultSection(plan)
+        if let proposal = content.proposal {
+          proposalSection(plan, proposal)
+        } else {
+          resultSection(plan)
+        }
       } else if let failure = content.loadFailure {
         Section {
           Text(Self.loadFailureMessage(failure))
@@ -234,6 +255,81 @@ struct ItemSplitView: View {
     } footer: {
       Text("채우기는 서버에 보내지 않아요. 지출 검토에서 확인하고 \"포함하기\"를 눌러야 여행방에 저장돼요.").textRole(.caption)
     }
+  }
+
+  // MARK: 제안(올린 사람)
+
+  @ViewBuilder private func proposalSection(_ plan: ItemPlan, _ proposal: ItemProposalPanel) -> some View {
+    Section {
+      Text(ShareProposalText.basis(proposal.basis))
+        .textRole(.supporting).accessibilityIdentifier("items-proposal-basis")
+      if case .ready = proposal.basis {
+        switch content.allocation {
+        case .success(let allocation)?:
+          switch allocation {
+          case .exact(let shares), .pairRule(let shares):
+            shareRows(shares)
+          case .remainder(let floors, let remaining):
+            shareRows(floors)
+            Text("원 단위로 나눠떨어지지 않아 \(Won.text(remaining))이 남아요. 남은 원을 낼 사람을 골라 주세요. 저절로 정하지 않아요.")
+              .textRole(.supporting).foregroundStyle(.orange).accessibilityIdentifier("items-remainder")
+            ForEach(Array(floors.enumerated()), id: \.element.member) { index, share in
+              Button {
+                actions.chooseRemainder(share.member)
+              } label: {
+                HStack {
+                  Text("\(name(share.member))이(가) \(Won.text(remaining)) 더 내기")
+                  Spacer()
+                  if proposal.remainderChoice == share.member { Image(systemName: "checkmark") }
+                }
+              }
+              .accessibilityIdentifier("items-remainder-\(index + 1)")
+              .accessibilityAddTraits(proposal.remainderChoice == share.member ? .isSelected : [])
+            }
+          }
+          if let request = proposal.request {
+            Text(
+              "보낼 몫: " + request.shares.map { "\(name($0.member.value)) \(Won.text($0.krw))" }.joined(separator: " · ")
+            )
+            .textRole(.supporting).accessibilityIdentifier("items-proposal-preview")
+          }
+          Button(proposal.sendState == .sending ? "보내는 중…" : "방장에게 제안 보내기", action: actions.propose)
+            .buttonStyle(.primaryAction)
+            .disabled(proposal.request == nil || proposal.sendState == .sending)
+            .accessibilityIdentifier("items-propose")
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
+        case .failure(let problem)?:
+          Text(Self.message(problem, plan: plan, people: content.people))
+            .textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("items-problem")
+        case nil:
+          EmptyView()
+        }
+      }
+      switch proposal.sendState {
+      case .sent?:
+        Text("제안을 보냈어요. 방장이 확인하고 포함해야 정산에 들어가요.")
+          .textRole(.supporting).accessibilityIdentifier("items-proposal-sent")
+      case .failed(let failure)?:
+        Text(failure.message).textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier(
+          "items-proposal-failed")
+      case .sending?, nil:
+        EmptyView()
+      }
+      if let sent = proposal.sent {
+        Text(ShareProposalText.uploaderState(sent.state))
+          .textRole(.supporting).accessibilityIdentifier("items-proposal-state")
+      }
+    } header: {
+      Text("방장에게 제안").textRole(.sectionTitle).foregroundStyle(.primary).textCase(nil)
+    } footer: {
+      Text("보내는 값: 사람마다 금액(원), 원화 기준과 합계, 지출 버전. 품목 이름·품목 금액·영수증 글자·사진은 보내지 않아요.")
+        .textRole(.caption)
+    }
+  }
+
+  private func name(_ member: String) -> String {
+    content.people.first { $0.id == member }?.name ?? "알 수 없는 구성원"
   }
 
   @ViewBuilder private func allocationRows(_ allocation: ItemAllocation) -> some View {

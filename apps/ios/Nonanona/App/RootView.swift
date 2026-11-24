@@ -39,6 +39,10 @@ struct RootView: View {
           ) { trip in
             SettlementDestination(rooms: model.rooms, trip: trip).id(trip)
           }
+          // 장부 위에 올린 사람(회원)의 품목 나누기 제안(ADR-0011).
+          .navigationDestination(item: $model.proposalSplit) { split in
+            ItemSplitDestination(model: model, rooms: model.rooms, split: split).id(split)
+          }
       }
     }
     .navigationSplitViewStyle(.balanced)
@@ -58,6 +62,18 @@ struct RootView: View {
     } message: { _ in
       Text("지금 미리보기의 송금표로 고정돼요. 확정한 뒤에는 지출을 더하거나 고칠 수 없어요.")
     }
+    .alert(
+      "방장에게 제안을 보낼까요?",
+      isPresented: Binding(
+        get: { model.proposalConfirmation != nil }, set: { if !$0 { model.proposalConfirmation = nil } }),
+      presenting: model.proposalConfirmation.flatMap(model.proposalRequest)
+    ) { request in
+      Button("보내기") { Task { await model.confirmProposalSend(request) } }
+        .accessibilityIdentifier("proposal-send-confirm")
+      Button("취소", role: .cancel) { model.proposalConfirmation = nil }
+    } message: { request in
+      Text(proposalConsentText(request))
+    }
     .sheet(
       isPresented: Binding(
         get: { model.login != .hidden },
@@ -68,6 +84,22 @@ struct RootView: View {
         onSignIn: { provider in Task { await model.signIn(with: provider) } },
         onCancel: model.dismissLogin)
     }
+  }
+
+  /// 보낼 값을 그대로 보인다: 사람마다 원, 원화 기준과 합계. 품목 정보는 보내지 않는다는 것을 함께 알린다.
+  private func proposalConsentText(_ request: ShareProposalRequest) -> String {
+    let ledger = model.proposalConfirmation.flatMap { model.rooms.ledgers[$0.expense.tripID] }
+    let lines = request.shares.map { "\(ledger?.name(of: $0.member) ?? "") \(Won.text($0.krw))" }.joined(
+      separator: ", ")
+    let basis: String =
+      switch request.basis {
+      case .krwOriginal: "원화 결제"
+      case .referenceEstimate: "기준환율 예상 금액"
+      case .verifiedCharge: "방장이 확인한 실제 청구액"
+      case .acquisitionCost: "방장이 확인한 환전 원가"
+      }
+    return "\(lines) (합계 \(Won.text(request.krwTotal)), \(basis)). 사람마다 금액만 보내고 품목 이름·품목 금액·영수증 글자는 보내지 않아요. "
+      + "방장이 확인하고 포함해야 정산에 들어가요."
   }
 
   /// 최종 확인은 한 곳(여기)에서만 띄운다. 개발용 화면이 없는 release에서는 아무것도 하지 않는다.
@@ -119,7 +151,9 @@ struct RootView: View {
           loading: model.rooms.loadingLedger.contains(room.id), failure: model.rooms.ledgerFailure[room.id],
           onReview: { model.rooms.openReview(ExpenseTarget(tripID: room.id, expenseID: $0)) },
           onSettlement: { model.rooms.openSettlement(room.id) },
-          onRefresh: { await model.refreshRoom(room.id) })
+          onRefresh: { await model.refreshRoom(room.id) },
+          canPropose: { model.canProposeItems($0, in: ledger) },
+          onPropose: { model.openItemProposal(ExpenseTarget(tripID: room.id, expenseID: $0)) })
       } else if let room = model.room {
         TripRoomView(room: room, localDraftCount: model.drafts.count)
       } else {
@@ -186,7 +220,8 @@ private struct ExpenseReviewDestination: View {
         onKeepEstimate: { Task { await rooms.keepEstimate(target) } },
         onApplyEstimate: { Task { await rooms.applyNewEstimate(target) } },
         itemSplitAvailable: model.localReceipt(for: expense) != nil,
-        onOpenItemSplit: { model.openItemSplit(target) }
+        onOpenItemSplit: { model.openItemSplit(target) },
+        onFillProposal: { rooms.fillFromProposal(target) }
       )
       // 지출 검토 위에 품목별 나누기(이 기기에서 올린 영수증만). 검토 화면에 붙여, 닫으면 검토로 돌아온다
       // (뿌리 화면에 붙이면 닫을 때 검토까지 함께 닫힌다 — 시뮬레이터에서 재현).
@@ -207,24 +242,34 @@ private struct ItemSplitDestination: View {
     let ledger = rooms.ledgers[split.expense.tripID]
     let expense = rooms.expense(split.expense)
     let form = rooms.forms[split.expense]
+    let isProposal = split.purpose == .proposal
+    let basis = model.proposalBasis(split)
+    let proposalKRW: Int? = if case .ready(_, let krw, _) = basis { krw } else { nil }
     ItemSplitView(
       content: ItemSplitContent(
         plan: model.itemPlans[split.receipt],
         people: (ledger?.members ?? []).map { ItemSplitPerson(id: $0.id.value, name: $0.displayName) },
-        krw: expense.flatMap { form?.krw(for: $0) },
+        krw: isProposal ? proposalKRW : expense.flatMap { form?.krw(for: $0) },
         allocation: model.itemAllocation(split),
         translation: model.itemTranslation[split.receipt],
         translatorLabel: model.graph.itemTranslator.label,
         translatorIsPreview: model.graph.itemTranslator.source == .preview,
         saveFailed: model.itemPlanSaveFailed.contains(split.receipt),
-        loadFailure: model.itemPlanLoadFailed[split.receipt]),
+        loadFailure: model.itemPlanLoadFailed[split.receipt],
+        proposal: isProposal
+          ? ItemProposalPanel(
+            basis: basis, remainderChoice: model.proposalRemainder[split]?.value,
+            request: model.proposalRequest(split), sent: expense?.shareProposal,
+            sendState: rooms.proposalState[split.expense]) : nil),
       actions: ItemSplitActions(
         edit: { model.editItemPlan(split.receipt, $0) },
         retrySave: { model.retryItemPlanSave(split.receipt) },
         retryLoad: { model.retryItemPlanLoad(split.receipt) },
         translate: { Task { await model.translateItemNames(split.receipt) } },
         recheckTranslation: { Task { await model.checkTranslation(split.receipt) } },
-        apply: { model.applyItemSplit(split) }))
+        apply: { model.applyItemSplit(split) },
+        chooseRemainder: { model.chooseProposalRemainder(split, MemberID(value: $0)) },
+        propose: { model.requestProposalSend(split) }))
   }
 }
 

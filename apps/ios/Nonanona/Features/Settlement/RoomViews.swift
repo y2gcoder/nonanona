@@ -134,6 +134,9 @@ struct RoomLedgerView: View {
   let onReview: (String) -> Void
   let onSettlement: () -> Void
   let onRefresh: () async -> Void
+  /// 회원이 이 기기에서 올린 영수증 지출이면 품목으로 나눠 방장에게 제안할 수 있다(ADR-0011).
+  var canPropose: (LedgerExpense) -> Bool = { _ in false }
+  var onPropose: (String) -> Void = { _ in }
 
   private var pendingCount: Int { ledger.expenses.filter { $0.status == .pending }.count }
   private var correctionCount: Int { ledger.expenses.filter { $0.fxCorrection?.blocksFinalize == true }.count }
@@ -193,7 +196,19 @@ struct RoomLedgerView: View {
             .accessibilityIdentifier("expense-\(index + 1)")
             .accessibilityHint("검토하기")
           } else {
-            row.accessibilityIdentifier("expense-\(index + 1)")
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+              row.accessibilityIdentifier("expense-\(index + 1)")
+              if let sent = expense.shareProposal, expense.uploadedBy == ledger.me {
+                Text(ShareProposalText.uploaderState(sent.state))
+                  .textRole(.caption).foregroundStyle(.secondary)
+                  .accessibilityIdentifier("expense-proposal-\(index + 1)")
+              }
+              if canPropose(expense) {
+                Button("품목으로 나눠 방장에게 제안") { onPropose(expense.id) }
+                  .buttonStyle(.borderless)
+                  .accessibilityIdentifier("propose-items-\(index + 1)")
+              }
+            }
           }
         }
       } header: {
@@ -270,6 +285,9 @@ struct ExpenseRow: View {
       if case .held(let reason) = expense.status {
         Text("보류 사유: \(reason)").textRole(.caption).foregroundStyle(.secondary)
       }
+      if ledger.isHost, expense.shareProposal?.state == .current {
+        Text("올린 사람의 품목 나누기 제안이 있어요").textRole(.caption).foregroundStyle(.orange)
+      }
     }
     .accessibilityElement(children: .combine)
   }
@@ -321,6 +339,8 @@ struct ExpenseReviewView: View {
   /// 이 지출을 이 기기에서 올려 영수증 품목(기기 안)으로 나눌 수 있다.
   var itemSplitAvailable = false
   var onOpenItemSplit: () -> Void = {}
+  /// 올린 사람의 제안 몫을 "직접 나누기"에 채운다(보내지 않는다, ADR-0011).
+  var onFillProposal: () -> Void = {}
 
   @State private var askingHoldReason = false
   static let holdReasons = ["원화 청구액 확인 대기", "결제 여부 불명확", "같은 지출일 수 있음"]
@@ -355,6 +375,12 @@ struct ExpenseReviewView: View {
 
       ReceiptAttachmentSection(
         hasArtifact: expense.artifact != nil, state: receipt, onShow: onShowReceipt, onHide: onHideReceipt)
+
+      if ledger.isHost, let proposal = expense.shareProposal {
+        ShareProposalSection(
+          proposal: proposal, expense: expense, ledger: ledger, form: form, entered: try? result.get(), saving: saving,
+          onFill: onFillProposal)
+      }
 
       Section {
         Picker("결제자", selection: binding(\.payer)) {
@@ -522,6 +548,62 @@ struct ExpenseReviewView: View {
 
 /// 검토 화면의 원화: KRW는 그대로, 엔화는 실제 청구액 → 환전 원가 → 기준환율 예상 순으로 고른다(ADR-0001·0008).
 /// 다른 외화는 실제 청구액만. 예상액은 서버 고시값으로만 만들고 "예상"과 근거를 함께 보인다.
+/// 방장 검토의 "올린 사람의 품목 나누기 제안": 원화 기준·합계, 사람마다 제안 몫과 지금 입력(또는 포함한) 몫, 상태.
+/// 채우기는 입력만 바꾸고 보내지 않는다. 지금 제안이 아니거나 방장이 고를 수 있는 원화와 맞지 않으면 채울 수 없다.
+struct ShareProposalSection: View {
+  let proposal: ShareProposal
+  let expense: LedgerExpense
+  let ledger: RoomLedger
+  let form: ShareForm
+  let entered: [ShareLine]?
+  let saving: Bool
+  let onFill: () -> Void
+
+  private var canFill: Bool {
+    var copy = form
+    return copy.fill(from: proposal, expense: expense, members: ledger.members)
+  }
+  private var other: [ShareLine] { entered ?? (expense.status == .included ? expense.shares : []) }
+  private var otherLabel: String { entered != nil ? "입력" : "포함" }
+
+  var body: some View {
+    let comparison = ProposalComparison(proposal: proposal, other: other, members: ledger.members)
+    Section {
+      Text("\(ledger.name(of: proposal.proposedBy))이(가) 보낸 제안 · \(ShareProposalText.basisLabel(proposal))")
+        .textRole(.body).accessibilityIdentifier("review-proposal-basis")
+      ForEach(Array(comparison.rows.enumerated()), id: \.element.member) { index, row in
+        LabeledContent(ledger.name(of: row.member)) {
+          Text(
+            "제안 \(row.proposed.map(Won.text) ?? "없음") · \(otherLabel) \(row.other.map(Won.text) ?? "없음")"
+          )
+        }
+        .accessibilityIdentifier("review-proposal-row-\(index + 1)")
+      }
+      if !other.isEmpty {
+        Text(comparison.matches ? "\(otherLabel)한 몫이 제안과 같아요." : "\(otherLabel)한 몫이 제안과 달라요.")
+          .textRole(.supporting).foregroundStyle(comparison.matches ? Color.secondary : Color.orange)
+          .accessibilityIdentifier("review-proposal-match")
+      }
+      Text(ShareProposalText.hostState(proposal.state))
+        .textRole(.supporting).accessibilityIdentifier("review-proposal-state")
+      if proposal.state == .current {
+        Button("제안 몫을 직접 나누기에 채우기", action: onFill)
+          .disabled(saving || !canFill)
+          .accessibilityIdentifier("review-proposal-fill")
+        if !canFill {
+          Text("지금 이 지출에서 고를 수 있는 원화와 제안의 원화가 달라 채울 수 없어요.")
+            .textRole(.supporting).foregroundStyle(.secondary).accessibilityIdentifier("review-proposal-unfillable")
+        }
+      }
+    } header: {
+      Text("올린 사람의 품목 나누기 제안").textRole(.sectionTitle).foregroundStyle(.primary).textCase(nil)
+    } footer: {
+      Text("품목 이름은 오지 않아요. 제안은 정산을 바꾸지 않아요. 채운 뒤 결제자를 고르고 \"포함하기\"를 눌러야 들어가요.")
+        .textRole(.caption)
+    }
+  }
+}
+
 struct KRWSection: View {
   let expense: LedgerExpense
   let form: ShareForm
@@ -1040,6 +1122,7 @@ extension SettlementFailure {
     case .fxCorrectionRequired: "기준환율이 정정된 예상 금액이 있어 확정하지 않았어요. 지출마다 고정 금액 유지나 새 예상 금액 적용을 골라 주세요."
     case .fxReplacementUnavailable: "정정 뒤 쓸 수 있는 기준환율이 없어요. 실제 청구액·환전 원가로 포함하거나 보류해 주세요."
     case .fxNothingToKeep: "이미 정해졌거나 고시값이 다시 바뀌었어요. 최신 내용을 확인해 주세요."
+    case .uploaderOnly: "이 지출을 올린 사람만 품목 나누기 제안을 보낼 수 있어요."
     case .network: "인터넷에 연결할 수 없어요. 연결을 확인하고 다시 시도해 주세요."
     case .unavailable: "지금은 저장할 수 없어요. 잠시 후 다시 시도해 주세요."
     case .unknown: "저장하지 못했어요. 다시 시도해 주세요."

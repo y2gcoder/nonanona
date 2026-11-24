@@ -52,6 +52,13 @@ struct ReceiptContext: Equatable {
   let trip: TripID?
 }
 
+enum ProposalSendState: Equatable {
+  case sending
+  case sent(replayed: Bool)
+  /// 보내지 못했다. 지출·기준환율이 바뀐 경우(`stale`·`quoteChanged`)에는 장부를 새로 불러와 새 값으로 다시 계산하게 한다.
+  case failed(SettlementFailure)
+}
+
 enum SettlementScreenState: Equatable {
   case loading
   case finalizing
@@ -105,6 +112,9 @@ final class RoomModel {
   private var sentKeeps: [ExpenseTarget: FXKeep] = [:]
 
   func isSaving(_ target: ExpenseTarget) -> Bool { inFlight[target] != nil || keeping.contains(target) }
+
+  /// 올린 사람의 품목 나누기 제안 보내기 상태(지출마다). 같은 내용은 같은 요청 키라 다시 보내도 같은 제안으로 수렴한다.
+  private(set) var proposalState: [ExpenseTarget: ProposalSendState] = [:]
   /// 검토 중 다른 변경이 먼저 저장돼 최신 값으로 다시 연 지출.
   private(set) var reviewRefreshed: Set<ExpenseTarget> = []
 
@@ -285,7 +295,7 @@ final class RoomModel {
         await loadLedger(target.tripID)
       case .sessionExpired:
         await onSessionExpired()
-      case .rejected, .hostOnly, .notFound:
+      case .rejected, .hostOnly, .notFound, .uploaderOnly:
         sentKeeps[target] = nil
       default:
         break
@@ -347,13 +357,47 @@ final class RoomModel {
         await loadLedger(target.tripID)
       case .sessionExpired:
         await onSessionExpired()
-      case .rejected, .hostOnly, .notFound:
+      case .rejected, .hostOnly, .notFound, .uploaderOnly:
         sentReviews[target] = nil
       case .network, .unavailable, .unknown, .pendingReview, .fxCorrectionRequired, .fxReplacementUnavailable,
         .fxNothingToKeep:
         break
       }
     }
+  }
+
+  // MARK: - 품목 나누기 제안(올린 사람)
+
+  /// 올린 사람이 동의한 제안을 보낸다. 서버로 가는 값은 `ShareProposalRequest`뿐이다(품목 정보 없음).
+  /// 보낸 뒤나 지출·고시값이 바뀌어 거절되면 장부를 새로 불러온다(장부의 제안 상태와 새 기준을 보인다).
+  func propose(_ request: ShareProposalRequest, target: ExpenseTarget) async {
+    if proposalState[target] == .sending { return }
+    proposalState[target] = .sending
+    do {
+      let sent = try await settlement.propose(request, in: target.tripID)
+      proposalState[target] = .sent(replayed: sent.replayed)
+      await loadLedger(target.tripID)
+    } catch {
+      let failure = await settlementFailure(error)
+      proposalState[target] = .failed(failure)
+      switch failure {
+      case .stale, .quoteChanged, .finalized, .rejected: await loadLedger(target.tripID)
+      default: break
+      }
+    }
+  }
+
+  func clearProposalState(_ target: ExpenseTarget) { proposalState[target] = nil }
+
+  /// 방장: 올린 사람의 지금 제안을 검토의 "직접 나누기"에 채운다. 서버에는 보내지 않는다(결제자를 고르고 "포함하기"를 눌러야 간다).
+  @discardableResult
+  func fillFromProposal(_ target: ExpenseTarget) -> Bool {
+    guard let ledger = ledgers[target.tripID], ledger.isHost, let expense = expense(target),
+      let proposal = expense.shareProposal, var form = forms[target], !isSaving(target),
+      form.fill(from: proposal, expense: expense, members: ledger.members)
+    else { return false }
+    forms[target] = form
+    return true
   }
 
   // MARK: - 가림 사본 보기

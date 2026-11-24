@@ -66,8 +66,15 @@ struct ReviewTarget: Hashable {
 
 /// 지출 검토 위에 연 품목별 나누기: 여행방 지출(방장 검토)과, 그 지출을 이 기기에서 올린 확인한 영수증(안정 ID).
 struct ItemSplitTarget: Hashable {
+  enum Purpose: Hashable {
+    /// 방장 검토(이 기기에서 올린 영수증): 결과를 검토의 "직접 나누기"에 채운다.
+    case hostReview
+    /// 올린 사람(회원)의 제안: 결과 몫만 방장에게 제안으로 보낸다(ADR-0011).
+    case proposal
+  }
   let expense: ExpenseTarget
   let receipt: ReviewTarget
+  var purpose: Purpose = .hostReview
 }
 
 /// 품목 이름 기기 번역 상태(영수증마다).
@@ -161,6 +168,12 @@ final class AppModel {
   private(set) var itemTranslation: [ReviewTarget: ItemTranslationState] = [:]
   private var itemPlanRevision = 0
   private var itemPlanSettled: [ReviewTarget: Int] = [:]
+  /// 올린 사람(회원)의 품목 나누기 제안 화면. 장부 위에 쌓인다.
+  var proposalSplit: ItemSplitTarget?
+  /// 나눠떨어지지 않을 때 남은 원을 낼 사람(올린 사람이 직접 고른다). 저절로 정하지 않는다.
+  private(set) var proposalRemainder: [ItemSplitTarget: MemberID] = [:]
+  /// 보내기 전 확인 창(보낼 값을 그대로 보이고 동의를 받는다).
+  var proposalConfirmation: ItemSplitTarget?
 
   let graph: AppGraph
   /// 여행방 목록·장부·검토·송금표.
@@ -766,12 +779,78 @@ final class AppModel {
   }
 
   /// 품목 계획과 방장이 고른 원화·결제자로 계산한 사람마다 몫. 화면이 열려 있는 동안 입력이 바뀌면 다시 계산한다.
+  /// 제안이면 원화는 제안을 묶을 기준(`ProposalBasis`)의 원화이고 결제자는 없다(방장이 검토에서 정한다).
   func itemAllocation(_ split: ItemSplitTarget) -> Result<ItemAllocation, ItemAllocationProblem>? {
     guard let plan = itemPlans[split.receipt], let expense = rooms.expense(split.expense),
-      let ledger = rooms.ledgers[split.expense.tripID], let form = rooms.forms[split.expense]
+      let ledger = rooms.ledgers[split.expense.tripID]
     else { return nil }
+    if split.purpose == .proposal {
+      let krw: Int? = if case .ready(_, let krw, _) = proposalBasis(split) { krw } else { nil }
+      return ItemAllocator.allocate(plan: plan, krw: krw, payer: nil, members: ledger.members.map(\.id.value))
+    }
+    guard let form = rooms.forms[split.expense] else { return nil }
     return ItemAllocator.allocate(
       plan: plan, krw: form.krw(for: expense), payer: form.payer?.value, members: ledger.members.map(\.id.value))
+  }
+
+  // MARK: - 품목 나누기 제안(올린 사람, ADR-0011)
+
+  /// 회원이 이 기기에서 올린 영수증 지출이면 품목으로 나눠 방장에게 제안할 수 있다. 방장 기기는 지금처럼 직접 나눈다.
+  func canProposeItems(_ expense: LedgerExpense, in ledger: RoomLedger) -> Bool {
+    !ledger.isHost && !ledger.isFinalized && expense.uploadedBy == ledger.me && !expense.isManual
+      && localReceipt(for: expense) != nil
+  }
+
+  func openItemProposal(_ target: ExpenseTarget) {
+    guard let ledger = rooms.ledgers[target.tripID], let expense = rooms.expense(target),
+      canProposeItems(expense, in: ledger), let receipt = localReceipt(for: expense),
+      let processor = processors[receipt.draftID]
+    else { return }
+    Task {
+      await loadItemPlan(receipt, with: processor)
+      rooms.clearProposalState(target)
+      proposalSplit = ItemSplitTarget(expense: target, receipt: receipt, purpose: .proposal)
+      await checkTranslation(receipt)
+    }
+  }
+
+  func proposalBasis(_ split: ItemSplitTarget) -> ProposalBasis {
+    guard let ledger = rooms.ledgers[split.expense.tripID], let expense = rooms.expense(split.expense) else {
+      return .unavailable(.finalized)
+    }
+    return ProposalBasis.of(expense, finalized: ledger.isFinalized)
+  }
+
+  func chooseProposalRemainder(_ split: ItemSplitTarget, _ member: MemberID) { proposalRemainder[split] = member }
+
+  /// 보낼 몫. 정확히 나눠떨어지면 그대로, 남은 원이 있으면 올린 사람이 고른 사람에게 더한다(고르기 전에는 nil).
+  /// 몫은 모두 양수여야 한다(0원 몫을 보내지 않고 막는다).
+  func proposalShares(_ split: ItemSplitTarget) -> [ShareLine]? {
+    guard case .success(let allocation)? = itemAllocation(split) else { return nil }
+    return ProposalShares.from(allocation, remainderTo: proposalRemainder[split])
+  }
+
+  /// 서버로 갈 요청 전부. 품목 정보는 들어갈 자리가 없다.
+  func proposalRequest(_ split: ItemSplitTarget) -> ShareProposalRequest? {
+    guard case .ready(let basis, let krw, let quote) = proposalBasis(split), let expense = rooms.expense(split.expense),
+      let shares = proposalShares(split), shares.reduce(0, { $0 + $1.krw }) == krw
+    else { return nil }
+    return ShareProposalRequest(
+      expenseID: expense.id, expectedVersion: expense.version, basis: basis, krwTotal: krw,
+      fxQuoteID: quote?.quoteID, shares: shares)
+  }
+
+  func requestProposalSend(_ split: ItemSplitTarget) {
+    guard proposalRequest(split) != nil else { return }
+    proposalConfirmation = split
+  }
+
+  /// 확인 창에서 "보내기"를 누른 뒤에만 보낸다. 창을 연 뒤 값이 바뀌었으면(장부 새로고침 등) 보내지 않고 다시 확인하게 한다.
+  func confirmProposalSend(_ shown: ShareProposalRequest) async {
+    guard let split = proposalConfirmation else { return }
+    proposalConfirmation = nil
+    guard let request = proposalRequest(split), request == shown else { return }
+    await rooms.propose(request, target: split.expense)
   }
 
   /// 계산한 몫을 지출 검토의 "직접 나누기"에 채우고 검토로 돌아간다. 서버에는 아무것도 보내지 않는다(방장이 "포함하기"를 눌러야 간다).

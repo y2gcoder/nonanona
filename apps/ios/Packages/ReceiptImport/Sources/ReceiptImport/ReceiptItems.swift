@@ -371,6 +371,11 @@ public struct ItemPlan: Codable, Equatable, Sendable {
 public struct ItemMemberShare: Equatable, Sendable {
   public let member: String
   public let krw: Int
+
+  public init(member: String, krw: Int) {
+    self.member = member
+    self.krw = krw
+  }
 }
 
 /// 품목별 나누기 결과. 어느 경우든 몫은 "직접 나누기" 입력으로만 들어가고, 방장이 "포함하기"를 눌러야 서버에 간다.

@@ -323,6 +323,25 @@
       return ReviewedExpense(version: r.version, revision: r.revision, replayed: r.replayed)
     }
 
+    /// 품목 나누기 제안 몫(ADR-0011). 본문은 `body(for:)`가 만드는 키만 담는다.
+    func propose(_ proposal: ShareProposalRequest, in trip: TripID) async throws -> SubmittedProposal {
+      let data = try await call("propose_expense_shares", Self.body(for: proposal))
+      guard let r = try? LocalJSON.decoder.decode(LocalJSON.ProposalSubmitted.self, from: data),
+        r.expenseId == proposal.expenseID
+      else { throw SettlementFailure.unknown }
+      return SubmittedProposal(proposalID: r.proposalId, replayed: r.replayed)
+    }
+
+    /// 제안 요청 본문: 지출·버전·요청 키·원화 기준·합계·(예상액이면) 고시값·사람마다 {구성원 ID, 원}. 다른 키는 없다.
+    static func body(for proposal: ShareProposalRequest) -> [String: Any] {
+      [
+        "p_expense": proposal.expenseID, "p_expected_version": proposal.expectedVersion,
+        "p_request_id": proposal.requestID.uuidString.lowercased(), "p_krw_basis": proposal.basis.rawValue,
+        "p_krw_total": proposal.krwTotal, "p_fx_quote_id": proposal.fxQuoteID.map { $0 as Any } ?? NSNull(),
+        "p_shares": proposal.shares.map { ["user_id": $0.member.value, "krw": $0.krw] as [String: Any] },
+      ]
+    }
+
     func preview(_ trip: TripID) async throws -> SettlementPreview {
       let data = try await call("preview_settlement", ["p_trip": trip.value])
       guard let p = try? LocalJSON.decoder.decode(LocalJSON.Preview.self, from: data) else {
@@ -385,6 +404,7 @@
       case .http(_, "fx_correction_required"): return .fxCorrectionRequired
       case .http(_, "fx_replacement_unavailable"): return .fxReplacementUnavailable
       case .http(_, "fx_not_superseded"): return .fxNothingToKeep
+      case .http(_, "uploader_only"): return .uploaderOnly
       case .http(_, let code?) where rejectedCodes.contains(code): return .rejected
       case .http(_, "not_authenticated"): return .sessionExpired
       case .http(_, let code?) where LocalTripGateway.sessionEndedCodes.contains(code): return .sessionExpired
@@ -512,6 +532,39 @@
       let foreignMinor: Int
     }
 
+    struct ProposalSubmitted: Decodable {
+      let proposalId: String
+      let expenseId: String
+      let replayed: Bool
+    }
+
+    /// 장부의 품목 나누기 제안. 기준·상태·몫이 하나라도 맞지 않으면 nil(→ 장부 전체 `.unknown`).
+    struct ShareProposalRow: Decodable {
+      let proposalId: String
+      let proposedBy: String
+      let expenseVersion: Int
+      let krwBasis: String
+      let krwTotal: Int
+      let fxQuoteId: String?
+      let shares: [Share]
+      let state: String
+
+      func value(currency: String, uploadedBy: String, version: Int) -> ShareProposal? {
+        guard let basis = KRWBasis(rawValue: krwBasis), let state = ShareProposal.State(rawValue: state),
+          proposedBy == uploadedBy, expenseVersion >= 1, expenseVersion <= version,
+          krwTotal > 0, krwTotal < SharePlan.maxKRW, !shares.isEmpty,
+          shares.allSatisfy({ $0.krw > 0 }), Set(shares.map(\.userId)).count == shares.count,
+          shares.reduce(0, { $0 + $1.krw }) == krwTotal,
+          (basis == .referenceEstimate) == (fxQuoteId != nil),
+          basis == .krwOriginal ? currency == "KRW" : currency == "JPY"
+        else { return nil }
+        return ShareProposal(
+          id: proposalId, proposedBy: MemberID(value: proposedBy), expenseVersion: expenseVersion, basis: basis,
+          krwTotal: krwTotal, fxQuoteID: fxQuoteId,
+          shares: shares.map { ShareLine(member: MemberID(value: $0.userId), krw: $0.krw) }, state: state)
+      }
+    }
+
     struct Expense: Decodable {
       let expenseId: String
       let version: Int
@@ -538,6 +591,8 @@
       let fxSuperseded: Bool?
       /// 열린 방 장부에만 있다(ADR-0009). null이면 정정 없음.
       let fxCorrection: String?
+      /// 올린 사람과 방장의 장부에만 있다(ADR-0011). 확정본·다른 구성원은 null.
+      let shareProposal: ShareProposalRow?
 
       /// 원화 기준과 그 근거가 서로 맞을 때만 값. 모르는 기준, 근거 없는 예상액·취득 원가, 예상 표시가 기준과 다른 값은
       /// nil이다(예상액을 실제 청구액처럼 그리지 않는다).
@@ -610,6 +665,15 @@
             return nil
           }
         }
+        let shareProposalValue: ShareProposal?
+        if let shareProposal {
+          guard entry == "receipt",
+            let parsed = shareProposal.value(currency: currency, uploadedBy: uploadedBy, version: version)
+          else { return nil }
+          shareProposalValue = parsed
+        } else {
+          shareProposalValue = nil
+        }
         return LedgerExpense(
           id: expenseId, version: version, isManual: entry == "manual", uploadedBy: MemberID(value: uploadedBy),
           date: expenseDate, amountMinor: amountMinor, currency: currency, merchant: merchant, status: state,
@@ -617,7 +681,7 @@
           shares: shares.map { ShareLine(member: MemberID(value: $0.userId), krw: $0.krw) },
           artifact: artifactPath.flatMap { path in artifactSha256.map { ReceiptArtifactRef(path: path, sha256: $0) } },
           fx: basis.1, acquisition: basis.2, fxProposal: proposal, fxSuperseded: fxSuperseded ?? false,
-          fxCorrection: correction)
+          fxCorrection: correction, shareProposal: shareProposalValue)
       }
     }
 
@@ -634,6 +698,10 @@
       var ledger: RoomLedger? {
         let mapped = expenses.compactMap(\.value)
         guard mapped.count == expenses.count else { return nil }
+        // 제안 몫은 이 방 구성원에게만 갈 수 있다.
+        let ids = Set(members.map(\.userId))
+        guard mapped.allSatisfy({ $0.shareProposal?.shares.allSatisfy { ids.contains($0.member.value) } ?? true })
+        else { return nil }
         return RoomLedger(
           tripID: TripID(value: tripId), name: tripName, isFinalized: status == "finalized", revision: revision,
           isHost: myRole == "host", me: MemberID(value: me), members: members.map(\.value), expenses: mapped)

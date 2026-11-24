@@ -165,6 +165,10 @@ run = "python3 -I scripts/fx-correction-contract.py"
 description = "정정 정책 마이그레이션 업그레이드 검사: 앞 마이그레이션까지 되돌려 v2 확정본·확정·검토 요청·정정된 포함 예상액을 만든 뒤 새 마이그레이션을 올려 본다. 로컬 DB를 지우고 끝나면 local:reset 상태로 되돌린다. 인자: [결과 JSON]"
 run = "python3 -I scripts/fx-correction-upgrade-check.py"
 
+[tasks."local:share-proposal-contract"]
+description = "품목 나누기 제안 몫 계약 시험(ADR-0011, 실제 HTTP: 올린 사람만·정확한 몫·원화 기준 묶기·고시값 정정·재시도·잠금 경쟁·보이는 사람·확정에 닿지 않음). local:up 또는 local:reset 뒤. 인자: [결과 JSON]"
+run = "python3 -I scripts/share-proposal-contract.py"
+
 [tasks."fx:fixture"]
 description = "기준환율 가상 시험값(시장 환율 아님, data_origin=fixture)을 로컬 DB에 넣는다. local:reset이 이미 넣는다"
 run = "python3 -I scripts/ecos-fx.py fixture"

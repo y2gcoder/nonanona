@@ -123,15 +123,31 @@ def screenshot(path):
 
 
 def scroll_to(timeout=30, **query):
-    """목록을 아래로, 그다음 위로 넘기며 찾는다."""
+    """화면을 넘겨 상단 막대와 화면 끝에 가리지 않는 항목을 찾는다."""
     deadline = time.time() + timeout
-    for swipe in ["540 1700 540 900"] * 6 + ["540 900 540 1700"] * 12:
-        n = find(**query)
-        if n and 150 < n.bounds[1] and n.bounds[3] < 2250:
+    for attempt in range(18):
+        nodes = dump()
+        if not nodes:
+            if time.time() > deadline:
+                break
+            time.sleep(0.6)
+            continue
+        left, top, right, bottom = nodes[0].bounds
+        height = bottom - top
+        top_limit = top + height // 8
+        bottom_limit = bottom - height // 16
+        n = find(nodes, **query)
+        if n and top_limit < n.center[1] < bottom_limit:
             return n
         if time.time() > deadline:
             break
-        sh(f"input swipe {swipe} 300")
+        # 잘린 항목이 보이면 그 자리에서 화면 안으로 옮긴다.
+        scroll_down = n.center[1] > top_limit if n else attempt < 6
+        x = (left + right) // 2
+        upper = top + height * 3 // 8
+        lower = top + height * 7 // 10
+        start, end = (lower, upper) if scroll_down else (upper, lower)
+        sh(f"input swipe {x} {start} {x} {end} 300")
         time.sleep(0.6)
     raise TimeoutError(f"not found while scrolling: {query}")
 

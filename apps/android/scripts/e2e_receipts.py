@@ -76,10 +76,8 @@ def main():
         u.adb("push", str(FIXTURES / name), "/sdcard/Pictures/NonanonaReceipts/")
         u.sh(f"am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Pictures/NonanonaReceipts/{name}")
     # debug 빌드만 읽는 검증 설정: 처리를 늦추고 4번째 사진의 첫 시도를 실패시킨다.
-    u.sh(f"am start -n {PKG}/.MainActivity")
-    time.sleep(2)
-    base.run_as("printf \"delayMillisPerItem=2500\\nfailFirstAttemptAtPosition=4\\n\" > files/debug-processing.properties")
-    u.sh(f"am force-stop {PKG}")
+    settings = 'printf "delayMillisPerItem=2500\\nfailFirstAttemptAtPosition=4\\n"'
+    u.sh(f"run-as {PKG} sh -c 'mkdir -p files && {settings} > files/debug-processing.properties'")
 
     base.share_from_files(NAMES, folder="NonanonaReceipts")
     u.wait(id="draft_row", timeout=30)
@@ -95,7 +93,7 @@ def main():
     log(f"SIGKILL app pid {victim} with {processed}/10 processed")
     at_kill = summary("at-kill")
     assert any(i["state"] == "Processing" for i in at_kill["items"]), "photos must be mid-read at kill time"
-    base.run_as("rm -f files/debug-processing.properties")
+    u.sh(f"run-as {PKG} rm -f files/debug-processing.properties")
 
     u.sh("input keyevent KEYCODE_HOME")
     u.sh(f"am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10200000 -n {PKG}/.MainActivity")
@@ -118,13 +116,15 @@ def main():
             break
         time.sleep(0.5)
     assert scroll_status(4) == ["확인 필요"]
+    unreadable_attempts = next(i["attempts"] for i in manifest()["items"] if i["position"] == unreadable)
     u.tap(u.scroll_to(id=f"item_{unreadable}_retry"))
-    time.sleep(3)
     for _ in range(120):
-        m = manifest()
-        if next(i for i in m["items"] if i["position"] == unreadable)["state"] == "Failed":
+        item = next(i for i in manifest()["items"] if i["position"] == unreadable)
+        if item["state"] == "Failed" and item["attempts"] == unreadable_attempts + 1:
             break
         time.sleep(0.5)
+    else:
+        raise AssertionError(f"unreadable receipt {unreadable} did not finish exactly one retry")
     after = {p: scroll_status(p) for p in range(1, 11)}
     assert after[unreadable] == ["읽지 못함"]
     for p in range(1, 11):

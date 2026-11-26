@@ -58,6 +58,11 @@ public struct OCRProposal: Codable, Equatable, Sendable {
   public func maskPolygons(lineIDs: Set<Int>, regions: [MaskRegion]) -> [[CGPoint]] {
     Masking.polygons(ocr: ocr, selected: lineIDs, automatic: Set(suggestedMaskLineIDs), regions: regions)
   }
+
+  /// 굽기와 미리보기가 쓰는 칠하는 순서의 가림(`MaskPlan`).
+  public func maskPlan(lineIDs: Set<Int>, regions: [MaskRegion]) -> MaskPlan {
+    Masking.plan(ocr: ocr, selected: lineIDs, automatic: Set(suggestedMaskLineIDs), regions: regions)
+  }
 }
 
 /// 사진 한 장을 읽는다. 처리기의 작업 스레드에서 동기로 부른다.
@@ -289,8 +294,7 @@ enum ProposalBuilder {
       ocr: ocr,
       fields: AllowedReceiptFields(date: date, amountMinor: total.amount, currency: currency, merchant: merchant),
       suggestedMaskLineIDs: masks.ids.sorted(),
-      needsMaskReview: masks.unmatchedLabel || masks.isTilted
-        || Masking.overlapsKeptNeighbor(ocr: ocr, selected: masks.ids))
+      needsMaskReview: masks.unmatchedLabel || masks.isTilted)
   }
 
   /// 결제일 라벨(결제일·결제일시·결제 일자, 라벨 끝을 확인해 `결제 일정`은 아니다). 숙소 화면의 체크인처럼 앞에 나오는 다른 날짜보다 우선한다.

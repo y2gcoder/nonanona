@@ -1173,14 +1173,70 @@
     },
     {
       "id": "quantity-overlapped-by-weak-label",
-      "reviews": ["review:codex-pr14-4", "adr:0013"],
+      "reviews": ["review:codex-pr14-4", "review:codex-pr14-5", "adr:0013"],
+      "note": "수량 잉크가 예약 591 민감 OCR 상자 안에 있다. 불변식 1(민감 상자는 항상 다 덮음)에 따라 덮이며 상자 겹침 불가피로 본다.",
       "size": [1000, 1000],
       "lines": [
         {"text": "数量", "box": [173, 662, 213, 686]},
         {"text": "2", "box": [224, 658, 235, 682]},
         {"text": "예약 591", "box": [225, 663, 304, 687]}
       ],
-      "expect": {"masked": {"booking": [273, 666, 302, 684]}, "visible": {"quantity": [226, 661, 233, 679]}, "needsReview": false, "reasons": []}
+      "expect": {"masked": {"booking": [273, 666, 302, 684]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "separate-number-overlapping-merchant-number",
+      "reviews": ["review:codex-pr14-5", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text":  "가맹점 번호 1384", "box":  [40, 600, 220, 620]},
+        {"text":  "12345678", "box":  [190, 600, 310, 620]}
+      ],
+      "expect": {"masked": {"front": [192, 603, 218, 617], "rest": [218, 603, 308, 617]}, "visible": {"merchant": [42, 603, 188, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "mixed-number-part-overlapping-merchant-number",
+      "reviews": ["review:codex-pr14-5", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text":  "가맹점 번호 1384", "box":  [40, 600, 220, 620]},
+        {"text":  "承認番号 12345678 ¥320", "box":  [85, 600, 405, 620],  "numberBox":  [190, 600, 310, 620]}
+      ],
+      "expect": {"masked": {"front": [192, 603, 218, 617], "rest": [218, 603, 308, 617]}, "visible": {"merchant": [42, 603, 83, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "random-price-overlapping-number-box-outside-kept",
+      "reviews": ["review:codex-pr14-5", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text":  "회원", "box":  [40, 600, 80, 620]},
+        {"text":  "6086", "box":  [188, 597, 232, 617]},
+        {"text":  "1,200円", "box":  [225, 603, 300, 623]},
+        {"text":  "₩24,100", "box":  [333, 599, 410, 619]},
+        {"text":  "수량", "box":  [40, 629, 80, 649]},
+        {"text":  "120", "box":  [98, 629, 131, 649]}
+      ],
+      "expect": {"masked": {"number": [190, 600, 230, 614]}, "visible": {"priceOutside": [232, 606, 298, 620], "won": [335, 602, 408, 616], "quantity": [100, 632, 129, 646]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "random-total-overlapping-inline-value-outside-kept",
+      "reviews": ["review:codex-pr14-5", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text":  "승인 4976", "box":  [40, 597, 130, 617]},
+        {"text":  "合計 1,408円", "box":  [125, 601, 246, 621]}
+      ],
+      "expect": {"masked": {"number": [88, 600, 128, 614]}, "visible": {"totalOutside": [130, 604, 244, 618]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "tilted-card-box-beside-quantity",
+      "reviews": ["review:codex-pr14-5", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text":  "Qty", "box":  [40, 635, 73, 655]},
+        {"text":  "3", "box":  [78, 632, 89, 652]},
+        {"text":  "결제 카드 0019", "box":  [92, 633, 228, 656],  "corners":  [[92, 633],  [228, 636],  [228, 656],  [92, 653]]}
+      ],
+      "expect": {"masked": {"card": [186, 638, 226, 652]}, "visible": {"quantity": [80, 635, 87, 649]}, "needsReview": false, "reasons": []}
     }
   ]
 }

@@ -891,7 +891,7 @@ fun rereadLeaks(
         val cy = g.ys.average()
         val angle = g.ownAngle ?: 0.0
         val e = g.textHeight / 4
-        val inMask = shapes.any { s -> listOf(-e, 0.0, e).any { d -> s.contains(cx - d * sin(angle), cy + d * cos(angle)) } }
+        val inMask = listOf(-e, 0.0, e).any { d -> shapes.covers(cx - d * sin(angle), cy + d * cos(angle)) }
         val windows = text.windowed(4).toSet()
         if (inMask && windows.any { it in grams }) return@any true
         // 같은 행(그 1차 줄의 방향으로 잰 행)에서는 그 줄 값의 4자 조각만 센다.
@@ -904,7 +904,23 @@ fun rereadLeaks(
     }
 }
 
-/** 점이 가림 안에 있는지(사각형은 반열린 구간, 네 점은 볼록 사각형). */
+/** 칠하는 순서의 가림 목록에서 점이 검정인지: 그 점을 품은 마지막 도형이 정한다([MaskShape.Restore]면 원본). */
+fun List<MaskShape>.covers(
+    x: Double,
+    y: Double,
+): Boolean {
+    var black = false
+    for (shape in this) {
+        if (shape is MaskShape.Restore) {
+            if (shape.area.contains(x, y)) black = false
+        } else if (shape.contains(x, y)) {
+            black = true
+        }
+    }
+    return black
+}
+
+/** 점이 도형 안에 있는지(사각형은 반열린 구간, 네 점은 볼록 사각형, 되돌림은 그 영역). */
 internal fun MaskShape.contains(
     x: Double,
     y: Double,
@@ -912,6 +928,10 @@ internal fun MaskShape.contains(
     when (this) {
         is MaskShape.Rect -> {
             x >= left && x < right && y >= top && y < bottom
+        }
+
+        is MaskShape.Restore -> {
+            area.contains(x, y)
         }
 
         is MaskShape.Quad -> {

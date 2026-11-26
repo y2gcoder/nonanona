@@ -21,19 +21,33 @@ object JvmFlattener : ReceiptFlattener {
         g.drawImage(source, 0, 0, null)
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_OFF)
         g.color = Color.BLACK
-        for (shape in shapes(source.width, source.height)) {
+
+        fun path(shape: MaskShape): java.awt.Shape =
             when (shape) {
                 is MaskShape.Rect -> {
-                    g.fillRect(shape.left, shape.top, shape.right - shape.left, shape.bottom - shape.top)
+                    java.awt.Rectangle(shape.left, shape.top, shape.right - shape.left, shape.bottom - shape.top)
                 }
 
                 is MaskShape.Quad -> {
-                    val path = Path2D.Double()
-                    path.moveTo(shape.xs[0], shape.ys[0])
-                    for (i in 1 until 4) path.lineTo(shape.xs[i], shape.ys[i])
-                    path.closePath()
-                    g.fill(path)
+                    Path2D.Double().apply {
+                        moveTo(shape.xs[0], shape.ys[0])
+                        for (i in 1 until 4) lineTo(shape.xs[i], shape.ys[i])
+                        closePath()
+                    }
                 }
+
+                is MaskShape.Restore -> {
+                    path(shape.area)
+                }
+            }
+        // 칠하는 순서대로: 되돌림 영역은 원본 픽셀을 다시 그린다.
+        for (shape in shapes(source.width, source.height)) {
+            if (shape is MaskShape.Restore) {
+                g.clip = path(shape.area)
+                g.drawImage(source, 0, 0, null)
+                g.clip = null
+            } else {
+                g.fill(path(shape))
             }
         }
         g.dispose()

@@ -6,7 +6,7 @@ import app.nonanona.feature.receiptimport.OcrLine
 import app.nonanona.feature.receiptimport.OcrResult
 import app.nonanona.feature.receiptimport.OcrTiles
 import app.nonanona.feature.receiptimport.ProposalBuilder
-import app.nonanona.feature.receiptimport.contains
+import app.nonanona.feature.receiptimport.covers
 import app.nonanona.feature.receiptimport.rereadLeaks
 import org.json.JSONArray
 import org.json.JSONObject
@@ -78,7 +78,7 @@ class CommonMaskPolicyTest {
                     val wrongPixel =
                         (box.getInt(1) until box.getInt(3)).any { y ->
                             (box.getInt(0) until box.getInt(2)).any { x ->
-                                shapes.any { it.contains(x + 0.5, y + 0.5) } != masked
+                                shapes.covers(x + 0.5, y + 0.5) != masked
                             }
                         }
                     if (wrongPixel) add("$id:$key.$name")

@@ -698,7 +698,8 @@ internal fun overlayShapes(
     val height = proposal?.ocr?.pixelHeight?.coerceAtLeast(1) ?: 1
     val lines = proposal?.ocr?.lines.orEmpty()
     val regionShapes = masked.regions.map { listOf(0.0, 1.0) to listOf(it.topPercent / 100.0, it.bottomPercent / 100.0) }
-    return Masking.shapes(lines, masked.maskLineIds, width, height).map { shape ->
+    // 원본 보기 위 표시용: 검정 도형만 그린다(되돌림 영역은 사본 미리보기에서 보인다).
+    return Masking.shapes(lines, masked.maskLineIds, width, height).filter { it !is MaskShape.Restore }.map { shape ->
         when (shape) {
             is MaskShape.Rect -> {
                 listOf(shape.left.toDouble() / width, shape.right.toDouble() / width) to
@@ -707,6 +708,10 @@ internal fun overlayShapes(
 
             is MaskShape.Quad -> {
                 shape.xs.map { it / width } to shape.ys.map { it / height }
+            }
+
+            is MaskShape.Restore -> {
+                error("filtered")
             }
         }
     } + regionShapes

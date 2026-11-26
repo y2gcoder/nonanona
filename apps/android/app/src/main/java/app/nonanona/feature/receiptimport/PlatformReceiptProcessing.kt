@@ -211,19 +211,35 @@ object CanvasReceiptFlattener : ReceiptFlattener {
                 style = Paint.Style.FILL
                 isAntiAlias = false
             }
-        shapes(source.width, source.height).forEach { shape ->
-            when (shape) {
-                is MaskShape.Rect -> {
-                    canvas.drawRect(shape.left.toFloat(), shape.top.toFloat(), shape.right.toFloat(), shape.bottom.toFloat(), paint)
-                }
 
-                is MaskShape.Quad -> {
-                    val path = Path()
-                    path.moveTo(shape.xs[0].toFloat(), shape.ys[0].toFloat())
-                    for (i in 1 until 4) path.lineTo(shape.xs[i].toFloat(), shape.ys[i].toFloat())
-                    path.close()
-                    canvas.drawPath(path, paint)
+        fun path(shape: MaskShape): Path =
+            Path().apply {
+                when (shape) {
+                    is MaskShape.Rect -> {
+                        addRect(shape.left.toFloat(), shape.top.toFloat(), shape.right.toFloat(), shape.bottom.toFloat(), Path.Direction.CW)
+                    }
+
+                    is MaskShape.Quad -> {
+                        moveTo(shape.xs[0].toFloat(), shape.ys[0].toFloat())
+                        for (i in 1 until 4) lineTo(shape.xs[i].toFloat(), shape.ys[i].toFloat())
+                        close()
+                    }
+
+                    is MaskShape.Restore -> {
+                        addPath(path(shape.area))
+                    }
                 }
+            }
+        // 칠하는 순서대로: 검정 도형은 칠하고, 되돌림 영역은 원본 픽셀을 다시 그린다.
+        shapes(source.width, source.height).forEach { shape ->
+            if (shape is MaskShape.Restore) {
+                canvas.save()
+                canvas.clipPath(path(shape.area))
+                // 원본(불투명)만 다시 그린다. 흰색을 먼저 칠하면 클립 경계에서 원본과 섞인다.
+                canvas.drawBitmap(source, 0f, 0f, null)
+                canvas.restore()
+            } else {
+                canvas.drawPath(path(shape), paint)
             }
         }
         return ByteArrayOutputStream().also { check(output.compress(Bitmap.CompressFormat.PNG, 100, it)) }.toByteArray()

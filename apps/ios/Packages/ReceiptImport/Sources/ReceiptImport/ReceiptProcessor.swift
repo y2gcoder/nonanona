@@ -224,7 +224,7 @@ public actor ReceiptProcessor {
   ) throws -> MaskedArtifact {
     try Masking.flatten(
       original: store.photoURL(draftID, manifest.items[index].photoFileName),
-      polygons: proposal.maskPolygons(lineIDs: maskLineIDs, regions: regions))
+      plan: proposal.maskPlan(lineIDs: maskLineIDs, regions: regions))
   }
 
   /// 기기 밖으로 보낼 수 있는 것: 가린 사본이 있는 확인한 영수증만. 가림 사본이 확인 당시와 같고, 허용한 PNG 청크만 있고,
@@ -333,10 +333,11 @@ public actor ReceiptProcessor {
       let image = try ImageLoading.cgImage(original)
       guard MaskImageQuality(image, ocr: proposal.ocr)?.needsReview == false else { return true }
       let lineIDs = Set(proposal.suggestedMaskLineIDs)
-      let polygons = proposal.maskPolygons(lineIDs: lineIDs, regions: [])
+      let plan = proposal.maskPlan(lineIDs: lineIDs, regions: [])
+      let polygons = plan.drawn
       // 확인에 쓰는 렌더러와 같은 픽셀을 메모리에서 다시 읽는다.
       let reread = try VisionReceiptRecognizer().recognize(
-        Masking.render(image, polygons: polygons), cancellation: cancellation)
+        Masking.render(image, plan: plan), cancellation: cancellation)
       return ResidualMaskCheck.hasResidue(original: proposal.ocr, reread: reread, lineIDs: lineIDs, polygons: polygons)
     } catch {
       return true

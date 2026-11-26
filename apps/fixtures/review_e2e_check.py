@@ -25,10 +25,11 @@ import check_artifact  # noqa: E402  (같은 폴더의 PNG 디코더)
 
 SENSITIVE_KEYS = ("TEL", "カード", "会員", "承認", "予約")
 ALLOWED_CURRENCIES = {"JPY", "KRW", "USD", "EUR"}
-# 뒤의 열은 정산 검토 값(ADR-0006): 방장이 서버에서 정하며 기기에서 오는 값이 아니다.
+# 뒤의 열은 정산 검토·환산 근거(ADR-0006, ADR-0008)다.
 EXPENSE_COLUMNS = ["id", "trip_id", "client_request_id", "request_fingerprint", "uploaded_by", "expense_date", "amount_minor",
                    "currency", "merchant", "artifact_path", "artifact_sha256", "created_at",
-                   "entry", "payer_id", "status", "krw_amount", "krw_basis", "hold_reason", "version", "updated_at", "updated_by"]
+                   "entry", "payer_id", "status", "krw_amount", "krw_basis", "hold_reason", "version", "updated_at", "updated_by",
+                   "fx_quote_id", "fx_rate", "fx_quote_unit", "fx_rate_date", "acq_krw", "acq_foreign_minor"]
 
 
 def norm(o):

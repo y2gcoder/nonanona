@@ -32,18 +32,23 @@ struct SensitiveLines {
       // 같은 행의 다른 라벨은 이 라벨의 값이 닿는 범위의 경계다. 값은 시작점이 그 값의 중심보다 앞서는 라벨 중 가장 가까운 라벨의
       // 것이다(상자가 겹쳐도 같다). 가격·날짜 상자는 경계가 아니다(값 뒤 조각을 계속 묶고, 가격 자체는 묶지 않는다).
       let walls = row.filter { $0.text.hasLabel || $0.text.isWeakStandaloneLabel }
-      func owned(_ candidate: Row) -> Bool {
+      // 다른 필드명(수량·결제 금액 등)도 값의 소유자다. 그 필드의 값은 이 라벨이 묶지 않고 안내도 하지 않는다.
+      let fields = row.filter { $0.text.isFieldName }
+      // 값 중심보다 시작점이 앞서는 라벨·필드명 중 가장 가까운 것: 이 라벨이면 0, 다른 민감 라벨이면 1, 필드명이면 2, 없으면 nil.
+      func owner(_ candidate: Row) -> Int? {
         let mid = (candidate.left.x + candidate.right.x) / 2
-        return !walls.contains { wall in
-          guard wall.line.id != candidate.line.id else { return false }
-          if mid >= label.left.x { return wall.left.x > label.left.x && wall.left.x < mid }
-          let wallMid = (wall.left.x + wall.right.x) / 2
-          return wallMid > mid && wallMid < label.left.x
-        }
+        let owners =
+          [(label.left.x, 0)] + walls.filter { $0.line.id != candidate.line.id }.map { ($0.left.x, 1) }
+          + fields.filter { $0.line.id != candidate.line.id }.map { ($0.left.x, 2) }
+        return owners.filter { $0.0 < mid }.max { $0.0 < $1.0 }?.1
+      }
+      func owned(_ candidate: Row) -> Bool {
+        let who = owner(candidate)
+        return who == nil || who == 0
       }
       let same = row.filter(owned)
       for candidate in row
-      where !owned(candidate) && label.isNear(candidate) && !candidate.text.hasLabel
+      where owner(candidate) == 1 && label.isNear(candidate) && !candidate.text.hasLabel
         && !candidate.text.hasStrongNumber && candidate.text.isFragment(minDigits: 2)
       {
         skipped.insert(candidate.line.id)
@@ -54,8 +59,18 @@ struct SensitiveLines {
           && $0.left.x >= label.left.x
       }
       // 가장 가까운 다음 행이 다른 항목이면 그 너머의 숫자를 끌어오지 않는다.
+      // 다음 행 값의 왼쪽에 그 행의 다른 필드명(결제 금액 | 1200, 수량 | 120)이 있으면 그 필드의 값이다.
+      // 값 바로 왼쪽 상자가 숫자 없는 필드명이면 그 필드의 값이다(AB8972 같은 값 상자는 필드명이 아니다).
+      func ownedByRowLabel(_ candidate: Row) -> Bool {
+        let left = rows.filter { other in
+          other.line.id != candidate.line.id && other.line.id != label.line.id && candidate.sameRow(as: other)
+            && other.right.x <= candidate.left.x + candidate.height * 0.5
+        }.max { $0.right.x < $1.right.x }
+        return left?.text.hasFieldName == true
+      }
       let below = neighbors.filter {
         !label.sameRow(as: $0) && label.verticalOffset(to: $0) > 0 && label.isAligned(with: $0)
+          && !ownedByRowLabel($0)
       }
       let next = below.map { label.verticalOffset(to: $0) }.min()
       let continuation = below.filter {
@@ -69,14 +84,19 @@ struct SensitiveLines {
       selected.formUnion(fragments.map(\.line.id))
       // 떨어진 한 자리 묶음은 인라인 번호와 같은 행에서 보호 상자 앞에 이어질 때만 연결한다.
       var right = max(label.right.x, fragments.filter { label.sameRow(as: $0) }.map { $0.right.x }.max() ?? 0)
-      let following = same.filter { $0.left.x >= label.right.x }.sorted { $0.left.x < $1.left.x }
-      let beforeProtected = following.prefix { !$0.text.isProtected }
+      // 묶음의 끝은 보호 상자(가격·날짜)나 다른 라벨의 시작점이다(다열 행에서도 그 앞의 한 자리 묶음은 이 라벨의 값이다).
+      let following = row.filter { $0.left.x >= label.right.x }.sorted { $0.left.x < $1.left.x }
+      let beforeProtected = following.prefix { candidate in
+        !candidate.text.isProtected && !candidate.text.isFieldName
+          && !walls.contains { $0.line.id == candidate.line.id }
+      }
       let digits = beforeProtected.filter {
         let value = SensitiveText.canonical($0.text.text)
         return value.count == 1 && value.first?.isNumber == true
       }
       let maxGap = label.height * 0.85
       var foundDigit = false
+      var looseDigit = false
       for (index, digit) in digits.enumerated() {
         let gap = digit.left.x - right
         let startsChain =
@@ -84,16 +104,28 @@ struct SensitiveLines {
           && gap <= label.height * 12 && index + 2 < digits.count
           && digits[index + 1].left.x - digit.right.x <= maxGap
           && digits[index + 2].left.x - digits[index + 1].right.x <= maxGap
-        guard gap <= maxGap || startsChain else { continue }
+        guard gap <= maxGap || startsChain else {
+          // 가까운 한 자리 숫자를 묶을 근거가 없으면 확인을 안내한다.
+          if gap <= label.height * 12 && !selected.contains(digit.line.id) { looseDigit = true }
+          continue
+        }
         selected.insert(digit.line.id)
         right = max(right, digit.right.x)
         foundDigit = true
       }
       // 결제 화면의 "라벨 ……… 값" 행처럼 같은 행의 먼 칸이 이미 강한 번호로 가려지면 짝이 있는 라벨이다(ADR-0013).
-      let strongOnRow = same.contains { $0.text.hasStrongNumber && $0.left.x >= label.right.x }
+      // 다른 라벨 줄 안의 번호(승인번호 334522)는 그 라벨의 값이라 이 라벨의 짝이 아니다(Android와 같다).
+      let strongOnRow = same.contains { $0.text.hasStrongNumber && !$0.text.hasLabel && $0.left.x >= label.right.x }
       if label.text.valueRanges.isEmpty && fragments.isEmpty && !foundDigit && !strongOnRow && !numberWordValue {
         hasUnpairedLabel = true
       }
+      // 보호 상자 뒤라도 라벨 오른쪽 가까이 남은 한 자리 숫자 조각은 확인을 안내한다(Android와 같다).
+      let trailing = following.filter { candidate in
+        owned(candidate) && candidate.left.x - label.right.x <= label.height * 12
+          && SensitiveText.canonical(candidate.text.text).count == 1
+          && SensitiveText.canonical(candidate.text.text).first?.isNumber == true
+      }
+      if looseDigit || trailing.contains(where: { !selected.contains($0.line.id) }) { hasUnpairedLabel = true }
     }
     if !skipped.subtracting(selected).isEmpty { hasUnpairedLabel = true }
     ids = selected

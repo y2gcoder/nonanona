@@ -6,7 +6,7 @@ struct SensitiveText {
     #"(?<![A-Z])(?:TEL|phone|card|reservation|booking|PIN|approval|authori[sz]ation|member(?:ship)?|AUTH|APPR)(?![A-Z])|電話|カ[ー一\-]ド|会員|承認|予約\s*(?:番号|ID|コード|No)|お客様\s*番号|會員\s*(?:號碼|编号)|카드\s*번호|승인\s*번호|회원\s*번호|예약\s*번호|전화(?:\s*번호)?|연락처"#
   )
   /// "번호" 없이 읽힌 한국어 라벨 낱말(OCR이 "번호"를 빠뜨렸거나 따로 읽은 경우, ADR-0013, Android와 같다).
-  /// - 바로 뒤에 번호 값(숫자 2자리 이상이 든 영문·숫자 3자 이상)이 붙으면 라벨이다(`승인 4938`, `예약: AB12`).
+  /// - 바로 뒤에 번호 값(숫자 2자리 이상이 든 영문·숫자)이 붙으면 라벨이다(`승인 4938`, `승인 46`, `예약: AB12`).
   /// - 줄이 그 낱말로 끝나면(`승인`, `결제 카드`) 값이 따로 읽힌 독립 라벨이다. `SensitiveLines`가 강한 라벨처럼 같은 행·다음 행에서
   ///   값을 찾고, 못 찾으면 확인을 안내한다.
   /// - 문구 속 낱말(`예약 확정`, `가상카드 일시불`, `예약 2명`)은 라벨이 아니다.
@@ -70,7 +70,7 @@ struct SensitiveText {
       let token = hit.range(at: 1)
       let value = (tail as NSString).substring(with: token)
       let shifted = NSRange(location: start + token.location, length: token.length)
-      return value.filter(\.isNumber).count >= 2 && value.filter { $0.isLetter || $0.isNumber }.count >= 3
+      return value.filter(\.isNumber).count >= 2
         && !boundaries.contains { NSIntersectionRange($0, shifted).length > 0 }
     }
     let labelRanges = (strongLabels + weakLabels).sorted { $0.location < $1.location }
@@ -117,6 +117,18 @@ struct SensitiveText {
   }
 
   var hasLabel: Bool { !labelRanges.isEmpty }
+  private static let fieldNames = expression(
+    #"수량|数量|個数|(?<![A-Z])QTY(?![A-Z])|금액|金額|단가|単価|가격|価格|小計|소계|합계|合計|お会計|결제\s*수단|상태|状態"#)
+
+  /// 값을 가진 다른 필드의 이름(수량·금액·소계·합계·결제수단·상태 등, 숫자 없음). 같은 행·다음 행 값의 소유자다(Android와 같다).
+  var isFieldName: Bool {
+    !hasLabel && !text.contains { $0.isNumber }
+      && Self.fieldNames.firstMatch(in: text, range: NSRange(location: 0, length: text.utf16.count)) != nil
+  }
+
+  /// 숫자 없이 글자(한글·한자·가나·영문)만 든 필드명 상자. 다음 행 값이 그 행의 다른 필드 것인지 볼 때 쓴다.
+  var hasFieldName: Bool { text.contains { $0.isLetter } && !text.contains { $0.isNumber } }
+
   /// "번호 4938"처럼 약한 라벨 뒤에 따로 읽힌 "번호…" 조각.
   var startsWithNumberWord: Bool { text.drop { $0.isWhitespace }.hasPrefix("번호") }
   var hasStrongNumber: Bool { !strongNumberRanges.isEmpty || (!containsBookingForm && isFragment(minDigits: 6)) }

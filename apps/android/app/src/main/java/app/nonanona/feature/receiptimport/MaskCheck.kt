@@ -396,7 +396,7 @@ internal object SensitiveText {
 
     /**
      * "번호" 없이 읽힌 한국어 라벨 낱말(OCR이 "번호"를 빠뜨렸거나 따로 읽은 경우, ADR-0013, iOS와 같다).
-     * - 바로 뒤에 번호 값(숫자 2자리 이상이 든 영문·숫자 3자 이상)이 붙으면 그 줄이 라벨이다(`승인 4938`, `예약: AB12`).
+     * - 바로 뒤에 번호 값(숫자 2자리 이상이 든 영문·숫자)이 붙으면 그 줄이 라벨이다(`승인 4938`, `승인 46`, `예약: AB12`).
      * - 줄이 그 낱말로 끝나면(`승인`, `결제 카드`) 값이 따로 읽힌 독립 라벨이다. [MaskSelector]가 강한 라벨처럼 같은 행·다음 행에서
      *   값을 찾고, 못 찾으면 확인을 안내한다.
      * - 문구 속 낱말(`예약 확정`, `가상카드 일시불`, `예약 2명`)은 라벨이 아니다.
@@ -413,12 +413,25 @@ internal object SensitiveText {
     private fun hasWeakInlineValue(text: String): Boolean =
         weakValue.findAll(withoutStoreNumbers(withoutPricesAndDates(text))).any { m ->
             val value = m.groupValues[1]
-            value.count { it in '0'..'9' } >= 2 && value.count { it.isLetterOrDigit() } >= 3
+            value.count { it in '0'..'9' } >= 2
         }
 
     /** 값이 따로 읽힌 독립 약한 라벨(줄이 약한 라벨 낱말로 끝난다). 강한 라벨 줄은 아니다. */
     fun isWeakStandaloneLabel(text: String): Boolean =
         !isLabel(text) && weakEnding.containsMatchIn(withoutStoreNumbers(prepared(text)).trimEnd())
+
+    /** 값을 가진 다른 필드의 이름(수량·금액·소계·합계·결제수단·상태 등, 숫자 없음). 같은 행·다음 행 값의 소유자다(iOS와 같다). */
+    private val fieldName =
+        Regex("수량|数量|個数|${NL}QTY$NR|금액|金額|단가|単価|가격|価格|小計|소계|합계|合計|お会計|결제\\s*수단|상태|状態", RegexOption.IGNORE_CASE)
+
+    fun isFieldName(text: String) = normalized(text).let { t -> fieldName.containsMatchIn(t) && t.none { it.isDigit() } } && !isLabel(text)
+
+    /** 가게 정보 상자(주소·레지·단말·등록·사업자·가맹점 번호). 가림 띠가 넘어가지 않는다. */
+    fun isStoreBox(text: String) =
+        !isLabel(text) && (
+            storeLine.containsMatchIn(prepared(text)) || storeNumber.containsMatchIn(normalized(text)) ||
+                Regex("登録番号|레지").containsMatchIn(normalized(text))
+        )
 
     /** "번호 4938"처럼 약한 라벨 뒤에 따로 읽힌 "번호…" 조각. */
     fun startsWithNumberWord(text: String) = normalized(text).trimStart().startsWith("번호")
@@ -588,7 +601,7 @@ internal object SensitiveText {
 
     /** 라벨에 딸린 번호가 같은 줄에 있다(가격·날짜 밖 숫자 3자리 이상, 영문·숫자 값, 카드 표기나 별표 3개 이상). */
     fun hasPayload(text: String): Boolean {
-        if (isCardNotation(text) || stars(text) >= 3 || digits(text) >= 3) return true
+        if (isCardNotation(text) || stars(text) >= 3 || digits(text) >= 3 || hasWeakInlineValue(text)) return true
         return alphanumericValue.containsMatchIn(label.replace(withoutPricesAndDates(text), " "))
     }
 
@@ -699,6 +712,7 @@ internal object MaskSelector {
         }
         // 다른 라벨의 칸이라 건너뛴 짧은 번호 조각. 끝까지 아무 라벨도 가리지 않으면 확인을 안내한다.
         val skipped = linkedSetOf<Int>()
+        val loose = linkedSetOf<Int>()
         for (g in geometry) {
             val text = g.line.text
             // 독립 약한 라벨(승인 | 4938, 승인 / 다음 행 4938)은 강한 라벨과 같이 값을 찾고, 못 찾으면 안내한다.
@@ -721,6 +735,16 @@ internal object MaskSelector {
                         o !== g && sameRow(g, o, theta) &&
                             (SensitiveText.isLabel(o.line.text) || SensitiveText.isWeakStandaloneLabel(o.line.text))
                     }.map { it.uRange(theta) }
+            // 다른 필드명(수량·결제 금액 등)도 값의 소유자다. 그 필드의 값은 이 라벨이 묶지 않고 안내도 하지 않는다.
+            val fields =
+                geometry.filter { o -> o !== g && sameRow(g, o, theta) && SensitiveText.isFieldName(o.line.text) }.map { it.uRange(theta) }
+
+            /** 값 중심보다 시작점이 앞서는 라벨·필드명 중 가장 가까운 것(없으면 null). 이 라벨이면 0, 다른 민감 라벨이면 1, 필드명이면 2. */
+            fun owner(mid: Double): Int? {
+                val candidates =
+                    listOf(left to 0) + walls.map { it.first to 1 } + fields.map { it.first to 2 }
+                return candidates.filter { it.first < mid }.maxByOrNull { it.first }?.second
+            }
             for (o in geometry) {
                 if (o === g) continue
                 val other = o.line.text
@@ -741,10 +765,10 @@ internal object MaskSelector {
                         continue
                     }
                     val mid = (ol + or) / 2
-                    val blocked =
-                        walls.any { (wl, wr) -> if (mid >= left) wl > left && wl < mid else (wl + wr) / 2 in mid..left }
+                    val owner = owner(mid)
                     val short = near && SensitiveText.isNumberFragment(other)
-                    if (blocked) {
+                    if (owner == 2) continue
+                    if (owner == 1) {
                         if (short && !SensitiveText.isNumberFormat(other)) skipped += o.line.id
                         continue
                     }
@@ -764,6 +788,17 @@ internal object MaskSelector {
                 if (gap > limit) continue
                 val other = o.line.text
                 if (SensitiveText.isLabel(other) || SensitiveText.hasDate(other)) continue
+                // 다음 행 값의 왼쪽에 그 행의 다른 필드명(결제 금액 | 1200, 수량 | 120)이 있으면 그 필드의 값이다(iOS와 같다).
+                val (vl, _) = o.uRange(theta)
+                val (vt, vb) = o.vRange(theta)
+                // 값 바로 왼쪽 상자가 숫자 없는 필드명이면 그 필드의 값이다(AB8972 같은 값 상자는 필드명이 아니다).
+                val leftNeighbor =
+                    geometry
+                        .filter { b -> b !== o && b !== g && sameRow(o, b, theta) && b.uRange(theta).second <= vl + 0.5 * (vb - vt) }
+                        .maxByOrNull { it.uRange(theta).second }
+                val ownedByRowLabel =
+                    leftNeighbor != null && leftNeighbor.line.text.let { t -> t.any { it.isLetter() } && t.none { it.isDigit() } }
+                if (ownedByRowLabel) continue
                 val aligned = below.any { it.first === o }
                 if ((aligned && SensitiveText.isNumberFragment(other, minDigits = 3)) || SensitiveText.isStrongFragment(other)) {
                     chosen += o.line.id
@@ -771,8 +806,27 @@ internal object MaskSelector {
                 }
             }
             if (!paired) unpaired = true
+            // 라벨 오른쪽 가까이(글자 높이 12배 안)의 한 자리 숫자 조각은 가림 띠가 덮는다. 그 사이에 띠가 멈추는 상자(가격·날짜·가게
+            // 정보·필드명)가 있으면 띠가 닿지 않으므로 확인을 안내한다(iOS와 같은 결과).
+            val stops =
+                geometry
+                    .filter { o ->
+                        o !== g && sameRow(g, o, theta) &&
+                            o.line.text.let {
+                                SensitiveText.isProtectedBox(it) || SensitiveText.isStoreBox(it) ||
+                                    SensitiveText.isFieldName(it)
+                            }
+                    }.map { it.uRange(theta).first }
+            for (o in geometry) {
+                if (o === g || !sameRow(g, o, theta)) continue
+                val (ol, _) = o.uRange(theta)
+                val digit = SensitiveText.compact(o.line.text).let { it.length == 1 && it[0].isDigit() }
+                val beyondStop = stops.any { it >= right && it < ol }
+                if (digit && owner(ol) == 0 && ol >= right && ol - right <= 12 * h && beyondStop) loose += o.line.id
+            }
         }
         if (skipped.any { it !in chosen }) unpaired = true
+        if (loose.any { it !in chosen }) unpaired = true
         val ids = ocr.lines.map { it.id }.filter { it in chosen }
         // 낱말 상자로 번호 부분을 나눈 줄([OcrLine.numberBox])은 그 부분만 덮으므로 섞인 줄 안내가 없다.
         val mixed = ocr.lines.any { it.id in chosen && it.numberBox == null && SensitiveText.isMixed(it.text) }

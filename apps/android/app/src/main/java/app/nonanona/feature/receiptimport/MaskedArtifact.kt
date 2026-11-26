@@ -76,9 +76,33 @@ object Masking {
         if (chosen.isEmpty()) return emptyList()
         val geometry = lines.map { LineGeometry.of(it, width, height) }
         val skew = LineGeometry.skew(geometry)
-        // 같은 행이어도 덮지 않는 상자: 고르지 않은, 그 자체가 가격·날짜인 상자(계약 4).
+        // 같은 행이어도 덮지 않는 상자: 고르지 않은, 그 자체가 가격·날짜인 상자(계약 4)와 가게 정보·필드명 상자.
+        // 가게 정보(가맹점·레지·등록번호)와 다른 필드명(수량·결제 금액 등)은 그 상자 앞 끝까지만 덮는다(ADR-0013, 그 뒤의 값을 지키고
+        // 여백을 두지 않아 바로 앞 번호 끝자리를 덜 덮지 않는다).
+        val keeps = { text: String -> SensitiveText.isStoreBox(text) || SensitiveText.isFieldName(text) }
+        // 필드명 바로 오른쪽 상자(수량 | 120)는 그 필드의 값이라 함께 지킨다(iOS 선택과 같은 소유 규칙).
+        val fieldValues =
+            geometry
+                .filter { o -> o.line.id !in selected }
+                .filter { o ->
+                    val (o0, _) = o.uRange(0.0)
+                    val (ot, ob) = o.vRange(0.0)
+                    geometry
+                        .filter { b ->
+                            b !== o && b.uRange(0.0).second <= o0 + 0.5 * (ob - ot) &&
+                                abs((b.vRange(0.0).first + b.vRange(0.0).second) / 2 - (ot + ob) / 2) <= 0.5 * (ob - ot)
+                        }.maxByOrNull { it.uRange(0.0).second }
+                        ?.let { SensitiveText.isFieldName(it.line.text) } == true
+                }.toSet()
         val protected = geometry.filter { it.line.id !in selected && SensitiveText.isProtectedBox(it.line.text) }
-        val unselected = geometry.filter { it.line.id !in selected && !SensitiveText.isProtectedBox(it.line.text) }
+        val kept =
+            geometry.filter {
+                it.line.id !in selected && !SensitiveText.isProtectedBox(it.line.text) && (keeps(it.line.text) || it in fieldValues)
+            }
+        val unselected =
+            geometry.filter {
+                it.line.id !in selected && !SensitiveText.isProtectedBox(it.line.text) && !keeps(it.line.text) && it !in fieldValues
+            }
         return chosen.map { line ->
             val g = LineGeometry.of(line, width, height)
             val theta = MaskSelector.directionOf(g, skew)
@@ -90,7 +114,23 @@ object Masking {
                     // 섞인 줄: 낱말 상자로 나눈 번호 부분만(앞뒤 여백), 같은 줄의 가격·날짜는 남긴다.
                     numberRange(numberBox, if (tilted) theta else 0.0, width, height, pad)
                 } else {
-                    rowLimits(g, if (tilted) theta else 0.0, protected + otherColumns(g, if (tilted) theta else 0.0, unselected), pad)
+                    val t = if (tilted) theta else 0.0
+                    val (pFrom, pTo) = rowLimits(g, t, protected + otherColumns(g, t, unselected), pad)
+                    val (kFrom, kTo) = rowLimits(g, t, kept, 0.0)
+                    // 필드명 상자와 겹친 번호 조각(OCR 상자가 겹침)은 끝까지 덮는다. 가격·날짜 앞에서는 그대로 멈춘다.
+                    val kToCovering =
+                        kTo?.let { limit ->
+                            val (top, bottom) = g.vRange(t)
+                            unselected
+                                .filter { o ->
+                                    val (ot, ob) = o.vRange(t)
+                                    val (o0, o1) = o.uRange(t)
+                                    abs((ot + ob) / 2 - (top + bottom) / 2) <= 0.5 * maxOf(bottom - top, ob - ot) && o0 < limit &&
+                                        o1 > limit && SensitiveText.isNumberFragment(o.line.text, minDigits = 1)
+                                }.maxOfOrNull { it.uRange(t).second + pad }
+                                ?.let { maxOf(limit, it) } ?: limit
+                        }
+                    listOfNotNull(pFrom, kFrom).maxOrNull() to listOfNotNull(pTo, kToCovering).minOrNull()
                 }
             if (!tilted) {
                 val top = line.y * height

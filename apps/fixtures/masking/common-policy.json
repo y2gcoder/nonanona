@@ -902,6 +902,136 @@
         {"text": "87654321", "box": [640, 600, 740, 620]}
       ],
       "expect": {"masked": {"approval": [255, 603, 275, 617], "member": [645, 603, 735, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-weak-label-next-row-value",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "승인", "box": [40, 600, 120, 620]},
+        {"text": "4938", "box": [55, 632, 105, 652]}
+      ],
+      "expect": {"masked": {"value": [58, 635, 102, 649]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-weak-label-next-row-value-reread",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "승인", "box": [40, 600, 120, 620]},
+        {"text": "4938", "box": [55, 632, 105, 652]}
+      ],
+      "reread": [
+        {"text": "4938", "box": [55, 632, 105, 652]}
+      ],
+      "expect": {"masked": {"value": [58, 635, 102, 649]}, "visible": {}, "needsReview": true, "reasons": ["reread"]}
+    },
+    {
+      "id": "korean-weak-label-without-value-needs-review",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "승인", "box": [40, 600, 120, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {}, "needsReview": true, "reasons": ["unpairedLabel"]}
+    },
+    {
+      "id": "inline-value-price-then-fragment",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "承認番号 493", "box": [40, 600, 140, 620]},
+        {"text": "¥320", "box": [155, 600, 187, 620]},
+        {"text": "38", "box": [201, 600, 231, 620]}
+      ],
+      "expect": {"masked": {"tail": [203, 603, 229, 617]}, "visible": {"price": [158, 603, 184, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "multicolumn-review-coordinates",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "承認番号", "box": [40, 600, 120, 620]},
+        {"text": "4938", "box": [280, 600, 320, 620]},
+        {"text": "会員番号", "box": [590, 600, 670, 620]},
+        {"text": "87654321", "box": [750, 600, 850, 620]}
+      ],
+      "expect": {"masked": {"approval": [283, 603, 317, 617], "member": [753, 603, 847, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "multicolumn-overlapping-boxes",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "承認番号", "box": [40, 600, 120, 620]},
+        {"text": "4938", "box": [280, 600, 320, 620]},
+        {"text": "会員番号", "box": [620, 600, 740, 620]},
+        {"text": "87654321", "box": [730, 600, 830, 620]}
+      ],
+      "expect": {"masked": {"approval": [283, 603, 317, 617], "member": [743, 603, 827, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "multicolumn-overlapping-boxes-far-short-value",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "承認番号", "box": [40, 600, 120, 620]},
+        {"text": "512", "box": [400, 600, 430, 620]},
+        {"text": "会員番号", "box": [620, 600, 740, 620]},
+        {"text": "87654321", "box": [730, 600, 830, 620]}
+      ],
+      "expect": {"masked": {"member": [743, 603, 827, 617]}, "visible": {}, "needsReview": true, "reasons": ["unpairedLabel"]}
+    },
+    {
+      "id": "korean-status-word-and-separate-number-kept",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "lines": [
+        {"text": "예약 확정", "box": [40, 600, 140, 620]},
+        {"text": "12", "box": [160, 600, 190, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"status": [45, 603, 135, 617], "number": [163, 603, 187, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-merchant-number-kept",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "lines": [
+        {"text": "가맹점 번호 1384", "box": [40, 600, 250, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 245, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-merchant-number-no-space-kept",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "lines": [
+        {"text": "가맹점번호 1384", "box": [40, 600, 250, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 245, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-strong-approval-inline",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "승인번호 4938", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-strong-booking-colon",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "예약번호: AB12", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "approval-with-distant-four-digit-value",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "承認番号", "box": [40, 600, 120, 620]},
+        {"text": "4938", "box": [280, 600, 320, 620]}
+      ],
+      "expect": {"masked": {"approval": [283, 603, 317, 617]}, "visible": {}, "needsReview": false, "reasons": []}
     }
   ]
 }

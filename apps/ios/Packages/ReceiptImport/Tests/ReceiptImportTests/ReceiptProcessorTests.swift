@@ -102,7 +102,10 @@ private final class TruthRecognizer: ReceiptRecognizer, @unchecked Sendable {
 /// 취소 신호가 올 때까지 읽기를 붙잡는 대역. 받은 사진을 센다.
 private final class CancellableRecognizer: ReceiptRecognizer, @unchecked Sendable {
   private let lock = NSLock()
-  private(set) var started: [String] = []
+  private var started: [String] = []
+
+  /// 시작한 읽기 수. 대역은 GCD 스레드에서 바꾸므로 락 안에서 읽는다.
+  var startedCount: Int { lock.withLock { started.count } }
 
   func recognize(_ url: URL) throws -> OCRResult { try recognize(url, cancellation: .none) }
 
@@ -236,10 +239,17 @@ struct ReceiptProcessorTests {
     let recognizer = CancellableRecognizer()
     let processor = try ReceiptProcessor(store: store, draft: draft, recognizer: recognizer)
     let run = Task { await processor.run() }
-    try await waitUntil { recognizer.started.count == 2 }
+    do {
+      try await waitUntil { recognizer.startedCount == 2 }
+    } catch {
+      // 기다리다 실패해도 붙잡힌 대역이 남지 않게 취소하고 끝날 때까지 기다린다.
+      run.cancel()
+      await run.value
+      throw error
+    }
     run.cancel()
     await run.value
-    #expect(recognizer.started.count == 2, "취소 뒤 새 사진을 읽기 시작했다")
+    #expect(recognizer.startedCount == 2, "취소 뒤 새 사진을 읽기 시작했다")
     let onDisk = try #require(try store.loadProcessing(draft.id))
     #expect(onDisk.items.map(\.state) == [.processing, .processing, .queued, .queued])
     let resumed = try ReceiptProcessor(store: store, draft: draft, recognizer: TruthRecognizer())

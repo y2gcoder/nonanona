@@ -22,31 +22,36 @@ struct SensitiveLines {
           || (row.text.hasBookingCode && !commercialRows.contains { row.sameRow(as: $0) })
       }.map(\.line.id))
     var hasUnpairedLabel = false
-    // 약한 라벨 낱말만 있는 행(승인 | 4938처럼 값이 따로 읽힘)은 같은 행에서 번호 조각을 찾을 때만 라벨로 본다(ADR-0013).
-    for label in rows where label.text.hasLabel || label.text.hasWeakLabelWord {
-      let strong = label.text.hasLabel
+    // 다른 라벨의 칸이라 건너뛴 짧은 번호 조각. 끝까지 아무 라벨도 가리지 않으면 확인을 안내한다.
+    var skipped: Set<Int> = []
+    // 독립 약한 라벨(승인 | 4938, 승인 / 다음 행 4938)은 강한 라벨과 같이 값을 찾고, 못 찾으면 안내한다(ADR-0013).
+    for label in rows where label.text.hasLabel || label.text.isWeakStandaloneLabel {
+      selected.insert(label.line.id)
       let neighbors = rows.filter { $0.line.id != label.line.id }
       let row = neighbors.filter { label.sameRow(as: $0) }
-      // 같은 행의 다른 라벨과 가격·날짜 상자는 이 라벨의 값이 닿는 범위의 경계다(다열 행에서 다른 항목의 번호를 짝으로 잡지 않는다).
-      let walls = row.filter { $0.text.hasLabel || $0.text.hasWeakLabelWord || $0.text.isProtected }
-      let same = row.filter { candidate in
-        !walls.contains { wall in
-          wall.line.id != candidate.line.id
-            && (candidate.left.x >= label.right.x
-              ? wall.left.x >= label.right.x && wall.right.x <= candidate.left.x
-              : wall.right.x <= label.left.x && wall.left.x >= candidate.right.x)
+      // 같은 행의 다른 라벨은 이 라벨의 값이 닿는 범위의 경계다. 값은 시작점이 그 값의 중심보다 앞서는 라벨 중 가장 가까운 라벨의
+      // 것이다(상자가 겹쳐도 같다). 가격·날짜 상자는 경계가 아니다(값 뒤 조각을 계속 묶고, 가격 자체는 묶지 않는다).
+      let walls = row.filter { $0.text.hasLabel || $0.text.isWeakStandaloneLabel }
+      func owned(_ candidate: Row) -> Bool {
+        let mid = (candidate.left.x + candidate.right.x) / 2
+        return !walls.contains { wall in
+          guard wall.line.id != candidate.line.id else { return false }
+          if mid >= label.left.x { return wall.left.x > label.left.x && wall.left.x < mid }
+          let wallMid = (wall.left.x + wall.right.x) / 2
+          return wallMid > mid && wallMid < label.left.x
         }
       }
-      if !strong {
-        let fragments = same.filter { candidate in
-          label.isNear(candidate) && !candidate.text.hasLabel
-            && (candidate.text.hasNumber || candidate.text.isFragment(minDigits: 2))
-        }
-        if !fragments.isEmpty {
-          selected.insert(label.line.id)
-          selected.formUnion(fragments.map(\.line.id))
-        }
-        continue
+      let same = row.filter(owned)
+      for candidate in row
+      where !owned(candidate) && label.isNear(candidate) && !candidate.text.hasLabel
+        && !candidate.text.hasStrongNumber && candidate.text.isFragment(minDigits: 2)
+      {
+        skipped.insert(candidate.line.id)
+      }
+      // 약한 라벨 뒤에 따로 읽힌 "번호 4938"은 이 라벨의 값이다.
+      let numberWordValue = same.contains {
+        $0.text.hasLabel && $0.text.startsWithNumberWord && !$0.text.valueRanges.isEmpty && label.isNear($0)
+          && $0.left.x >= label.left.x
       }
       // 가장 가까운 다음 행이 다른 항목이면 그 너머의 숫자를 끌어오지 않는다.
       let below = neighbors.filter {
@@ -86,10 +91,11 @@ struct SensitiveLines {
       }
       // 결제 화면의 "라벨 ……… 값" 행처럼 같은 행의 먼 칸이 이미 강한 번호로 가려지면 짝이 있는 라벨이다(ADR-0013).
       let strongOnRow = same.contains { $0.text.hasStrongNumber && $0.left.x >= label.right.x }
-      if label.text.valueRanges.isEmpty && fragments.isEmpty && !foundDigit && !strongOnRow {
+      if label.text.valueRanges.isEmpty && fragments.isEmpty && !foundDigit && !strongOnRow && !numberWordValue {
         hasUnpairedLabel = true
       }
     }
+    if !skipped.subtracting(selected).isEmpty { hasUnpairedLabel = true }
     ids = selected
     unmatchedLabel =
       hasUnpairedLabel

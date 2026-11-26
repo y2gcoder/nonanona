@@ -395,23 +395,33 @@ internal object SensitiveText {
         )
 
     /**
-     * "번호" 없이 읽힌 한국어 라벨 낱말(OCR이 "번호"를 빠뜨렸거나 따로 읽은 경우). 바로 뒤에 번호 값(숫자 2자리 이상이 든 영문·숫자
-     * 3자 이상)이 붙어 있을 때만 그 줄이 라벨이다. 값이 따로 읽혔으면 [MaskSelector]가 같은 행에서 번호 조각을 찾을 때만 라벨로 본다.
-     * "예약 확정"·"가상카드 일시불"·"예약 2명"은 라벨이 아니다(ADR-0013, iOS와 같다). 사업자·등록·가맹점 번호는 가게 정보다.
+     * "번호" 없이 읽힌 한국어 라벨 낱말(OCR이 "번호"를 빠뜨렸거나 따로 읽은 경우, ADR-0013, iOS와 같다).
+     * - 바로 뒤에 번호 값(숫자 2자리 이상이 든 영문·숫자 3자 이상)이 붙으면 그 줄이 라벨이다(`승인 4938`, `예약: AB12`).
+     * - 줄이 그 낱말로 끝나면(`승인`, `결제 카드`) 값이 따로 읽힌 독립 라벨이다. [MaskSelector]가 강한 라벨처럼 같은 행·다음 행에서
+     *   값을 찾고, 못 찾으면 확인을 안내한다.
+     * - 문구 속 낱말(`예약 확정`, `가상카드 일시불`, `예약 2명`)은 라벨이 아니다.
+     * 사업자(등록)·등록·가맹점 번호는 가게 정보라 띄어쓰기와 상관없이 뺀다.
      */
-    private const val WEAK = "카드|승인|회원|예약|(?<!사업자|등록|가맹점)번호"
-    private val weakLabel = Regex(WEAK)
+    private const val WEAK = "카드|승인|회원|예약|번호"
+    private val storeNumber = Regex("(?:사업자\\s*(?:등록\\s*)?|등록\\s*|가맹점\\s*)번호")
     private val weakValue =
         Regex("(?:$WEAK)\\s*[:：.#\\-]?\\s*(?:번호\\s*[:：.#\\-]?\\s*)?([A-Z0-9*●•#×][A-Z0-9*●•#×\\-‐–−|_]*)", RegexOption.IGNORE_CASE)
+    private val weakEnding = Regex("(?:$WEAK)\\s*[:：.#\\-]?\\s*$")
 
-    /** 약한 라벨 낱말이 있다(값이 붙었는지와 상관없이). */
-    fun hasWeakLabelWord(text: String) = weakLabel.containsMatchIn(prepared(text))
+    private fun withoutStoreNumbers(text: String) = storeNumber.replace(text, " ")
 
     private fun hasWeakInlineValue(text: String): Boolean =
-        weakValue.findAll(withoutPricesAndDates(text)).any { m ->
+        weakValue.findAll(withoutStoreNumbers(withoutPricesAndDates(text))).any { m ->
             val value = m.groupValues[1]
             value.count { it in '0'..'9' } >= 2 && value.count { it.isLetterOrDigit() } >= 3
         }
+
+    /** 값이 따로 읽힌 독립 약한 라벨(줄이 약한 라벨 낱말로 끝난다). 강한 라벨 줄은 아니다. */
+    fun isWeakStandaloneLabel(text: String): Boolean =
+        !isLabel(text) && weakEnding.containsMatchIn(withoutStoreNumbers(prepared(text)).trimEnd())
+
+    /** "번호 4938"처럼 약한 라벨 뒤에 따로 읽힌 "번호…" 조각. */
+    fun startsWithNumberWord(text: String) = normalized(text).trimStart().startsWith("번호")
 
     /** 하이픈 전화번호 형식(라벨 없이도 라벨처럼 취급한다). */
     private val phone = Regex("\\d{2,4}-\\d{2,4}-\\d{3,4}")
@@ -522,9 +532,7 @@ internal object SensitiveText {
             (masks >= 4 && m.value.count { it in '0'..'9' } >= 2) || (masks >= 2 && cardTail.containsMatchIn(m.value))
         }
 
-    fun isLabel(text: String) =
-        prepared(text).let { label.containsMatchIn(it) || phone.containsMatchIn(it) } ||
-            (hasWeakLabelWord(text) && hasWeakInlineValue(text))
+    fun isLabel(text: String) = prepared(text).let { label.containsMatchIn(it) || phone.containsMatchIn(it) } || hasWeakInlineValue(text)
 
     private fun isStoreLine(text: String) = storeLine.containsMatchIn(prepared(text)) && !isLabel(text)
 
@@ -689,28 +697,29 @@ internal object MaskSelector {
                 }
             if (!priced) chosen += g.line.id
         }
+        // 다른 라벨의 칸이라 건너뛴 짧은 번호 조각. 끝까지 아무 라벨도 가리지 않으면 확인을 안내한다.
+        val skipped = linkedSetOf<Int>()
         for (g in geometry) {
             val text = g.line.text
-            // 약한 라벨 낱말만 있는 줄(승인 | 4938처럼 값이 따로 읽힘)은 같은 행에서 번호 조각을 찾을 때만 라벨로 본다.
-            val strong = SensitiveText.isLabel(text)
-            if (!strong && !SensitiveText.hasWeakLabelWord(text)) continue
-            val picked = mutableListOf(g.line.id)
+            // 독립 약한 라벨(승인 | 4938, 승인 / 다음 행 4938)은 강한 라벨과 같이 값을 찾고, 못 찾으면 안내한다.
+            if (!SensitiveText.isLabel(text) && !SensitiveText.isWeakStandaloneLabel(text)) continue
+            chosen += g.line.id
             val theta = directionOf(g, skew)
             val (top, bottom) = g.vRange(theta)
             val (left, right) = g.uRange(theta)
             val center = (top + bottom) / 2
             val h = maxOf(bottom - top, 1.0)
-            var paired = strong && SensitiveText.hasPayload(text)
+            var paired = SensitiveText.hasPayload(text)
             // 다음 행 후보: 라벨 아래, 라벨과 가로로 겹치거나 한 줄 높이 안에 있는 줄.
             val below = mutableListOf<Pair<LineGeometry, Double>>()
             val far = mutableListOf<Pair<LineGeometry, Double>>()
-            // 같은 행의 다른 라벨과 가격·날짜 상자는 이 라벨의 값이 닿는 범위의 경계다(다열 행에서 다른 항목의 번호를 짝으로 잡지 않는다).
-            val sameRow = geometry.filter { o -> o !== g && sameRow(g, o, theta) }
+            // 같은 행의 다른 라벨은 이 라벨의 값이 닿는 범위의 경계다. 값은 시작점이 그 값의 중심보다 앞서는 라벨 중 가장 가까운
+            // 라벨의 것이다(상자가 겹쳐도 같다). 가격·날짜 상자는 경계가 아니다(값 뒤 조각을 계속 묶고, 가격 자체는 묶지 않는다).
             val walls =
-                sameRow
+                geometry
                     .filter { o ->
-                        SensitiveText.isLabel(o.line.text) || SensitiveText.hasWeakLabelWord(o.line.text) ||
-                            SensitiveText.isProtectedBox(o.line.text)
+                        o !== g && sameRow(g, o, theta) &&
+                            (SensitiveText.isLabel(o.line.text) || SensitiveText.isWeakStandaloneLabel(o.line.text))
                     }.map { it.uRange(theta) }
             for (o in geometry) {
                 if (o === g) continue
@@ -721,18 +730,29 @@ internal object MaskSelector {
                 val apart = maxOf(left, ol) - minOf(right, or)
                 if (abs(gap) <= 0.5 * maxOf(h, ob - ot)) {
                     // 같은 행: 가까운 번호 조각, 떨어져 있어도 강한 번호(4자리 이상·카드 표기), 라벨 아닌 번호 형식 줄.
-                    if (SensitiveText.isLabel(other)) continue
-                    val blocked =
-                        walls.any { (wl, wr) -> if (ol >= right) wl >= right && wr <= ol else wr <= left && wl >= or }
-                    if (blocked) continue
                     val near = apart <= maxOf(right - left, 8 * h)
-                    if ((near && SensitiveText.isNumberFragment(other)) || SensitiveText.isStrongFragment(other) ||
-                        SensitiveText.isNumberFormat(other)
-                    ) {
-                        picked += o.line.id
+                    if (SensitiveText.isLabel(other)) {
+                        // 약한 라벨 뒤에 따로 읽힌 "번호 4938"은 이 라벨의 값이다.
+                        if (near && ol >= left && SensitiveText.startsWithNumberWord(other) &&
+                            SensitiveText.hasPayload(other)
+                        ) {
+                            paired = true
+                        }
+                        continue
+                    }
+                    val mid = (ol + or) / 2
+                    val blocked =
+                        walls.any { (wl, wr) -> if (mid >= left) wl > left && wl < mid else (wl + wr) / 2 in mid..left }
+                    val short = near && SensitiveText.isNumberFragment(other)
+                    if (blocked) {
+                        if (short && !SensitiveText.isNumberFormat(other)) skipped += o.line.id
+                        continue
+                    }
+                    if (short || SensitiveText.isStrongFragment(other) || SensitiveText.isNumberFormat(other)) {
+                        chosen += o.line.id
                         paired = true
                     }
-                } else if (strong && gap > 0 && gap <= 2.1 * h) {
+                } else if (gap > 0 && gap <= 2.1 * h) {
                     if (apart <= h) below += o to gap else far += o to gap
                 }
             }
@@ -746,13 +766,13 @@ internal object MaskSelector {
                 if (SensitiveText.isLabel(other) || SensitiveText.hasDate(other)) continue
                 val aligned = below.any { it.first === o }
                 if ((aligned && SensitiveText.isNumberFragment(other, minDigits = 3)) || SensitiveText.isStrongFragment(other)) {
-                    picked += o.line.id
+                    chosen += o.line.id
                     paired = true
                 }
             }
-            if (strong || paired) chosen += picked
-            if (strong && !paired) unpaired = true
+            if (!paired) unpaired = true
         }
+        if (skipped.any { it !in chosen }) unpaired = true
         val ids = ocr.lines.map { it.id }.filter { it in chosen }
         // 낱말 상자로 번호 부분을 나눈 줄([OcrLine.numberBox])은 그 부분만 덮으므로 섞인 줄 안내가 없다.
         val mixed = ocr.lines.any { it.id in chosen && it.numberBox == null && SensitiveText.isMixed(it.text) }

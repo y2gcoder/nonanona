@@ -291,8 +291,8 @@ enum ProposalBuilder {
       suggestedMaskLineIDs: masks.ids.sorted(), needsMaskReview: masks.unmatchedLabel || masks.isTilted)
   }
 
-  /// 결제일 라벨(결제일·결제일시·결제 일자). 숙소 화면의 체크인처럼 앞에 나오는 다른 날짜보다 우선한다.
-  static let paymentDateLabel = #"결제\s*일"#
+  /// 결제일 라벨(결제일·결제일시·결제 일자, 라벨 끝을 확인해 `결제 일정`은 아니다). 숙소 화면의 체크인처럼 앞에 나오는 다른 날짜보다 우선한다.
+  static let paymentDateLabel = #"결제\s*(?:일시|일자|일)(?![가-힣])"#
 
   /// 지출 날짜: 결제일 라벨 줄의 날짜, 없으면 그 줄과 같은 행 오른쪽 상자의 날짜(가까운 순), 결제일 라벨이 없거나 날짜를 못 찾으면
   /// 위에서부터 첫 날짜.
@@ -344,9 +344,11 @@ enum ProposalBuilder {
     return nil
   }
 
-  /// 원·円은 숫자 뒤 금액 접미사, ₩·¥는 숫자 앞, 통화 코드는 독립 토큰, W는 숫자 바로 앞(₩ 오독)만 센다(회원번호의 '원'은 아니다).
-  static let krwMark = #"(?<=\d)\s*원|₩\s*\d|(?<![A-Za-z])KRW(?![A-Za-z])|(?<![A-Za-z])W(?=\s*\d)"#
-  static let jpyMark = #"(?<=\d)\s*円|[¥￥]\s*\d|(?<![A-Za-z])JPY(?![A-Za-z])"#
+  /// 원·円은 숫자 뒤 금액 접미사, ₩·¥는 숫자 앞, 통화 코드는 앞이 영숫자가 아니거나(뒤에 금액 가능) 금액 바로 뒤의 토큰, W는 숫자
+  /// 바로 앞(₩ 오독)만 센다. 회원번호의 '원', 상품 코드 A1KRW2는 아니다.
+  static let krwMark =
+    #"(?<=\d)\s*원|₩\s*\d|(?<![A-Za-z0-9])KRW(?![A-Za-z])|(?<=\d)\s*KRW(?![A-Za-z0-9])|(?<![A-Za-z])W(?=\s*\d)"#
+  static let jpyMark = #"(?<=\d)\s*円|[¥￥]\s*\d|(?<![A-Za-z0-9])JPY(?![A-Za-z])|(?<=\d)\s*JPY(?![A-Za-z0-9])"#
 
   /// 합계 통화. 합계를 읽은 글자의 표시(금액에 붙은 円·¥, JPY / 원·₩, KRW, OCR이 ₩를 W로 읽는 경우 포함)를 먼저 본다. 둘 다 있거나 없으면
   /// 사진 전체에서 표시가 붙은 줄이 더 많은 쪽, 그래도 같으면 한글 줄이 2줄 이상이면 KRW, 아니면 JPY(기존 동작)다.

@@ -5,10 +5,15 @@ struct SensitiveText {
   private static let labels = expression(
     #"(?<![A-Z])(?:TEL|phone|card|reservation|booking|PIN|approval|authori[sz]ation|member(?:ship)?|AUTH|APPR)(?![A-Z])|電話|カ[ー一\-]ド|会員|承認|予約\s*(?:番号|ID|コード|No)|お客様\s*番号|會員\s*(?:號碼|编号)|카드\s*번호|승인\s*번호|회원\s*번호|예약\s*번호|전화(?:\s*번호)?|연락처"#
   )
-  /// "번호" 없이 읽힌 한국어 라벨 낱말(OCR이 "번호"를 빠뜨렸거나 따로 읽은 경우). 바로 뒤에 번호 값(숫자 2자리 이상이 든 영문·숫자
-  /// 3자 이상)이 붙어 있을 때만 라벨이다. 값이 따로 읽혔으면 `SensitiveLines`가 같은 행에서 번호 조각을 찾을 때만 라벨로 본다.
-  /// "예약 확정"·"가상카드 일시불"·"예약 2명"은 라벨이 아니다(ADR-0013, Android와 같다). 사업자·등록·가맹점 번호는 가게 정보다.
-  private static let weakLabels = expression(#"카드|승인|회원|예약|(?<!사업자|등록|가맹점)번호"#)
+  /// "번호" 없이 읽힌 한국어 라벨 낱말(OCR이 "번호"를 빠뜨렸거나 따로 읽은 경우, ADR-0013, Android와 같다).
+  /// - 바로 뒤에 번호 값(숫자 2자리 이상이 든 영문·숫자 3자 이상)이 붙으면 라벨이다(`승인 4938`, `예약: AB12`).
+  /// - 줄이 그 낱말로 끝나면(`승인`, `결제 카드`) 값이 따로 읽힌 독립 라벨이다. `SensitiveLines`가 강한 라벨처럼 같은 행·다음 행에서
+  ///   값을 찾고, 못 찾으면 확인을 안내한다.
+  /// - 문구 속 낱말(`예약 확정`, `가상카드 일시불`, `예약 2명`)은 라벨이 아니다.
+  /// 사업자(등록)·등록·가맹점 번호는 가게 정보라 띄어쓰기와 상관없이 뺀다.
+  private static let weakLabels = expression(#"카드|승인|회원|예약|번호"#)
+  private static let storeNumber = expression(#"(?:사업자\s*(?:등록\s*)?|등록\s*|가맹점\s*)번호"#)
+  private static let weakEnding = expression(#"^\s*[:：.#\-]?\s*$"#)
   private static let weakValue = expression(
     #"^\s*[:：.#\-]?\s*(?:번호\s*[:：.#\-]?\s*)?([A-Z0-9*●•#×][A-Z0-9*●•#×\-‐–−|_]*)"#)
   private static let qualifiers = expression(#"^\s*(?:番号|號碼|번호|CODE|NO\.?|ID)?[\s:：.#\-]*"#)
@@ -35,8 +40,8 @@ struct SensitiveText {
   private static let identifierToken = expression(#"[\p{L}\p{N}]+(?:[\p{Pd}|_/()][\p{L}\p{N}]+)*"#)
 
   let text: String
-  /// 값이 붙지 않은 약한 라벨 낱말(승인·예약·카드 등)이 있다.
-  let hasWeakLabelWord: Bool
+  /// 값이 따로 읽힌 독립 약한 라벨(줄이 약한 라벨 낱말로 끝난다). 강한 라벨 줄은 아니다.
+  let isWeakStandaloneLabel: Bool
   let labelRanges: [NSRange]
   let valueRanges: [NSRange]
   private let strongNumberRanges: [NSRange]
@@ -53,8 +58,9 @@ struct SensitiveText {
     let strongLabels = Self.labels.matches(in: normalized, range: range).map(\.range)
     let amounts = Self.amounts.matches(in: normalized, range: range)
     let boundaries = (Self.dates.matches(in: normalized, range: range) + amounts).map(\.range)
+    let stores = Self.storeNumber.matches(in: normalized, range: range).map(\.range)
     let weakWords = Self.weakLabels.matches(in: normalized, range: range).map(\.range).filter { weak in
-      !strongLabels.contains { NSIntersectionRange($0, weak).length > 0 }
+      !(strongLabels + stores).contains { NSIntersectionRange($0, weak).length > 0 }
     }
     let weakLabels = weakWords.filter { weak in
       let start = NSMaxRange(weak)
@@ -67,8 +73,13 @@ struct SensitiveText {
       return value.filter(\.isNumber).count >= 2 && value.filter { $0.isLetter || $0.isNumber }.count >= 3
         && !boundaries.contains { NSIntersectionRange($0, shifted).length > 0 }
     }
-    hasWeakLabelWord = !weakWords.isEmpty
     let labelRanges = (strongLabels + weakLabels).sorted { $0.location < $1.location }
+    isWeakStandaloneLabel =
+      labelRanges.isEmpty
+      && weakWords.last.map { last in
+        let tail = units.substring(from: NSMaxRange(last))
+        return Self.weakEnding.firstMatch(in: tail, range: NSRange(location: 0, length: tail.utf16.count)) != nil
+      } == true
     let item = Self.itemCode.firstMatch(in: normalized, range: range) != nil
     let businessField = item || Self.business.firstMatch(in: normalized, range: range) != nil
     let commercial = item || !amounts.isEmpty || Self.firstPassField.firstMatch(in: normalized, range: range) != nil
@@ -106,6 +117,8 @@ struct SensitiveText {
   }
 
   var hasLabel: Bool { !labelRanges.isEmpty }
+  /// "번호 4938"처럼 약한 라벨 뒤에 따로 읽힌 "번호…" 조각.
+  var startsWithNumberWord: Bool { text.drop { $0.isWhitespace }.hasPrefix("번호") }
   var hasStrongNumber: Bool { !strongNumberRanges.isEmpty || (!containsBookingForm && isFragment(minDigits: 6)) }
   var hasBookingCode: Bool { !bookingRanges.isEmpty }
   var hasNumber: Bool { hasStrongNumber || hasBookingCode }

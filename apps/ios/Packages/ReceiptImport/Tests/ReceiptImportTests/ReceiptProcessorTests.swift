@@ -38,6 +38,32 @@ private func tempRoot() -> URL {
   FileManager.default.temporaryDirectory.appending(path: "receipts-\(UUID().uuidString)")
 }
 
+private let blurredReceipt = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+  .appending(path: "Fixtures/mask-blur-r03.png")
+
+/// iOS Vision의 흐린 가상 영수증 관측값. macOS Vision은 같은 사진에서 승인 줄 자체를 놓치기도 한다.
+private struct BlurredReceiptVisionCapture: ReceiptRecognizer {
+  func recognize(_ url: URL) throws -> OCRResult {
+    let observations: [(String, Double, Double, Double, Double)] = [
+      ("つばめ書店", 0.0666, 0.0571, 0.2835, 0.0582),
+      ("TEL 06-6650-0803", 0.0639, 0.2025, 0.3500, 0.0425),
+      ("2026年11月4日 1015", 0.0611, 0.2675, 0.4333, 0.0450),
+      ("合計3,025円", 0.0637, 0.7316, 0.3310, 0.0618),
+      ("※65083912", 0.0639, 0.8100, 0.3111, 0.0425),
+    ]
+    let lines = observations.enumerated().map { id, entry in
+      let (text, x, y, width, height) = entry
+      return OCRLine(
+        id: id, text: text, x: x, y: y, width: width, height: height,
+        corners: [
+          CGPoint(x: x, y: y), CGPoint(x: x + width, y: y),
+          CGPoint(x: x + width, y: y + height), CGPoint(x: x, y: y + height),
+        ])
+    }
+    return OCRResult(pixelWidth: 720, pixelHeight: 800, lines: lines)
+  }
+}
+
 /// 정답의 줄 위치로 만든 결정적 OCR 대역. 호출을 세고, 정한 호출부터 풀어 줄 때까지 붙잡아 둘 수 있다.
 private final class TruthRecognizer: ReceiptRecognizer, @unchecked Sendable {
   private let lock = NSLock()
@@ -84,6 +110,66 @@ private func waitUntil(_ timeout: Duration = .seconds(60), _ condition: () async
 }
 
 struct ReceiptProcessorTests {
+  @Test func blurredApprovalNumberIsCoveredAndNeedsMaskReview() async throws {
+    let root = tempRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = ReceiptDraftStore(root: root)
+    let draft = try store.create(
+      source: .picker, photos: [IncomingPhoto(fileExtension: "png", content: .file(blurredReceipt))])
+    let processor = try ReceiptProcessor(store: store, draft: draft, recognizer: BlurredReceiptVisionCapture())
+    await processor.run()
+    let id = try #require(await processor.snapshot().items.first?.id)
+    let proposal = try await processor.proposal(id)
+    let preview = try await processor.preview(id, maskLineIDs: Set(proposal.suggestedMaskLineIDs), regions: [])
+    let masked = try rgba(preview.pngData)
+    let original = try rgba(Data(contentsOf: fixtures.appending(path: truths[2].file)))
+    let approval = try #require(truths[2].sensitive.last?.rect)
+    let uncovered = (approval[1]..<approval[3]).reduce(0) { count, y in
+      count + (approval[0]..<approval[2]).filter { original.isInk($0, y) && !masked.isBlack($0, y) }.count
+    }
+    #expect(uncovered == 0, "흐린 승인 번호의 잉크가 사본에 남았다")
+    #expect(proposal.needsMaskReview == true, "가림 확인 필요 표시가 없다")
+  }
+
+  @Test func blurredPhotoNeedsMaskReviewUsingVision() async throws {
+    let root = tempRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = ReceiptDraftStore(root: root)
+    let draft = try store.create(
+      source: .picker, photos: [IncomingPhoto(fileExtension: "png", content: .file(blurredReceipt))])
+    let processor = try ReceiptProcessor(store: store, draft: draft, recognizer: VisionReceiptRecognizer())
+    await processor.run()
+    let id = try #require(await processor.snapshot().items.first?.id)
+    #expect(try await processor.proposal(id).needsMaskReview == true)
+  }
+
+  @Test func maskGroupsFragmentsOnTiltedAndFollowingRowsWithoutTakingTheTotal() {
+    func line(_ id: Int, _ text: String, x: Double, y: Double, width: Double, slope: Double) -> OCRLine {
+      let rise = width * slope
+      return OCRLine(
+        id: id, text: text, x: x, y: y, width: width, height: 0.026 + rise,
+        corners: [
+          CGPoint(x: x, y: y), CGPoint(x: x + width, y: y + rise),
+          CGPoint(x: x + width, y: y + rise + 0.026), CGPoint(x: x, y: y + 0.026),
+        ])
+    }
+    let ocr = OCRResult(
+      pixelWidth: 1000, pixelHeight: 1000,
+      lines: [
+        line(0, "カード番号", x: 0.10, y: 0.30, width: 0.16, slope: 0.14),
+        line(1, "4821", x: 0.44, y: 0.35, width: 0.10, slope: 0.15),
+        line(2, "87", x: 0.14, y: 0.35, width: 0.08, slope: 0.13),
+        line(3, "合計", x: 0.10, y: 0.40, width: 0.16, slope: 0.14),
+        line(4, "123456円", x: 0.44, y: 0.45, width: 0.12, slope: 0.15),
+        line(5, "承認番号", x: 0.10, y: 0.60, width: 0.16, slope: 0.13),
+        line(6, "レジID 00123456", x: 0.10, y: 0.70, width: 0.16, slope: 0.13),
+      ])
+    let masks = SensitiveLines(ocr)
+    #expect(masks.ids == [0, 1, 2, 5])
+    #expect(masks.unmatchedLabel)
+    #expect(!masks.isTilted, "행이 일정하게 기울어진 경우는 안내하지 않는다")
+  }
+
   /// 실제 Apple Vision 일본어 OCR(macOS)로 10장 모두 읽는다. r10(초점 나감)은 읽지 못해야 한다.
   @Test func realJapaneseOCRProposalsMatchFixtures() throws {
     for t in truths {

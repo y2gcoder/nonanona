@@ -50,8 +50,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -245,6 +248,17 @@ private fun Header(
             )
         }
         Text(item.guidance(), style = TextRoles.supporting)
+        // 자동 가림이 불확실한 사진(MaskCheck): 안내 한 줄. 확인을 막지 않고, 가린 사본 미리보기는 펼쳐 연다(AppViewModel).
+        if (item.state == ItemState.Ready && content.proposal?.maskCheck?.needsReview == true) {
+            Surface(color = MaterialTheme.colorScheme.errorContainer, shape = MaterialTheme.shapes.medium) {
+                Text(
+                    stringResource(R.string.review_mask_doubt),
+                    style = TextRoles.supporting,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.padding(Spacing.m).testTag("mask_doubt_notice"),
+                )
+            }
+        }
     }
 }
 
@@ -629,7 +643,7 @@ private fun OriginalPhoto(
     val bitmap by produceState<ImageBitmap?>(null, file) { value = withContext(Dispatchers.IO) { decodeSampled(file, 1600) } }
     val image = bitmap
     val aspect = image?.let { it.width.toFloat() / it.height } ?: 0.75f
-    val bands = bands(proposal, masked)
+    val shapes = overlayShapes(proposal, masked)
     Box(
         Modifier
             .fillMaxWidth()
@@ -644,37 +658,58 @@ private fun OriginalPhoto(
         ) {
             Image(image, contentDescription = null, contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
         }
-        Canvas(Modifier.fillMaxSize()) {
-            bands.forEach { (top, bottom) ->
-                drawRect(
-                    Color.Black.copy(alpha = 0.55f),
-                    Offset(0f, (top * size.height).toFloat()),
-                    Size(
-                        size.width,
-                        (
-                            (bottom - top) *
-                                size.height
-                        ).toFloat().coerceAtLeast(2f),
-                    ),
-                )
+        // 겹친 가림(같은 행의 라벨·번호 조각)도 한 번만 칠한다: 레이어 전체를 반투명으로 두고 안에는 불투명하게 그린다.
+        Canvas(
+            Modifier.fillMaxSize().graphicsLayer {
+                alpha = 0.55f
+                compositingStrategy = CompositingStrategy.Offscreen
+            },
+        ) {
+            val shade = Color.Black
+            shapes.forEach { (xs, ys) ->
+                if (xs.size == 2) {
+                    // 사각형: xs = [l, r], ys = [t, b]
+                    drawRect(
+                        shade,
+                        Offset((xs[0] * size.width).toFloat(), (ys[0] * size.height).toFloat()),
+                        Size(((xs[1] - xs[0]) * size.width).toFloat(), ((ys[1] - ys[0]) * size.height).toFloat().coerceAtLeast(2f)),
+                    )
+                } else {
+                    val path = Path()
+                    path.moveTo((xs[0] * size.width).toFloat(), (ys[0] * size.height).toFloat())
+                    for (i in 1 until xs.size) path.lineTo((xs[i] * size.width).toFloat(), (ys[i] * size.height).toFloat())
+                    path.close()
+                    drawPath(path, shade)
+                }
             }
         }
     }
 }
 
-/** 0~1 세로 구간. 확인 때 굽는 띠와 같은 기준(줄은 위아래 여백 포함, 띠는 정수 퍼센트). */
-private fun bands(
+/**
+ * 확인 때 굽는 가림과 같은 모양(Masking.shapes·regionRects)을 0~1 좌표로. 사각형은 ([l, r], [t, b]), 기울어진 띠는 네 점.
+ */
+internal fun overlayShapes(
     proposal: OcrProposal?,
     masked: ResolvedReview?,
-): List<Pair<Double, Double>> {
+): List<Pair<List<Double>, List<Double>>> {
     if (masked == null) return emptyList()
+    val width = proposal?.ocr?.pixelWidth?.coerceAtLeast(1) ?: 1
     val height = proposal?.ocr?.pixelHeight?.coerceAtLeast(1) ?: 1
-    val lines =
-        proposal?.ocr?.lines.orEmpty().filter { it.id in masked.maskLineIds }.map { line ->
-            val pad = maxOf(8.0 / height, line.height * 0.3)
-            (line.y - pad).coerceAtLeast(0.0) to (line.y + line.height + pad).coerceAtMost(1.0)
+    val lines = proposal?.ocr?.lines.orEmpty()
+    val regionShapes = masked.regions.map { listOf(0.0, 1.0) to listOf(it.topPercent / 100.0, it.bottomPercent / 100.0) }
+    return Masking.shapes(lines, masked.maskLineIds, width, height).map { shape ->
+        when (shape) {
+            is MaskShape.Rect -> {
+                listOf(shape.left.toDouble() / width, shape.right.toDouble() / width) to
+                    listOf(shape.top.toDouble() / height, shape.bottom.toDouble() / height)
+            }
+
+            is MaskShape.Quad -> {
+                shape.xs.map { it / width } to shape.ys.map { it / height }
+            }
         }
-    return lines + masked.regions.map { it.topPercent / 100.0 to it.bottomPercent / 100.0 }
+    } + regionShapes
 }
 
 /** 화면용으로 줄여 읽되 OCR·굽기와 같은 디코딩(EXIF 방향 적용)을 쓴다. 읽지 못하면 null(빈 칸). */

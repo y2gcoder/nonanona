@@ -4,6 +4,7 @@ import app.nonanona.feature.receiptimport.AllowedReceiptFields
 import app.nonanona.feature.receiptimport.FieldProblem
 import app.nonanona.feature.receiptimport.ItemState
 import app.nonanona.feature.receiptimport.MaskRegion
+import app.nonanona.feature.receiptimport.MaskShape
 import app.nonanona.feature.receiptimport.Masking
 import app.nonanona.feature.receiptimport.ProcessingItem
 import app.nonanona.feature.receiptimport.ProcessingManifest
@@ -12,7 +13,6 @@ import app.nonanona.feature.receiptimport.ReviewForm
 import app.nonanona.feature.receiptimport.Validation
 import app.nonanona.feature.receiptimport.nextToReview
 import app.nonanona.feature.receiptimport.regionRects
-import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -58,7 +58,7 @@ class ReviewFormTest {
         val low = MaskRegion.of("b", 94, 6).resized(3)
         assertEquals(91 to 100, low.topPercent to low.bottomPercent)
         // 정수 퍼센트 → 픽셀: 위는 내림, 아래는 올림. 746px 사진의 79–85%는 589–635px(iOS와 같은 값).
-        assertArrayEquals(intArrayOf(0, 589, 720, 635), Masking.regionRects(listOf(MaskRegion.of("c", 79, 6)), 720, 746).single())
+        assertEquals(MaskShape.Rect(0, 589, 720, 635), Masking.regionRects(listOf(MaskRegion.of("c", 79, 6)), 720, 746).single())
         val json = ReviewDraft(amount = "1", maskLineIds = listOf(2), regions = listOf(region)).toJson()
         assertEquals(ReviewDraft(amount = "1", maskLineIds = listOf(2), regions = listOf(region)), ReviewDraft.fromJson(json))
     }

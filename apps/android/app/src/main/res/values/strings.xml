@@ -81,6 +81,7 @@
     <string name="review_device_only">원본과 읽은 글자 전체는 이 기기에만 남아요. 여행방에는 확인한 가린 사본과 날짜·금액·통화·가게만 올라가요.</string>
     <string name="review_mask_count">가림 %1$d곳</string>
     <string name="review_mask_warning">자동으로 찾지 못한 정보가 있을 수 있어요. 카드·회원·예약 번호나 전화번호가 보이면 그 줄을 가리거나, 줄이 목록에 없으면 가림 영역을 더해 주세요.</string>
+    <string name="review_mask_doubt">가림이 충분한지 확실하지 않아요. 번호가 보이지 않는지 확인해 주세요.</string>
     <string name="review_mask_suggested">자동 제안</string>
     <string name="review_mask_line_on">가림</string>
     <string name="review_mask_line_off">보임</string>

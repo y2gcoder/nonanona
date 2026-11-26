@@ -11,14 +11,23 @@ public struct OCRLine: Codable, Equatable, Sendable {
   public let y: Double
   public let width: Double
   public let height: Double
+  /// Vision이 읽은 글자 영역의 네 모서리. 옛 초안에는 없다.
+  let corners: [CGPoint]?
+  /// 가격이나 날짜와 한 상자로 읽힌 번호의 글자 범위.
+  let sensitiveCorners: [CGPoint]?
 
-  public init(id: Int, text: String, x: Double, y: Double, width: Double, height: Double) {
+  public init(
+    id: Int, text: String, x: Double, y: Double, width: Double, height: Double, corners: [CGPoint]? = nil,
+    sensitiveCorners: [CGPoint]? = nil
+  ) {
     self.id = id
     self.text = text
     self.x = x
     self.y = y
     self.width = width
     self.height = height
+    self.corners = corners
+    self.sensitiveCorners = sensitiveCorners
   }
 }
 
@@ -39,6 +48,13 @@ public struct OCRProposal: Codable, Equatable, Sendable {
   public let ocr: OCRResult
   public let fields: AllowedReceiptFields
   public let suggestedMaskLineIDs: [Int]
+  /// 옛 초안에는 재확인 결과가 없으므로 검토 화면에서 확인을 안내한다.
+  public internal(set) var needsMaskReview: Bool? = nil
+
+  /// 가림 표시와 PNG 굽기가 공유하는 왼쪽 위 기준 0~1 좌표.
+  public func maskPolygons(lineIDs: Set<Int>, regions: [MaskRegion]) -> [[CGPoint]] {
+    Masking.polygons(ocr: ocr, selected: lineIDs, automatic: Set(suggestedMaskLineIDs), regions: regions)
+  }
 }
 
 /// 사진 한 장을 읽는다. 처리기의 작업 스레드에서 동기로 부른다.
@@ -62,36 +78,96 @@ enum ImageLoading {
   }
 }
 
-/// Apple Vision 일본어 OCR. 기기 안에서만 동작한다(native-batch-import 실험에서 옮김).
+/// Apple Vision 다국어 OCR. 기기 안에서만 동작한다(native-batch-import 실험에서 옮김).
 public struct VisionReceiptRecognizer: ReceiptRecognizer {
   public init() {}
 
   public func recognize(_ url: URL) throws -> OCRResult {
-    let image = try ImageLoading.cgImage(url)
-    let request = VNRecognizeTextRequest()
-    request.recognitionLevel = .accurate
-    let supported = (try? request.supportedRecognitionLanguages()) ?? []
-    request.recognitionLanguages = ["ja-JP", "en-US"].filter { supported.contains($0) }
-    do {
-      try VNImageRequestHandler(cgImage: image, orientation: .up).perform([request])
-    } catch {
-      throw ProcessingFailure.recognitionError
+    try recognize(ImageLoading.cgImage(url))
+  }
+
+  func recognize(_ image: CGImage) throws -> OCRResult {
+    let width = image.width
+    let height = image.height
+    let tileHeight = height > width * 5 / 2 ? width * 2 : height
+    let overlap = tileHeight < height ? max(1, width / 4) : 0
+    var tiles: [OCRTile] = []
+    var top = 0
+    while top < height {
+      let bottom = min(height, top + tileHeight)
+      let tileBounds = CGRect(x: 0, y: top, width: width, height: bottom - top)
+      guard let tile = top == 0 && bottom == height ? image : image.cropping(to: tileBounds)
+      else { throw ProcessingFailure.recognitionError }
+      var lines: [OCRLine] = []
+      for observation in try observations(in: tile) {
+        guard let candidate = observation.topCandidates(1).first else { continue }
+        let b = observation.boundingBox
+        func corners(_ rectangle: VNRectangleObservation) -> [CGPoint] {
+          [rectangle.topLeft, rectangle.topRight, rectangle.bottomRight, rectangle.bottomLeft]
+            .map { CGPoint(x: $0.x, y: 1 - $0.y) }
+        }
+        let text = candidate.string
+        let matches = SensitiveText(text)
+        var sensitiveCorners: [CGPoint]?
+        if matches.isMixed, let range = matches.maskRange.flatMap({ SensitiveText.originalRange($0, in: text) }),
+          let box = try? candidate.boundingBox(for: range), box.boundingBox.width < b.width * 0.94
+        {
+          sensitiveCorners = corners(box)
+        }
+        lines.append(
+          OCRLine(
+            id: 0, text: text, x: b.minX, y: 1 - b.maxY, width: b.width,
+            height: b.height, corners: corners(observation),
+            sensitiveCorners: sensitiveCorners))
+      }
+      tiles.append(OCRTile(top: top, height: tile.height, lines: lines))
+      if bottom == height { break }
+      top = bottom - overlap
     }
-    let raw = (request.results ?? []).compactMap { observation -> (String, CGRect)? in
-      guard let text = observation.topCandidates(1).first?.string else { return nil }
-      let b = observation.boundingBox
-      return (text, CGRect(x: b.minX, y: 1 - b.maxY, width: b.width, height: b.height))
-    }.sorted { $0.1.minY < $1.1.minY }
-    let lines = raw.enumerated().map { index, entry in
+    let sorted = OCRTile.merge(tiles, imageHeight: height).enumerated().map { id, line in
       OCRLine(
-        id: index, text: entry.0, x: entry.1.minX, y: entry.1.minY, width: entry.1.width, height: entry.1.height)
+        id: id, text: line.text, x: line.x, y: line.y, width: line.width, height: line.height, corners: line.corners,
+        sensitiveCorners: line.sensitiveCorners)
     }
-    return OCRResult(pixelWidth: image.width, pixelHeight: image.height, lines: lines)
+    return OCRResult(pixelWidth: width, pixelHeight: height, lines: sorted)
+  }
+
+  private func observations(in image: CGImage) throws -> [VNRecognizedTextObservation] {
+    func read(detectLanguage: Bool) throws -> [VNRecognizedTextObservation] {
+      let request = VNRecognizeTextRequest()
+      request.recognitionLevel = .accurate
+      request.automaticallyDetectsLanguage = detectLanguage
+      let supported = (try? request.supportedRecognitionLanguages()) ?? []
+      let languages = detectLanguage ? ["ja-JP", "en-US", "ko-KR"] : ["ja-JP", "en-US"]
+      request.recognitionLanguages = languages.filter { supported.contains($0) }
+      do {
+        try VNImageRequestHandler(cgImage: image, orientation: .up).perform([request])
+      } catch {
+        throw ProcessingFailure.recognitionError
+      }
+      return request.results ?? []
+    }
+
+    func countLines(_ rows: [VNRecognizedTextObservation], containing script: ClosedRange<UInt32>) -> Int {
+      rows.count {
+        $0.topCandidates(1).first?.string.unicodeScalars.contains { script.contains($0.value) } == true
+      }
+    }
+
+    let primary = try read(detectLanguage: false)
+    // 일본어 품목 판독의 결과를 유지하면서 가나를 거의 읽지 못한 결제 화면은 한글도 확인한다.
+    if countLines(primary, containing: 0x3040...0x30ff) < 2,
+      let alternate = try? read(detectLanguage: true), countLines(alternate, containing: 0xac00...0xd7a3) >= 2
+    {
+      return alternate
+    }
+    return primary
   }
 }
 
 /// OCR 줄에서 날짜·합계·가게와 가림 후보를 고른다. 읽지 못하면 이유를 `ProcessingFailure`로 알린다.
 enum ProposalBuilder {
+  // 품목 추출에서 쓰던 제외 패턴은 그대로 유지한다.
   static let sensitivePattern =
     #"TEL|電話|カード|card|会員|承認|予約\s*(?:番号|ID|コード|No)|reservation|booking|PIN|\d{2,4}-\d{2,4}-\d{3,4}"#
   static let datePattern = #"(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})"#
@@ -102,11 +178,11 @@ enum ProposalBuilder {
     guard let amount = total(ocr.lines) else { throw .missingTotal }
     guard let date = ocr.lines.lazy.compactMap({ isoDate($0.text) }).first else { throw .missingDate }
     let merchant = ocr.lines.first?.text.trimmingCharacters(in: .whitespaces)
-    let masks = ocr.lines.filter { matches(sensitivePattern, $0.text) }.map(\.id)
+    let masks = SensitiveLines(ocr)
     return OCRProposal(
       ocr: ocr,
       fields: AllowedReceiptFields(date: date, amountMinor: amount, currency: "JPY", merchant: merchant),
-      suggestedMaskLineIDs: masks)
+      suggestedMaskLineIDs: masks.ids.sorted(), needsMaskReview: masks.unmatchedLabel || masks.isTilted)
   }
 
   static func isoDate(_ raw: String) -> String? {

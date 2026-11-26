@@ -14,7 +14,6 @@ import app.nonanona.feature.receiptimport.ProcessingFailure
 import app.nonanona.feature.receiptimport.ProcessorError
 import app.nonanona.feature.receiptimport.ProcessorException
 import app.nonanona.feature.receiptimport.ReceiptDraftStore
-import app.nonanona.feature.receiptimport.ReceiptFlattener
 import app.nonanona.feature.receiptimport.ReceiptProcessor
 import app.nonanona.feature.receiptimport.ReceiptRecognizer
 import app.nonanona.feature.receiptimport.ReceiptStorageException
@@ -38,7 +37,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.awt.Color
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicInteger
@@ -110,17 +108,7 @@ class ReceiptProcessorTest {
     }
 
     /** JVM용 굽기(Android Canvas 대신 ImageIO). 원본 메타데이터를 옮기지 않는다. */
-    private val flattener =
-        ReceiptFlattener { original, rects ->
-            val source = ImageIO.read(original)
-            val image = java.awt.image.BufferedImage(source.width, source.height, java.awt.image.BufferedImage.TYPE_INT_RGB)
-            val g = image.createGraphics()
-            g.drawImage(source, 0, 0, null)
-            g.color = Color.BLACK
-            rects.forEach { (l, t, r, b) -> g.fillRect(l, t, r - l, b - t) }
-            g.dispose()
-            ByteArrayOutputStream().also { ImageIO.write(image, "png", it) }.toByteArray()
-        }
+    private val flattener = JvmFlattener
 
     private fun processor(
         store: ReceiptDraftStore,

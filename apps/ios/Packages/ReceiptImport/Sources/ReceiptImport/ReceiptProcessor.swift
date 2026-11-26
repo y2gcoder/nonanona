@@ -195,12 +195,9 @@ public actor ReceiptProcessor {
   private func flatten(
     _ index: Int, proposal: OCRProposal, maskLineIDs: Set<Int>, regions: [MaskRegion]
   ) throws -> MaskedArtifact {
-    let width = proposal.ocr.pixelWidth
-    let height = proposal.ocr.pixelHeight
-    let rects =
-      Masking.rects(for: proposal.ocr.lines, selected: maskLineIDs, width: width, height: height)
-      + Masking.rects(for: regions, width: width, height: height)
-    return try Masking.flatten(original: store.photoURL(draftID, manifest.items[index].photoFileName), rects: rects)
+    try Masking.flatten(
+      original: store.photoURL(draftID, manifest.items[index].photoFileName),
+      polygons: proposal.maskPolygons(lineIDs: maskLineIDs, regions: regions))
   }
 
   /// 기기 밖으로 보낼 수 있는 것: 가린 사본이 있는 확인한 영수증만. 가림 사본이 확인 당시와 같고, 허용한 PNG 청크만 있고,
@@ -248,24 +245,47 @@ public actor ReceiptProcessor {
     let url = store.photoURL(draftID, item.photoFileName)
     let recognizer = recognizer
     let hooks = hooks
-    let result: Result<OCRProposal, ProcessingFailure> = await Task.detached(priority: .utility) {
-      if hooks.delayPerItem > .zero { try? await Task.sleep(for: hooks.delayPerItem) }
-      if hooks.failFirstAttemptAtPosition == item.position && item.attempts == 1 {
-        return .failure(.recognitionError)
-      }
-      do {
-        let proposal = try ProposalBuilder.make(recognizer.recognize(url))
-        if hooks.dropSuggestionsAtPosition == item.position {
-          return .success(OCRProposal(ocr: proposal.ocr, fields: proposal.fields, suggestedMaskLineIDs: []))
+    if hooks.delayPerItem > .zero { try? await Task.sleep(for: hooks.delayPerItem) }
+    let result: Result<OCRProposal, ProcessingFailure> = await withCheckedContinuation { continuation in
+      // 동기 Vision 호출이 자체 작업 큐를 기다리는 동안 Swift 협력 스레드를 점유하지 않는다.
+      DispatchQueue.global(qos: .utility).async {
+        if hooks.failFirstAttemptAtPosition == item.position && item.attempts == 1 {
+          continuation.resume(returning: .failure(.recognitionError))
+          return
         }
-        return .success(proposal)
-      } catch let failure as ProcessingFailure {
-        return .failure(failure)
-      } catch {
-        return .failure(.recognitionError)
+        do {
+          var proposal = try ProposalBuilder.make(recognizer.recognize(url))
+          if hooks.dropSuggestionsAtPosition == item.position {
+            proposal = OCRProposal(
+              ocr: proposal.ocr, fields: proposal.fields, suggestedMaskLineIDs: [],
+              needsMaskReview: proposal.needsMaskReview)
+          }
+          if proposal.needsMaskReview == false {
+            proposal.needsMaskReview = Self.maskNeedsReview(proposal, original: url)
+          }
+          continuation.resume(returning: .success(proposal))
+        } catch let failure as ProcessingFailure {
+          continuation.resume(returning: .failure(failure))
+        } catch {
+          continuation.resume(returning: .failure(.recognitionError))
+        }
       }
-    }.value
+    }
     finish(item.id, result)
+  }
+
+  private nonisolated static func maskNeedsReview(_ proposal: OCRProposal, original: URL) -> Bool {
+    do {
+      let image = try ImageLoading.cgImage(original)
+      guard MaskImageQuality(image, ocr: proposal.ocr)?.needsReview == false else { return true }
+      let lineIDs = Set(proposal.suggestedMaskLineIDs)
+      let polygons = proposal.maskPolygons(lineIDs: lineIDs, regions: [])
+      // 확인에 쓰는 렌더러와 같은 픽셀을 메모리에서 다시 읽는다.
+      let reread = try VisionReceiptRecognizer().recognize(Masking.render(image, polygons: polygons))
+      return ResidualMaskCheck.hasResidue(original: proposal.ocr, reread: reread, lineIDs: lineIDs, polygons: polygons)
+    } catch {
+      return true
+    }
   }
 
   private func finish(_ id: String, _ result: Result<OCRProposal, ProcessingFailure>) {

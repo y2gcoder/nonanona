@@ -6,6 +6,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
+import android.graphics.Path
 import android.media.ExifInterface
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
@@ -19,6 +20,7 @@ import java.util.concurrent.ExecutionException
  * 영수증 사진 디코딩은 이것 하나다: OCR, 가림 굽기, 검토 화면의 원본·가림 표시, 목록 미리보기가 모두 쓴다.
  * EXIF 방향(회전·뒤집기 8가지)을 적용한 똑바로 선 픽셀을 돌려주므로, OCR 좌표(0~1)가 화면과 구운 사본에 같은 자리로 맞는다.
  * 긴 변이 [maxPx] 이하가 되도록 2의 거듭제곱으로 줄여 읽는다(가로세로 비율은 그대로).
+ * 세로로 긴 영수증(긴 변이 짧은 변의 2배 이상)은 글자가 작아지지 않게 짧은 변 [maxPx]/2, 긴 변 [maxPx]×3까지 둔다.
  */
 internal object ReceiptImages {
     fun decode(
@@ -29,7 +31,13 @@ internal object ReceiptImages {
         BitmapFactory.decodeFile(file.path, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) throw ProcessingException(ProcessingFailure.InvalidImage)
         var sample = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / sample > maxPx) sample *= 2
+        val long = maxOf(bounds.outWidth, bounds.outHeight)
+        val short = minOf(bounds.outWidth, bounds.outHeight)
+        if (long >= 2 * short) {
+            while (short / sample > maxPx / 2 || long / sample > maxPx * 3) sample *= 2
+        } else {
+            while (long / sample > maxPx) sample *= 2
+        }
         val decoded =
             BitmapFactory.decodeFile(
                 file.path,
@@ -94,6 +102,32 @@ class MlKitReceiptRecognizer : ReceiptRecognizer {
 
     override fun recognize(file: File): OcrResult {
         val bitmap = ReceiptImages.decode(file)
+        // 긴 영수증은 겹치는 타일로 나눠 읽고 합친다(한 번에 읽으면 엔진이 한 구간을 통째로 건너뛸 수 있다).
+        val tiles = OcrTiles.plan(bitmap.width, bitmap.height)
+        val merged =
+            OcrTiles.merge(
+                bitmap.width,
+                bitmap.height,
+                tiles.map { tile ->
+                    val part = if (tiles.size == 1) bitmap else Bitmap.createBitmap(bitmap, 0, tile.top, bitmap.width, tile.height)
+                    tile to read(part)
+                },
+            )
+        val lines = merged.lines
+        val perLine =
+            PhotoQuality.measureLines(lines, bitmap.width, bitmap.height) { x, y, rw, rh ->
+                val argb = IntArray(rw * rh)
+                bitmap.getPixels(argb, 0, rw, x, y, rw, rh)
+                IntArray(argb.size) { i ->
+                    val p = argb[i]
+                    (((p shr 16) and 255) * 299 + ((p shr 8) and 255) * 587 + (p and 255) * 114) / 1000
+                }
+            }
+        return OcrResult(bitmap.width, bitmap.height, lines, PhotoQuality.median(perLine.values), perLine)
+    }
+
+    /** 비트맵 하나(사진 전체 또는 타일)를 읽어 그 비트맵 안 0~1 좌표로. */
+    private fun read(bitmap: Bitmap): OcrResult {
         val result =
             try {
                 Tasks.await(client.process(InputImage.fromBitmap(bitmap, 0)))
@@ -105,9 +139,27 @@ class MlKitReceiptRecognizer : ReceiptRecognizer {
         val lines =
             result.textBlocks
                 .flatMap { it.lines }
-                .mapNotNull { line -> line.boundingBox?.let { line.text to it } }
+                .mapNotNull { line -> line.boundingBox?.let { line to it } }
                 .sortedBy { it.second.top }
-                .mapIndexed { i, (text, b) -> OcrLine(i, text, b.left / w, b.top / h, b.width() / w, b.height() / h) }
+                .mapIndexed { i, (line, b) ->
+                    // 기울어진 글자 상자의 네 모서리(왼위부터 시계 방향). 가림 띠를 줄 방향으로 굽는 데 쓴다.
+                    val corners =
+                        line.cornerPoints
+                            ?.takeIf { it.size == 4 }
+                            ?.flatMap { listOf(it.x / w, it.y / h) }
+                    // 가격·날짜가 섞인 줄은 낱말 상자로 번호 부분만 덮을 수 있는지 본다.
+                    val numberBox =
+                        if (SensitiveText.isMixed(line.text)) {
+                            NumberSpan.box(
+                                line.elements.mapNotNull { e ->
+                                    e.boundingBox?.let { eb -> e.text to listOf(eb.left / w, eb.top / h, eb.right / w, eb.bottom / h) }
+                                },
+                            )
+                        } else {
+                            null
+                        }
+                    OcrLine(i, line.text, b.left / w, b.top / h, b.width() / w, b.height() / h, corners, numberBox)
+                }
         return OcrResult(bitmap.width, bitmap.height, lines)
     }
 }
@@ -116,7 +168,7 @@ class MlKitReceiptRecognizer : ReceiptRecognizer {
 object CanvasReceiptFlattener : ReceiptFlattener {
     override fun flatten(
         original: File,
-        rects: List<IntArray>,
+        shapes: (width: Int, height: Int) -> List<MaskShape>,
     ): ByteArray {
         val source = ReceiptImages.decode(original)
         val output = Bitmap.createBitmap(source.width, source.height, Bitmap.Config.ARGB_8888)
@@ -129,7 +181,21 @@ object CanvasReceiptFlattener : ReceiptFlattener {
                 style = Paint.Style.FILL
                 isAntiAlias = false
             }
-        rects.forEach { (l, t, r, b) -> canvas.drawRect(l.toFloat(), t.toFloat(), r.toFloat(), b.toFloat(), paint) }
+        shapes(source.width, source.height).forEach { shape ->
+            when (shape) {
+                is MaskShape.Rect -> {
+                    canvas.drawRect(shape.left.toFloat(), shape.top.toFloat(), shape.right.toFloat(), shape.bottom.toFloat(), paint)
+                }
+
+                is MaskShape.Quad -> {
+                    val path = Path()
+                    path.moveTo(shape.xs[0].toFloat(), shape.ys[0].toFloat())
+                    for (i in 1 until 4) path.lineTo(shape.xs[i].toFloat(), shape.ys[i].toFloat())
+                    path.close()
+                    canvas.drawPath(path, paint)
+                }
+            }
+        }
         return ByteArrayOutputStream().also { check(output.compress(Bitmap.CompressFormat.PNG, 100, it)) }.toByteArray()
     }
 }

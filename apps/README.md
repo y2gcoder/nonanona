@@ -498,6 +498,10 @@ mise run android:e2e-adaptive -- [증거 폴더]                 # 접히는 기
 
 iOS 단위 테스트와 release 확인은 `IOS_DESTINATION`(기본 `platform=iOS Simulator,name=iPhone 18 Pro`)으로 시뮬레이터를 고른다. 커밋할 때 lefthook이 바뀐 Swift·Kotlin 파일에 swift-format과 ktlint를 돌린다.
 
+### iOS 실기기
+
+`apps/ios/Config/Signing.local.xcconfig.example`을 같은 폴더의 `Signing.local.xcconfig`로 복사하고 `YOUR_TEAM_ID`를 Apple 개발 팀 ID로 바꾼다. Xcode에서 `Nonanona` 스킴과 연결한 iPhone을 선택해 실행한다.
+
 ### E2E가 확인하는 것
 
 두 스크립트 모두 앱을 새로 설치하고 [가상 영수증](fixtures/README.md) 한 장으로 같은 순서를 밟는다.

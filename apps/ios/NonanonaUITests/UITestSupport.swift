@@ -1,0 +1,59 @@
+import XCTest
+
+/// 여러 UI 테스트가 함께 쓰는 실제 기기 진입 경로: 사진 앱 공유, 시스템 링크 열기, 화면 기록.
+@MainActor
+extension XCTestCase {
+  var nonanona: XCUIApplication { XCUIApplication() }
+
+  func shareFromPhotos(matching label: String) {
+    shareFromPhotos(matchingEach: [label])
+  }
+
+  /// 사진 앱에서 여러 장을 골라 공유한다. 사진 앱은 고른 순서가 아니라 보관함 격자 순서로 넘긴다.
+  func shareFromPhotos(matchingEach labels: [String]) {
+    let photos = XCUIApplication(bundleIdentifier: "com.apple.mobileslideshow")
+    photos.launch()
+    if photos.buttons["Continue"].waitForExistence(timeout: 3) { photos.buttons["Continue"].tap() }
+    if photos.buttons["Cancel"].exists { photos.buttons["Cancel"].tap() }
+    let first = photos.images.matching(NSPredicate(format: "label CONTAINS %@", labels[0])).firstMatch
+    XCTAssertTrue(first.waitForExistence(timeout: 10), "가상 영수증이 사진 앱에 있어야 한다")
+    photos.buttons["Select"].tap()
+    for label in labels {
+      // 낮은 창(예: iPhone Duo 바깥 화면)에서는 사진이 하단 선택 막대 아래에 있을 수 있다. 눌릴 때까지 격자를 올린다.
+      let image = photos.images.matching(NSPredicate(format: "label CONTAINS %@", label)).firstMatch
+      for _ in 0..<3 where !image.isHittable { photos.swipeUp(velocity: .slow) }
+      image.tap()
+    }
+    photos.buttons["Share"].tap()
+    let ours = photos.cells.matching(NSPredicate(format: "label == '노나노나'")).firstMatch
+    XCTAssertTrue(ours.waitForExistence(timeout: 10), "공유 메뉴에 노나노나가 보여야 한다")
+    ours.tap()
+    let save = photos.buttons["share-save"]
+    XCTAssertTrue(save.waitForExistence(timeout: 10))
+    XCTAssertTrue(photos.staticTexts["share-status"].label.contains("사진 \(labels.count)장"))
+    snapshot("ios-share-extension")
+    save.tap()
+    XCTAssertTrue(save.waitForNonExistence(timeout: 20), "공유 확장이 끝나야 한다")
+    if photos.buttons["Cancel"].exists { photos.buttons["Cancel"].tap() }
+  }
+
+  /// 메신저의 초대 링크를 누른 것과 같은 시스템 경로로 연다.
+  func openLink(_ link: String) {
+    let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+    XCUIDevice.shared.system.open(URL(string: link)!)
+    let open = springboard.buttons["열기"].exists ? springboard.buttons["열기"] : springboard.buttons["Open"]
+    if open.waitForExistence(timeout: 3) { open.tap() }
+    XCTAssertTrue(nonanona.staticTexts["여행방에 초대받았어요"].waitForExistence(timeout: 15))
+  }
+
+  func failureText(contains text: String) -> XCUIElement {
+    nonanona.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
+  }
+
+  func snapshot(_ name: String) {
+    let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+    shot.name = name
+    shot.lifetime = .keepAlways
+    add(shot)
+  }
+}

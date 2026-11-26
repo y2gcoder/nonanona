@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 창 배경만 정한다. 화면 색은 design/Theme.kt의 Material 3 테마가 맡는다. -->
+    <style name="Theme.Nonanona" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+    </style>
+</resources>

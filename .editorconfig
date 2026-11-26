@@ -8,3 +8,13 @@ indent_style = space
 indent_size = 2
 
 # 언어별 들여쓰기·줄 길이는 스택에 맞춰 추가한다(예: [*.{kt,kts}] indent_size = 4).
+
+[*.{kt,kts}]
+indent_size = 4
+max_line_length = 140
+ktlint_code_style = ktlint_official
+# Compose 관례: @Composable 함수는 대문자로 시작한다.
+ktlint_function_naming_ignore_when_annotated_with = Composable
+
+[*.swift]
+indent_size = 2

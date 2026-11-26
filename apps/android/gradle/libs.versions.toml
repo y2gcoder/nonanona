@@ -1,0 +1,34 @@
+# 정확한 버전만 쓴다. 게시 후 7일이 지난 안정판이며, 게시일은 Google Maven/Maven Central의 Last-Modified로 확인했다(확인일 2026-11-21).
+# Kotlin 2.4.21 + AGP 9.3.1 + Gradle 9.7.0 교집합: https://kotlinlang.org/docs/gradle-configure-project.html (확인일 2026-11-21)
+[versions]
+agp = "9.3.1"                    # 2026-07-23
+kotlin = "2.4.21"                # 2026-10-08
+compose-bom = "2026.09.00"       # 2026-09-09 (ui 1.12.1, material3 1.4.0, material3-adaptive 1.3.0 2026-08-12)
+activity-compose = "1.13.0"      # 2026-03-11
+lifecycle = "2.11.0"             # 2026-06-17
+navigation3 = "1.2.1"            # 2026-11-04
+junit = "4.13.2"                 # 2021-02-13
+mlkit-text-japanese = "16.0.1"   # 2024-08-07. 번들 일본어 모델(기기 안 OCR). native-batch-import 실험에서 검증
+org-json = "20260814"            # 2026-08-14. JVM 단위 테스트 전용(앱은 플랫폼 org.json을 쓴다)
+
+[libraries]
+compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
+compose-ui = { module = "androidx.compose.ui:ui" }
+compose-material3 = { module = "androidx.compose.material3:material3" }
+compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
+# 창 크기 종류·접힘(hinge) 정보와 목록·상세 배치. 버전은 Compose BOM이 정한다(1.3.0, 2026-08-12).
+compose-material3-adaptive = { module = "androidx.compose.material3.adaptive:adaptive" }
+compose-material3-adaptive-layout = { module = "androidx.compose.material3.adaptive:adaptive-layout" }
+compose-material3-adaptive-navigation3 = { module = "androidx.compose.material3.adaptive:adaptive-navigation3" }
+activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity-compose" }
+lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycle" }
+navigation3-ui = { module = "androidx.navigation3:navigation3-ui", version.ref = "navigation3" }
+junit = { module = "junit:junit", version.ref = "junit" }
+mlkit-text-japanese = { module = "com.google.mlkit:text-recognition-japanese", version.ref = "mlkit-text-japanese" }
+org-json = { module = "org.json:json", version.ref = "org-json" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

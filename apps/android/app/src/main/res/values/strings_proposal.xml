@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 품목 나누기 제안 몫(ADR-0011). iOS와 같은 문구. -->
+<resources>
+    <string name="settle_failure_uploader_only">이 지출을 올린 사람만 품목 나누기 제안을 보낼 수 있어요.</string>
+    <string name="proposal_open">품목으로 나눠 방장에게 제안</string>
+    <string name="proposal_privacy">품목 이름과 영수증 글자는 이 기기에만 있어요. 방장에게는 사람마다 부담 금액(원)만 제안으로 가고, 방장이 확인해야 정산에 들어가요.</string>
+    <string name="proposal_title">방장에게 제안</string>
+    <string name="proposal_basis_krw">원화 결제 %1$s을 나눠요.</string>
+    <string name="proposal_basis_estimate">예상 금액 %1$s(%2$s)을 나눠요. 방장도 같은 고시값을 봐요.</string>
+    <string name="proposal_basis_estimate_synthetic">예상 금액 %1$s(%2$s · 가상 시험 환율)을 나눠요. 방장도 같은 고시값을 봐요.</string>
+    <string name="proposal_basis_verified">방장이 확인한 실제 원화 청구액 %1$s을 나눠요.</string>
+    <string name="proposal_basis_acquisition">방장이 확인한 환전 원가 기준 %1$s을 나눠요.</string>
+    <string name="proposal_basis_finalized">이미 확정된 정산이라 제안할 수 없어요.</string>
+    <string name="proposal_basis_none">아직 이 엔화 지출의 원화 기준(방장이 확인한 청구액이나 기준환율)이 없어 제안할 수 없어요. 방장이 원화를 정한 뒤 다시 열어 주세요.</string>
+    <string name="proposal_basis_unsupported">이 통화는 아직 품목별로 나눠 제안할 수 없어요.</string>
+    <string name="proposal_remainder">원 단위로 나눠떨어지지 않아 %1$s이 남아요. 남은 원을 낼 사람을 골라 주세요. 저절로 정하지 않아요.</string>
+    <string name="proposal_remainder_choice">%1$s이(가) %2$s 더 내기</string>
+    <string name="proposal_preview">보낼 몫: %1$s</string>
+    <string name="proposal_send">방장에게 제안 보내기</string>
+    <string name="proposal_sending">보내는 중…</string>
+    <string name="proposal_consent_changed">확인 창을 연 뒤 지출이나 원화 기준이 바뀌어 보내지 않았어요. 바뀐 값을 확인하고 다시 보내 주세요.</string>
+    <string name="proposal_sent">제안을 보냈어요. 방장이 확인하고 포함해야 정산에 들어가요.</string>
+    <string name="proposal_footer">보내는 값: 사람마다 금액(원), 원화 기준과 합계, 지출 버전. 품목 이름·품목 금액·영수증 글자·사진은 보내지 않아요.</string>
+    <string name="proposal_confirm_title">방장에게 제안을 보낼까요?</string>
+    <string name="proposal_confirm_body">%1$s (합계 %2$s, %3$s). 사람마다 금액만 보내고 품목 이름·품목 금액·영수증 글자는 보내지 않아요. 방장이 확인하고 포함해야 정산에 들어가요.</string>
+    <string name="proposal_confirm_send">보내기</string>
+    <string name="proposal_kind_krw">원화 결제</string>
+    <string name="proposal_kind_estimate">기준환율 예상 금액</string>
+    <string name="proposal_kind_verified">방장이 확인한 실제 청구액</string>
+    <string name="proposal_kind_acquisition">방장이 확인한 환전 원가</string>
+    <string name="proposal_uploader_current">보낸 제안: 방장 확인을 기다려요.</string>
+    <string name="proposal_uploader_stale_expense">보낸 제안: 그 뒤 지출이 바뀌어 방장이 쓸 수 없어요. 새 값으로 다시 보내 주세요.</string>
+    <string name="proposal_uploader_stale_basis">보낸 제안: 원화 기준(기준환율)이 바뀌어 방장이 쓸 수 없어요. 새 값으로 다시 보내 주세요.</string>
+    <string name="proposal_uploader_applied">보낸 제안과 같은 몫으로 방장이 포함했어요.</string>
+    <string name="proposal_uploader_closed">정산이 확정됐어요. 보낸 제안은 쓰이지 않았어요.</string>
+    <string name="proposal_host_title">올린 사람의 품목 나누기 제안</string>
+    <string name="proposal_host_hint">품목 이름은 오지 않아요. 제안은 정산을 바꾸지 않아요. 채운 뒤 결제자를 고르고 \"포함하기\"를 눌러야 들어가요.</string>
+    <string name="proposal_host_from">%1$s이(가) 보낸 제안 · %2$s</string>
+    <string name="proposal_host_label_krw">원화 결제 %1$s</string>
+    <string name="proposal_host_label_estimate">예상 금액 %1$s(기준환율)</string>
+    <string name="proposal_host_label_verified">실제 청구액 %1$s</string>
+    <string name="proposal_host_label_acquisition">환전 원가 기준 %1$s</string>
+    <string name="proposal_host_row">제안 %1$s · %2$s %3$s</string>
+    <string name="proposal_none">없음</string>
+    <string name="proposal_entered">입력</string>
+    <string name="proposal_included">포함</string>
+    <string name="proposal_host_match">%1$s한 몫이 제안과 같아요.</string>
+    <string name="proposal_host_differs">%1$s한 몫이 제안과 달라요.</string>
+    <string name="proposal_host_current">지금 지출 값에 맞는 제안이에요. 채운 뒤 확인하고 \"포함하기\"를 눌러야 정산에 들어가요.</string>
+    <string name="proposal_host_stale_expense">제안 뒤 지출이 바뀌어 쓸 수 없어요. 올린 사람이 다시 보내야 해요.</string>
+    <string name="proposal_host_stale_basis">제안 뒤 원화 기준(기준환율)이 바뀌어 쓸 수 없어요. 올린 사람이 다시 보내야 해요.</string>
+    <string name="proposal_host_applied">포함한 몫이 제안과 같아요.</string>
+    <string name="proposal_host_closed">확정된 정산이에요. 이 제안은 쓰이지 않았어요.</string>
+    <string name="proposal_host_fill">제안 몫을 직접 나누기에 채우기</string>
+    <string name="proposal_host_unfillable">지금 이 지출에서 고를 수 있는 원화와 제안의 원화가 달라 채울 수 없어요.</string>
+    <string name="proposal_host_row_note">올린 사람의 품목 나누기 제안이 있어요</string>
+</resources>

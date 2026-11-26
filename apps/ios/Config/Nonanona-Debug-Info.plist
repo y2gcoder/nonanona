@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Debug 전용. Release는 Nonanona-Info.plist를 쓴다. 로컬 모드 값은 Config/Debug.xcconfig와 Local.xcconfig(gitignore)에서 온다. -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>app.nonanona.invite</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>nonanona</string>
+			</array>
+		</dict>
+	</array>
+	<key>NonanonaBackend</key>
+	<string>$(NONANONA_BACKEND)</string>
+	<key>NonanonaLocalSupabaseURL</key>
+	<string>$(NONANONA_LOCAL_SUPABASE_URL)</string>
+	<key>NonanonaLocalPublishableKey</key>
+	<string>$(NONANONA_LOCAL_PUBLISHABLE_KEY)</string>
+	<key>NonanonaLocalTestEmail</key>
+	<string>$(NONANONA_LOCAL_TEST_EMAIL)</string>
+	<key>NonanonaLocalTestPassword</key>
+	<string>$(NONANONA_LOCAL_TEST_PASSWORD)</string>
+	<key>NonanonaLocalHostEmail</key>
+	<string>$(NONANONA_LOCAL_HOST_EMAIL)</string>
+	<key>NonanonaLocalHostPassword</key>
+	<string>$(NONANONA_LOCAL_HOST_PASSWORD)</string>
+</dict>
+</plist>

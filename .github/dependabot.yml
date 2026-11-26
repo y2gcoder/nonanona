@@ -19,4 +19,17 @@ updates:
   #   cooldown: { default-days: 7 }
   #   groups: { minor-patch: { update-types: [minor, patch] } }
   #   open-pull-requests-limit: 5
-  # - package-ecosystem: gradle   # 위와 같은 형식
+  # Android 앱(apps/android). 의존성 버전은 gradle/libs.versions.toml, 전이 의존성은 app/gradle.lockfile에 있다.
+  - package-ecosystem: gradle
+    directory: /apps/android
+    schedule:
+      interval: weekly
+      day: monday
+      timezone: Asia/Seoul
+    cooldown:
+      default-days: 7
+    groups:
+      minor-patch:
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+  # Swift 패키지(apps/ios/Packages/*)는 원격 의존성이 없어 넣지 않는다. 원격 패키지를 더하면 package-ecosystem: swift를 추가한다.

@@ -51,8 +51,17 @@ else
   fi
 fi
 
-# echo "저장소별 점검"
-# 예: if docker info >/dev/null 2>&1; then ok "Docker 실행 중"; else bad "Docker를 실행하세요"; fi
+echo "모바일 앱 (apps/)"
+want_xcode="Xcode 27.2"   # iOS 빌드·swift-format을 이 버전으로 맞췄다. 바꾸면 apps/README.md도 고친다.
+got_xcode=$(xcodebuild -version 2>/dev/null | head -1)
+if [[ $got_xcode == "$want_xcode" ]]; then ok "$got_xcode"
+elif [[ -n $got_xcode ]]; then warn "$got_xcode (기준: $want_xcode)"
+else warn "Xcode가 없습니다(iOS 작업에만 필요)"; fi
+sdk=${ANDROID_HOME:-}
+[[ -z $sdk && -f apps/android/local.properties ]] && sdk=$(sed -n 's/^sdk.dir=//p' apps/android/local.properties)
+if [[ -z $sdk ]]; then warn "Android SDK 위치가 없습니다: ANDROID_HOME 또는 apps/android/local.properties(sdk.dir)"
+elif [[ -d $sdk/platforms/android-37.1 ]]; then ok "Android SDK Platform 37.1 설치됨"
+else warn "Android SDK Platform 37.1이 없습니다: sdkmanager \"platforms;android-37.1\""; fi
 
 echo
 if (( failures )); then printf '\033[31m%d개 항목이 실패했습니다.\033[0m\n' "$failures"; exit 1; fi

@@ -1,0 +1,70 @@
+{
+  "_comment": "정산 공통 예제(가상 값). 서버 계약 시험(scripts/settlement-contract.py)과 두 앱의 몫 제안 단위 테스트가 같은 파일을 읽는다. 금액은 원(KRW) 정수다.",
+  "pair_splits": {
+    "_comment": "둘이 반씩(ADR-0007). 두 사람은 구성원 목록 순서. payer: 두 사람 중 결제자의 자리(0·1), null이면 결제자가 두 사람 밖. split: 두 사람 몫(같은 순서), null이면 자동으로 나누지 않고 problem을 보인다(payer_outside: 직접 나누기, too_small: 한 사람). 홀수면 결제자가 floor(원화/2)+1을 부담한다.",
+    "cases": [
+      { "krw": 13377, "payer": 0, "split": [6689, 6688] },
+      { "krw": 13377, "payer": 1, "split": [6688, 6689] },
+      { "krw": 13377, "payer": null, "split": null, "problem": "payer_outside" },
+      { "krw": 38000, "payer": 0, "split": [19000, 19000] },
+      { "krw": 38000, "payer": 1, "split": [19000, 19000] },
+      { "krw": 38000, "payer": null, "split": [19000, 19000] },
+      { "krw": 3, "payer": 0, "split": [2, 1] },
+      { "krw": 3, "payer": 1, "split": [1, 2] },
+      { "krw": 2, "payer": 0, "split": [1, 1] },
+      { "krw": 2, "payer": null, "split": [1, 1] },
+      { "krw": 1, "payer": 0, "split": null, "problem": "too_small" },
+      { "krw": 1, "payer": 1, "split": null, "problem": "too_small" },
+      { "krw": 1, "payer": null, "split": null, "problem": "too_small" },
+      { "krw": 99999999999, "payer": 1, "split": [49999999999, 50000000000] },
+      { "krw": 99999999998, "payer": null, "split": [49999999999, 49999999999] }
+    ]
+  },
+  "settlement": {
+    "_comment": "host=다라(결제), member=가나. r01은 외화라 확인한 원화 청구액 13,377원(홀수)을 둘이 반씩 나눠 결제자(host)가 1원을 더 부담한다. legacy_shares는 이 규칙 전에 직접 적던 몫으로, 서버가 지금도 그대로 받는다. r02는 원화 청구액을 몰라 보류한다. 입장권은 증빙 없는 직접 입력(KRW). 기념품은 가나 혼자 내고 혼자 부담한 개인 지출이다.",
+    "expenses": [
+      { "key": "r01", "entry": "receipt", "date": "2026-11-03", "amount_minor": 1408, "currency": "JPY", "merchant": "さくら食堂",
+        "review": { "decision": "include", "payer": "host", "krw_amount": 13377, "shares": { "host": 6689, "member": 6688 },
+                    "legacy_shares": { "host": 6688, "member": 6689 } } },
+      { "key": "r02", "entry": "receipt", "date": "2026-11-03", "amount_minor": 1276, "currency": "JPY", "merchant": "みなと珈琲",
+        "review": { "decision": "hold", "hold_reason": "원화 청구액 확인 대기" } },
+      { "key": "ticket", "entry": "manual", "date": "2026-11-08", "amount_minor": 38000, "currency": "KRW", "merchant": "입장권",
+        "review": { "decision": "include", "payer": "host", "shares": { "host": 19000, "member": 19000 } } },
+      { "key": "souvenir", "entry": "manual", "date": "2026-11-08", "amount_minor": 12000, "currency": "KRW", "merchant": "기념품",
+        "review": { "decision": "include", "payer": "member", "shares": { "member": 12000 } } }
+    ],
+    "expected": {
+      "included_total_krw": 51377,
+      "balances": { "host": 25688, "member": -25688 },
+      "transfers": [ { "from": "member", "to": "host", "krw": 25688 } ],
+      "excluded": [ { "key": "r02", "kind": "held", "reason": "원화 청구액 확인 대기" }, { "key": "souvenir", "kind": "personal", "reason": null } ],
+      "if_r02_included_at_12122_even": { "transfers": [ { "from": "member", "to": "host", "krw": 31749 } ] }
+    }
+  },
+  "krw_conversions": {
+    "_comment": "엔화 지출의 원화 환산(ADR-0008). 정확한 십진·분수 계산 뒤 원 단위로 반올림(양수 .5는 올림)하고, 몫은 그 원화로 나눈다(ADR-0007). acquisition: 엔 × 환전에 쓴 원화 ÷ 받은 엔. reference_rate: 엔 × 고시값 ÷ quote_unit(ECOS 731Y001/0000002는 100엔당 원). krw가 null이면 쓸 수 없다(too_small: 0원, too_large: 1,000억 원 이상). 서버 계약 시험(SQL)과 두 앱 단위 테스트가 같은 답을 내는지 본다. 고시값은 가상 값이다.",
+    "acquisition": [
+      { "amount_minor": 1408, "krw_paid": 95000, "foreign_minor": 10000, "krw": 13376 },
+      { "amount_minor": 8000, "krw_paid": 95000, "foreign_minor": 10000, "krw": 76000 },
+      { "amount_minor": 1276, "krw_paid": 95000, "foreign_minor": 10000, "krw": 12122 },
+      { "amount_minor": 1, "krw_paid": 1, "foreign_minor": 2, "krw": 1 },
+      { "amount_minor": 3, "krw_paid": 1, "foreign_minor": 2, "krw": 2 },
+      { "amount_minor": 5, "krw_paid": 1, "foreign_minor": 2, "krw": 3 },
+      { "amount_minor": 1, "krw_paid": 1, "foreign_minor": 3, "krw": null, "problem": "too_small" },
+      { "amount_minor": 7, "krw_paid": 10, "foreign_minor": 3, "krw": 23 },
+      { "amount_minor": 99999999, "krw_paid": 9999999999, "foreign_minor": 1, "krw": null, "problem": "too_large" }
+    ],
+    "reference_rate": [
+      { "amount_minor": 1408, "rate": "905.25", "quote_unit": 100, "krw": 12746 },
+      { "amount_minor": 1276, "rate": "905.25", "quote_unit": 100, "krw": 11551 },
+      { "amount_minor": 200, "rate": "905.25", "quote_unit": 100, "krw": 1811 },
+      { "amount_minor": 1, "rate": "905.25", "quote_unit": 100, "krw": 9 },
+      { "amount_minor": 1000, "rate": "911.50", "quote_unit": 100, "krw": 9115 },
+      { "amount_minor": 1, "rate": "50.0000", "quote_unit": 100, "krw": 1 },
+      { "amount_minor": 3, "rate": "50.0000", "quote_unit": 100, "krw": 2 },
+      { "amount_minor": 2, "rate": "0.25", "quote_unit": 100, "krw": null, "problem": "too_small" },
+      { "amount_minor": 99999999, "rate": "999999.9999", "quote_unit": 100, "krw": null, "problem": "too_large" },
+      { "amount_minor": 1408, "rate": "0.0001", "quote_unit": 100, "krw": null, "problem": "too_small" }
+    ]
+  }
+}

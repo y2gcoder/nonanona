@@ -1,0 +1,193 @@
+{
+ "balances": [
+  {
+   "net_krw": -50463,
+   "user_id": "00000000-0000-4000-8000-00000000000b"
+  },
+  {
+   "net_krw": 50463,
+   "user_id": "00000000-0000-4000-8000-00000000000a"
+  }
+ ],
+ "estimated_total_krw": 11551,
+ "excluded": [],
+ "expenses": [
+  {
+   "acquisition": null,
+   "amount_minor": 1408,
+   "currency": "JPY",
+   "entry": "manual",
+   "expense_date": "2026-11-03",
+   "expense_id": "cd4ea02d-f985-4e82-9789-c3e82410ff44",
+   "fx": null,
+   "has_artifact": false,
+   "hold_reason": null,
+   "is_estimate": false,
+   "kind": "shared",
+   "krw_amount": 13377,
+   "krw_basis": "verified_krw_charge",
+   "merchant": "さくら食堂",
+   "payer_id": "00000000-0000-4000-8000-00000000000a",
+   "shares": [
+    {
+     "krw": 6688,
+     "user_id": "00000000-0000-4000-8000-00000000000b"
+    },
+    {
+     "krw": 6689,
+     "user_id": "00000000-0000-4000-8000-00000000000a"
+    }
+   ],
+   "status": "included",
+   "uploaded_by": "00000000-0000-4000-8000-00000000000b",
+   "version": 2
+  },
+  {
+   "acquisition": {
+    "currency": "JPY",
+    "foreign_minor": 10000,
+    "krw_paid": 95000
+   },
+   "amount_minor": 8000,
+   "currency": "JPY",
+   "entry": "manual",
+   "expense_date": "2026-11-03",
+   "expense_id": "aca2f99d-440b-4837-9ff3-f4f14d0aae13",
+   "fx": null,
+   "has_artifact": false,
+   "hold_reason": null,
+   "is_estimate": false,
+   "kind": "shared",
+   "krw_amount": 76000,
+   "krw_basis": "acquisition_cost",
+   "merchant": "현금 공동 지출",
+   "payer_id": "00000000-0000-4000-8000-00000000000a",
+   "shares": [
+    {
+     "krw": 38000,
+     "user_id": "00000000-0000-4000-8000-00000000000b"
+    },
+    {
+     "krw": 38000,
+     "user_id": "00000000-0000-4000-8000-00000000000a"
+    }
+   ],
+   "status": "included",
+   "uploaded_by": "00000000-0000-4000-8000-00000000000b",
+   "version": 2
+  },
+  {
+   "acquisition": null,
+   "amount_minor": 1276,
+   "currency": "JPY",
+   "entry": "manual",
+   "expense_date": "2026-11-03",
+   "expense_id": "f3a5e3ae-3764-4827-bb75-c4e463d9d614",
+   "fx": {
+    "currency": "JPY",
+    "data_origin": "fixture",
+    "determined_at": "2026-11-24T05:13:05Z",
+    "item_code": "0000002",
+    "item_name": "원/일본엔(100엔)",
+    "quote_id": "85ff81a2-30bf-4760-915d-bb1500ec41f5",
+    "quote_unit": 100,
+    "rate": "905.25",
+    "rate_date": "2026-11-02",
+    "source": "bok_ecos",
+    "stat_code": "731Y001",
+    "unit_name": "원"
+   },
+   "has_artifact": false,
+   "hold_reason": null,
+   "is_estimate": true,
+   "kind": "shared",
+   "krw_amount": 11551,
+   "krw_basis": "reference_rate_estimate",
+   "merchant": "みなと珈琲",
+   "payer_id": "00000000-0000-4000-8000-00000000000a",
+   "shares": [
+    {
+     "krw": 5775,
+     "user_id": "00000000-0000-4000-8000-00000000000b"
+    },
+    {
+     "krw": 5776,
+     "user_id": "00000000-0000-4000-8000-00000000000a"
+    }
+   ],
+   "status": "included",
+   "uploaded_by": "00000000-0000-4000-8000-00000000000b",
+   "version": 2
+  },
+  {
+   "acquisition": null,
+   "amount_minor": 1500,
+   "currency": "JPY",
+   "entry": "manual",
+   "expense_date": "2026-11-04",
+   "expense_id": "294ca75b-c85e-493a-a9c3-82de4d238901",
+   "fx": null,
+   "has_artifact": false,
+   "hold_reason": null,
+   "is_estimate": false,
+   "kind": "pending",
+   "krw_amount": null,
+   "krw_basis": null,
+   "merchant": "駅弁",
+   "payer_id": null,
+   "shares": [],
+   "status": "pending",
+   "uploaded_by": "00000000-0000-4000-8000-00000000000b",
+   "version": 1
+  },
+  {
+   "acquisition": null,
+   "amount_minor": 2000,
+   "currency": "JPY",
+   "entry": "manual",
+   "expense_date": "2026-12-01",
+   "expense_id": "73e52bd6-288d-407f-a9ac-01f1eaca16c0",
+   "fx": null,
+   "has_artifact": false,
+   "hold_reason": null,
+   "is_estimate": false,
+   "kind": "pending",
+   "krw_amount": null,
+   "krw_basis": null,
+   "merchant": "미래 날짜",
+   "payer_id": null,
+   "shares": [],
+   "status": "pending",
+   "uploaded_by": "00000000-0000-4000-8000-00000000000b",
+   "version": 1
+  }
+ ],
+ "included_total_krw": 100928,
+ "members": [
+  {
+   "display_name": "다라",
+   "role": "host",
+   "user_id": "00000000-0000-4000-8000-00000000000a"
+  },
+  {
+   "display_name": "가나",
+   "role": "member",
+   "user_id": "00000000-0000-4000-8000-00000000000b"
+  }
+ ],
+ "pending_expense_ids": [
+  "294ca75b-c85e-493a-a9c3-82de4d238901",
+  "73e52bd6-288d-407f-a9ac-01f1eaca16c0"
+ ],
+ "ready": false,
+ "revision": 9,
+ "status": "open",
+ "transfers": [
+  {
+   "from": "00000000-0000-4000-8000-00000000000b",
+   "krw": 50463,
+   "to": "00000000-0000-4000-8000-00000000000a"
+  }
+ ],
+ "trip_id": "e1cc2f9b-adcc-409d-8d1e-46d41138b19e"
+}

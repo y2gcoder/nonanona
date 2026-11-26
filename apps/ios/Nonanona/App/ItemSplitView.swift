@@ -26,6 +26,14 @@ struct ItemSplitContent {
   let loadFailure: ItemPlanLoadFailure?
   /// 올린 사람(회원)의 제안 화면이면 값이 있다(ADR-0011). nil이면 방장 검토(직접 나누기에 채우기).
   var proposal: ItemProposalPanel? = nil
+  /// 품목명 다시 번역 단추를 보일지(debug 미리보기 대역이 있을 때).
+  var canRetranslate = false
+  /// 그 영수증에 남긴 재번역 기록을 다 읽어 새로 시작할 수 있는지. 읽는 동안·읽지 못했으면 단추를 막는다.
+  var retranslationReady = false
+  /// 남긴 재번역 기록을 읽지 못했다(파일은 그대로). 다시 불러오기를 둔다.
+  var retranslationLoadFailed = false
+  /// 열려 있는 품목명 다시 번역(앱 모델이 가진다). 있으면 시트가 뜬다.
+  var retranslation: ItemRetranslationSession? = nil
 }
 
 /// 제안 화면에 그릴 값: 묶을 원화 기준, 남은 원을 낼 사람, 보낼 요청(전부), 장부의 가장 최근 제안과 보내기 상태.
@@ -48,6 +56,10 @@ struct ItemSplitActions {
   let apply: () -> Void
   var chooseRemainder: (String) -> Void = { _ in }
   var propose: () -> Void = {}
+  var beginRetranslation: ([ItemPlanLine]) -> Void = { _ in }
+  var retryRetranslationLoad: () -> Void = {}
+  var retranslation = ItemRetranslationActions(
+    toggle: { _ in }, confirm: {}, retry: {}, accept: { _, _ in }, close: {})
 }
 
 /// 영수증 품목으로 사람마다 몫을 계산해 지출 검토의 "직접 나누기"에 채운다. 품목 이름·OCR 글자는 이 기기에만 있고,
@@ -92,6 +104,7 @@ struct ItemSplitView: View {
         }
       }
     }
+    .itemRetranslationSheet(content.retranslation, actions.retranslation)
     .modifier(TranslationDownload(requested: $downloadRequested, onFinished: actions.recheckTranslation))
     .toolbar {
       ToolbarItemGroup(placement: .keyboard) {
@@ -172,8 +185,27 @@ struct ItemSplitView: View {
         Text("영수증에서 품목을 찾지 못했어요. 아래에서 품목을 직접 더해 주세요.")
           .textRole(.supporting).accessibilityIdentifier("items-empty")
       }
+      if content.canRetranslate {
+        if content.retranslationLoadFailed {
+          Text("저장한 번역 결과를 이 기기에서 읽지 못했어요. 결과는 지우거나 바꾸지 않았어요. 다시 불러와 주세요.")
+            .textRole(.supporting).accessibilityIdentifier("items-retranslation-load-failed")
+          Button("다시 불러오기", action: actions.retryRetranslationLoad)
+            .accessibilityIdentifier("items-retranslation-load-retry")
+        }
+        let available = plan.retranslatableLines
+        if available.count > 1 {
+          Button("여러 품목 다시 번역") { actions.beginRetranslation(available) }
+            .disabled(!content.retranslationReady)
+            .accessibilityIdentifier("items-retranslate-batch")
+        }
+      }
       ForEach(plan.lines) { line in
         ItemLineRow(line: line, currency: plan.currency, people: content.people, edit: actions.edit)
+        if content.canRetranslate, !line.originalName.isEmpty, !line.excluded {
+          Button("이 항목 다시 번역") { actions.beginRetranslation([line]) }
+            .disabled(!content.retranslationReady)
+            .accessibilityIdentifier("item-\(line.id)-retranslate")
+        }
       }
     } header: {
       Text("품목").textRole(.sectionTitle).foregroundStyle(.primary).textCase(nil)

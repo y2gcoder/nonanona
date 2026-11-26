@@ -1,0 +1,20 @@
+name = "nonanona-item-translation"
+main = "index.mjs"
+compatibility_date = "2026-11-18"
+workers_dev = false
+preview_urls = false
+
+[ai]
+binding = "AI"
+
+[[ratelimits]]
+name = "USER_TRANSLATION_LIMIT"
+namespace_id = "731904"
+
+  [ratelimits.simple]
+  limit = 10
+  period = 60
+
+[observability.logs]
+enabled = true
+invocation_logs = false

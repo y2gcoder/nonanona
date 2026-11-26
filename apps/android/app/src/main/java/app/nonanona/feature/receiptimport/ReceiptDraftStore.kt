@@ -131,6 +131,30 @@ class ReceiptDraftStore(
         itemId: String,
     ) = File(File(draftsDir, id), "items/$itemId.json")
 
+    private fun retranslationFile(
+        id: String,
+        itemId: String,
+    ) = File(File(draftsDir, id), "retranslations/$itemId.json")
+
+    internal fun loadRetranslation(
+        id: String,
+        itemId: String,
+    ): StoredItemRetranslation? = readIfPresent(retranslationFile(id, itemId))?.let(StoredItemRetranslation::fromJson)
+
+    internal fun saveRetranslation(
+        id: String,
+        itemId: String,
+        value: StoredItemRetranslation?,
+    ) {
+        val file = retranslationFile(id, itemId)
+        if (value != null) {
+            writeAtomic(file, value.toJson().toByteArray(Charsets.UTF_8))
+        } else {
+            val staging = stagingFile(file)
+            if ((staging.exists() && !staging.delete()) || (file.exists() && !file.delete())) throw ReceiptStorageException()
+        }
+    }
+
     fun artifactFile(
         id: String,
         fileName: String,
@@ -163,13 +187,15 @@ class ReceiptDraftStore(
         if (writeFault?.invoke(file) == true) throw ReceiptStorageException()
         try {
             file.parentFile?.mkdirs()
-            val staging = File(file.parentFile, ".${file.name}.partial")
+            val staging = stagingFile(file)
             staging.writeBytes(bytes)
             if (!staging.renameTo(file)) throw IOException("cannot write ${file.name}")
         } catch (e: IOException) {
             throw ReceiptStorageException(e)
         }
     }
+
+    private fun stagingFile(file: File) = File(file.parentFile, ".${file.name}.partial")
 
     private fun safeExtension(raw: String): String = raw.lowercase().filter { it in 'a'..'z' || it in '0'..'9' }.ifEmpty { "img" }
 

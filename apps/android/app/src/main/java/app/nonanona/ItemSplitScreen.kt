@@ -25,12 +25,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.nonanona.design.NavigateBackButton
 import app.nonanona.design.Spacing
 import app.nonanona.design.TextRoles
@@ -68,7 +70,7 @@ data class ItemSplitPerson(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ItemSplitScreen(
+internal fun ItemSplitScreen(
     plan: ItemPlan?,
     people: List<ItemSplitPerson>,
     krw: Long?,
@@ -89,7 +91,16 @@ fun ItemSplitScreen(
     proposal: ItemProposalPanel? = null,
     onChooseRemainder: (String) -> Unit = {},
     onPropose: () -> Unit = {},
+    retranslationReceipt: Route.Receipt,
+    retranslation: ItemRetranslationSession?,
+    retranslationState: ItemRetranslationState,
 ) {
+    val restores by retranslationState.restores.collectAsStateWithLifecycle()
+    val restore = restores[retranslationReceipt]
+    val canRetranslate = restore == RetranslationRestore.Ready && retranslation == null
+    if (retranslation != null) {
+        ItemRetranslationDialog(retranslationReceipt, retranslation, retranslationState)
+    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -153,6 +164,26 @@ fun ItemSplitScreen(
             }
             item {
                 Block(stringResource(R.string.items_lines_title), stringResource(R.string.items_lines_hint)) {
+                    if (retranslationState.enabled) {
+                        if (restore == RetranslationRestore.Failed) {
+                            Text(
+                                stringResource(R.string.items_retranslation_load_failed),
+                                style = TextRoles.supporting,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            TextButton(onClick = { retranslationState.reload(retranslationReceipt) }) {
+                                Text(stringResource(R.string.items_load_retry))
+                            }
+                        }
+                        val available = plan.lines.filter { it.isRetranslatable }
+                        if (available.size > 1) {
+                            TextButton(
+                                onClick = { retranslationState.open(retranslationReceipt, available) },
+                                enabled = canRetranslate,
+                                modifier = Modifier.testTag("items_retranslate_batch"),
+                            ) { Text(stringResource(R.string.items_retranslate_batch)) }
+                        }
+                    }
                     if (saveFailed) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(
@@ -173,6 +204,13 @@ fun ItemSplitScreen(
             }
             items(plan.lines, key = { it.id }) { line ->
                 ItemLine(line, plan.currency, people, edit)
+                if (retranslationState.enabled && line.isRetranslatable) {
+                    TextButton(
+                        onClick = { retranslationState.open(retranslationReceipt, listOf(line)) },
+                        enabled = canRetranslate,
+                        modifier = Modifier.padding(horizontal = Spacing.m).testTag("item_${line.id}_retranslate"),
+                    ) { Text(stringResource(R.string.items_retranslate)) }
+                }
                 HorizontalDivider()
             }
             item {

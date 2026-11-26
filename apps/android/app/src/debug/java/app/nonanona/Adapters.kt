@@ -2,6 +2,7 @@ package app.nonanona
 
 import android.content.Context
 import app.nonanona.feature.receiptimport.ProcessingHooks
+import app.nonanona.feature.receiptimport.ReceiptDraftStore
 import app.nonanona.feature.receiptimport.ReceiptProcessor
 import app.nonanona.localbackend.LocalAuthGateway
 import app.nonanona.localbackend.LocalBackendConfig
@@ -40,6 +41,7 @@ internal fun createAdapters(context: Context): Adapters {
             writeFault = writeFault(context),
             readFault = writeFault(context, "debug-fail-reads"),
             itemTranslator = itemTranslator(context),
+            previewRetranslation = previewRetranslation(context),
         )
     }
     val auth =
@@ -49,13 +51,23 @@ internal fun createAdapters(context: Context): Adapters {
         )
     return Adapters(
         auth = auth,
-        trips = TestTripGateway(auth),
+        trips =
+            TestTripGateway(
+                auth,
+                retranslationFixtures =
+                    if (debugFlag(context, "e2eRetranslationLedger")) {
+                        ReceiptDraftStore(File(context.filesDir, "receipt-import"))
+                    } else {
+                        null
+                    },
+            ),
         processingHooks = processingHooks(context),
         debugReceiptConfirm = confirmWithSuggestions(context),
         debugUploadUi = DebugUploadSection,
         writeFault = writeFault(context),
         readFault = writeFault(context, "debug-fail-reads"),
         itemTranslator = itemTranslator(context),
+        previewRetranslation = previewRetranslation(context),
     )
 }
 
@@ -63,6 +75,13 @@ internal fun createAdapters(context: Context): Adapters {
  * 검증용: files/debug-processing.properties의 itemTranslation=preview(또는 preview-fail-once)면 미리보기 대역(정해 둔 사전,
  * 실제 번역 아님)을 쓴다. 없으면 기기 번역 서비스(null).
  */
+private fun previewRetranslation(context: Context): (suspend (List<String>) -> List<String?>)? =
+    if (debugValue(context, "itemRetranslation") == "preview") {
+        { names -> names.map { PreviewItemTranslator.DICTIONARY[it] } }
+    } else {
+        null
+    }
+
 private fun itemTranslator(context: Context) =
     debugValue(context, "itemTranslation")?.takeIf { it.startsWith("preview") }?.let {
         PreviewItemTranslator(

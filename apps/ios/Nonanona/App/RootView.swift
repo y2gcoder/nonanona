@@ -262,7 +262,11 @@ private struct ItemSplitDestination: View {
             basis: basis, remainderChoice: model.proposalRemainder(split)?.value,
             request: model.proposalRequest(split), sent: expense?.shareProposal,
             sendState: rooms.proposalState[split.expense],
-            consentChanged: rooms.proposalConsentChanged.contains(split.expense)) : nil),
+            consentChanged: rooms.proposalConsentChanged.contains(split.expense)) : nil,
+        canRetranslate: model.retranslation.translate != nil,
+        retranslationReady: model.retranslation.canBegin(split.receipt),
+        retranslationLoadFailed: model.retranslation.restores[split.receipt] == .failed,
+        retranslation: model.retranslation.sessions[split.receipt]),
       actions: ItemSplitActions(
         edit: { model.editItemPlan(split.receipt, $0) },
         retrySave: { model.retryItemPlanSave(split.receipt) },
@@ -271,7 +275,10 @@ private struct ItemSplitDestination: View {
         recheckTranslation: { Task { await model.checkTranslation(split.receipt) } },
         apply: { model.applyItemSplit(split) },
         chooseRemainder: { model.chooseProposalRemainder(split, MemberID(value: $0)) },
-        propose: { model.requestProposalSend(split) }))
+        propose: { model.requestProposalSend(split) },
+        beginRetranslation: { model.retranslation.begin(split.receipt, lines: $0) },
+        retryRetranslationLoad: { model.retryRetranslationLoad(split.receipt) },
+        retranslation: ItemRetranslationActions(model: model.retranslation, target: split.receipt)))
   }
 }
 

@@ -37,6 +37,7 @@ class Adapters(
     val readFault: ((File) -> Boolean)? = null,
     /** 품목 이름 번역. null이면 기기 번역 서비스(release와 debug 기본값). debug는 미리보기 대역을 고를 수 있다. */
     val itemTranslator: ItemNameTranslator? = null,
+    val previewRetranslation: (suspend (List<String>) -> List<String?>)? = null,
 )
 
 /** 초안 화면이 개발용 올리기 화면에 넘기는 값. */

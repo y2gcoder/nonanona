@@ -16,6 +16,8 @@ struct AppGraph: Sendable {
   /// 품목 이름 번역(기기 안). debug는 실행 환경 변수로 미리보기 대역을 고를 수 있다.
   var itemTranslator: any ItemNameTranslator = AppleItemTranslator()
 
+  var previewRetranslation: (@Sendable ([String]) async throws -> [String?])?
+
   static func live() -> AppGraph {
     let support = URL.applicationSupportDirectory
     #if DEBUG
@@ -69,10 +71,16 @@ struct AppGraph: Sendable {
     #else
       let translator: any ItemNameTranslator = AppleItemTranslator()
     #endif
-    return AppGraph(
+    var graph = AppGraph(
       auth: auth, trips: trips, settlement: settlement, drafts: drafts,
       joinFlow: JoinFlow(auth: auth, trips: trips, pendingInvites: pending),
       recognizer: VisionReceiptRecognizer(), processingHooks: hooks, itemTranslator: translator)
+    #if DEBUG
+      if ProcessInfo.processInfo.environment["NONANONA_ITEM_RETRANSLATION"] == "preview" {
+        graph.previewRetranslation = { names in names.map { PreviewItemTranslator.dictionary[$0] } }
+      }
+    #endif
+    return graph
   }
 
   #if DEBUG

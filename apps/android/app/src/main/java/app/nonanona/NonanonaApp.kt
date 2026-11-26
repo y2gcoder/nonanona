@@ -66,6 +66,7 @@ import app.nonanona.feature.trip.TripRoomScreen
 fun NonanonaApp(viewModel: AppViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val rooms by viewModel.rooms.state.collectAsStateWithLifecycle()
+    val retranslations by viewModel.itemRetranslation.sessions.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val resources = LocalResources.current
     val pickPhotos =
@@ -275,6 +276,9 @@ fun NonanonaApp(viewModel: AppViewModel) {
                         onRetrySave = { viewModel.retryItemPlanSave(route.receipt) },
                         onRetryLoad = { viewModel.retryItemPlanLoad(route.receipt) },
                         onTranslate = { viewModel.translateItemNames(route.receipt) },
+                        retranslationReceipt = route.receipt,
+                        retranslation = retranslations[route.receipt],
+                        retranslationState = viewModel.itemRetranslation,
                         onOpenTranslationSettings = {
                             runCatching { settings?.send(context, 0, null) }
                             viewModel.checkTranslation(route.receipt)
@@ -304,6 +308,9 @@ fun NonanonaApp(viewModel: AppViewModel) {
                         onRetrySave = { viewModel.retryItemPlanSave(route.receipt) },
                         onRetryLoad = { viewModel.retryItemPlanLoad(route.receipt) },
                         onTranslate = { viewModel.translateItemNames(route.receipt) },
+                        retranslationReceipt = route.receipt,
+                        retranslation = retranslations[route.receipt],
+                        retranslationState = viewModel.itemRetranslation,
                         onOpenTranslationSettings = {
                             runCatching { settings?.send(context, 0, null) }
                             viewModel.checkTranslation(route.receipt)

@@ -11,7 +11,9 @@ import android.media.ExifInterface
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
+import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.ExecutionException
@@ -96,24 +98,27 @@ internal object ReceiptImages {
         }
 }
 
-/** ML Kit 번들 일본어 모델. 기기 안에서만 동작한다(native-batch-import 실험에서 옮김). */
+/**
+ * ML Kit 번들 일본어·한국어 모델(ADR-0013). 기기 안에서만 동작하고 모델을 내려받지 않는다.
+ * 사진마다 두 모델로 모두 읽고 [OcrLanguageChoice] 규칙(iOS와 같다)으로 한쪽 결과를 고른다. 일본어 모델은 한글을 가나·한자로,
+ * 한국어 모델은 한자·가나를 한글로 잘못 읽어 한 모델의 결과만으로는 다른 언어 사진을 가려낼 수 없었다(ADR-0013의 측정).
+ */
 class MlKitReceiptRecognizer : ReceiptRecognizer {
-    private val client = TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
+    private val japanese = TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
+    private val korean = TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
 
     override fun recognize(file: File): OcrResult {
         val bitmap = ReceiptImages.decode(file)
-        // 긴 영수증은 겹치는 타일로 나눠 읽고 합친다(한 번에 읽으면 엔진이 한 구간을 통째로 건너뛸 수 있다).
-        val tiles = OcrTiles.plan(bitmap.width, bitmap.height)
-        val merged =
-            OcrTiles.merge(
-                bitmap.width,
-                bitmap.height,
-                tiles.map { tile ->
-                    val part = if (tiles.size == 1) bitmap else Bitmap.createBitmap(bitmap, 0, tile.top, bitmap.width, tile.height)
-                    tile to read(part)
-                },
-            )
-        val lines = merged.lines
+        val japanese = read(bitmap, OcrScript.Japanese)
+        // 한국어 모델이 실패하면 일본어 결과를 쓴다(예전과 같다).
+        val korean =
+            try {
+                read(bitmap, OcrScript.Korean)
+            } catch (e: ProcessingException) {
+                null
+            }
+        val lines =
+            if (korean != null && OcrLanguageChoice.prefersKorean(japanese.scored(), korean.scored())) korean.lines else japanese.lines
         val perLine =
             PhotoQuality.measureLines(lines, bitmap.width, bitmap.height) { x, y, rw, rh ->
                 val argb = IntArray(rw * rh)
@@ -126,8 +131,37 @@ class MlKitReceiptRecognizer : ReceiptRecognizer {
         return OcrResult(bitmap.width, bitmap.height, lines, PhotoQuality.median(perLine.values), perLine)
     }
 
+    /**
+     * 한 모델로 사진 전체를 읽는다(품질 측정 전). 긴 영수증은 겹치는 타일로 나눠 읽고 합친다
+     * (한 번에 읽으면 엔진이 한 구간을 통째로 건너뛸 수 있다). 측정 하네스도 이 함수로 모델별 결과와 시간을 잰다.
+     */
+    internal fun read(
+        bitmap: Bitmap,
+        script: OcrScript,
+    ): OcrResult {
+        val client =
+            when (script) {
+                OcrScript.Japanese -> japanese
+                OcrScript.Korean -> korean
+            }
+        val tiles = OcrTiles.plan(bitmap.width, bitmap.height)
+        return OcrTiles.merge(
+            bitmap.width,
+            bitmap.height,
+            tiles.map { tile ->
+                val part = if (tiles.size == 1) bitmap else Bitmap.createBitmap(bitmap, 0, tile.top, bitmap.width, tile.height)
+                tile to read(part, client)
+            },
+        )
+    }
+
+    private fun OcrResult.scored() = lines.map { OcrLanguageChoice.Line(it.text, it.confidence ?: 0.0) }
+
     /** 비트맵 하나(사진 전체 또는 타일)를 읽어 그 비트맵 안 0~1 좌표로. */
-    private fun read(bitmap: Bitmap): OcrResult {
+    private fun read(
+        bitmap: Bitmap,
+        client: TextRecognizer,
+    ): OcrResult {
         val result =
             try {
                 Tasks.await(client.process(InputImage.fromBitmap(bitmap, 0)))
@@ -158,7 +192,17 @@ class MlKitReceiptRecognizer : ReceiptRecognizer {
                         } else {
                             null
                         }
-                    OcrLine(i, line.text, b.left / w, b.top / h, b.width() / w, b.height() / h, corners, numberBox)
+                    OcrLine(
+                        i,
+                        line.text,
+                        b.left / w,
+                        b.top / h,
+                        b.width() / w,
+                        b.height() / h,
+                        corners,
+                        numberBox,
+                        line.confidence.toDouble(),
+                    )
                 }
         return OcrResult(bitmap.width, bitmap.height, lines)
     }

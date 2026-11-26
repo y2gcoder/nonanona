@@ -383,10 +383,11 @@ internal object SensitiveText {
                 "${NL}AUTH",
                 "${NL}APPR",
                 "${NL}MEMBER",
-                "카드",
-                "승인",
-                "회원",
-                "예약",
+                // 한국어 라벨은 "번호"와 묶어 본다(iOS와 같다). 한국어 화면의 "예약 확정"·"가상카드 일시불" 같은 글자를 가리지 않는다(ADR-0013).
+                "카드\\s*번호",
+                "승인\\s*번호",
+                "회원\\s*번호",
+                "예약\\s*번호",
                 "전화",
                 "연락처",
             ).joinToString("|"),
@@ -417,8 +418,8 @@ internal object SensitiveText {
             RegexOption.IGNORE_CASE,
         )
 
-    /** 날짜. OCR이 월·일 숫자 사이에 공백을 넣어도(2026-1 1-07) 날짜다. */
-    private val date = Regex("\\d{4}\\s*[-/.年]\\s*\\d(?:\\s?\\d)?\\s*[-/.月]\\s*\\d(?:\\s?\\d)?\\s*日?")
+    /** 날짜(일본어·한국어 표기 포함). OCR이 월·일 숫자 사이에 공백을 넣어도(2026-1 1-07) 날짜다. */
+    private val date = Regex("\\d{4}\\s*[-/.年년]\\s*\\d(?:\\s?\\d)?\\s*[-/.月월]\\s*\\d(?:\\s?\\d)?\\s*[日일]?")
     private val time = Regex("\\d{1,2}\\s*:\\s*\\d{2}")
 
     /** 품목 코드 근거: JAN·EAN 낱말. */

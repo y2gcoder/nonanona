@@ -737,6 +737,74 @@
         {"text": "コーヒー ABC-12345 ¥198", "box": [40, 600, 380, 620]}
       ],
       "expect": {"masked": {}, "visible": {"line": [43, 603, 377, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-won-total",
+      "reviews": ["contract:policy", "adr:0013"],
+      "lines": [
+        {"text": "합계 6,900원", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-total-won-sign-read-as-w",
+      "reviews": ["contract:policy", "adr:0013"],
+      "lines": [
+        {"text": "총 결제 금액", "box": [40, 600, 200, 620]},
+        {"text": "W265,100", "box": [600, 600, 760, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"label": [45, 603, 195, 617], "amount": [605, 603, 755, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-date-year-month",
+      "reviews": ["contract:policy", "adr:0013"],
+      "lines": [
+        {"text": "결제일시 2026년 11월 4일 19:22", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-approval-label-value-row",
+      "reviews": ["contract:policy", "adr:0013"],
+      "lines": [
+        {"text": "승인번호", "box": [40, 600, 140, 620]},
+        {"text": "30418827", "box": [600, 600, 700, 620]}
+      ],
+      "expect": {"masked": {"value": [605, 603, 695, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-booking-label-value-row",
+      "reviews": ["contract:policy", "adr:0013"],
+      "lines": [
+        {"text": "예약번호", "box": [40, 600, 140, 620]},
+        {"text": "4708215963", "box": [600, 600, 720, 620]}
+      ],
+      "expect": {"masked": {"value": [605, 603, 715, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-card-label-value-row",
+      "reviews": ["contract:policy", "adr:0013"],
+      "lines": [
+        {"text": "카드번호", "box": [40, 600, 140, 620]},
+        {"text": "9411-23**-****-0582", "box": [520, 600, 760, 620]}
+      ],
+      "expect": {"masked": {"value": [525, 603, 755, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-booking-status-not-label",
+      "reviews": ["contract:policy", "adr:0013"],
+      "lines": [
+        {"text": "예약 확정 · 가상 여행앱", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-payment-method-not-label",
+      "reviews": ["contract:policy", "adr:0013"],
+      "lines": [
+        {"text": "결제수단 가상카드 일시불", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
     }
   ]
 }

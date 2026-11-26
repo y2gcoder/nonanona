@@ -15,10 +15,12 @@ public struct OCRLine: Codable, Equatable, Sendable {
   let corners: [CGPoint]?
   /// 가격이나 날짜와 한 상자로 읽힌 번호의 글자 범위.
   let sensitiveCorners: [CGPoint]?
+  /// Vision이 준 줄 신뢰도(0~1). 언어 선택(`OCRLanguageChoice`)에 쓴다. 옛 초안에는 없다.
+  let confidence: Double?
 
   public init(
     id: Int, text: String, x: Double, y: Double, width: Double, height: Double, corners: [CGPoint]? = nil,
-    sensitiveCorners: [CGPoint]? = nil
+    sensitiveCorners: [CGPoint]? = nil, confidence: Double? = nil
   ) {
     self.id = id
     self.text = text
@@ -28,6 +30,7 @@ public struct OCRLine: Codable, Equatable, Sendable {
     self.height = height
     self.corners = corners
     self.sensitiveCorners = sensitiveCorners
+    self.confidence = confidence
   }
 }
 
@@ -78,7 +81,8 @@ enum ImageLoading {
   }
 }
 
-/// Apple Vision 다국어 OCR. 기기 안에서만 동작한다(native-batch-import 실험에서 옮김).
+/// Apple Vision 다국어 OCR. 기기 안에서만 동작한다(native-batch-import 실험에서 옮김). 사진마다 일본어·영어 우선 읽기와
+/// 한국어를 포함한 자동 감지 읽기를 하고 `OCRLanguageChoice`로 고른다(ADR-0013).
 public struct VisionReceiptRecognizer: ReceiptRecognizer {
   public init() {}
 
@@ -87,6 +91,18 @@ public struct VisionReceiptRecognizer: ReceiptRecognizer {
   }
 
   func recognize(_ image: CGImage) throws -> OCRResult {
+    // 일본어 우선 읽기와 한국어를 포함한 자동 감지 읽기를 모두 하고 같은 규칙으로 고른다(ADR-0013, Android와 같다).
+    let japanese = try read(image, detectLanguage: false)
+    // 한국어 포함 읽기가 실패하면 일본어 결과를 쓴다(예전과 같다).
+    let korean = (try? read(image, detectLanguage: true)) ?? []
+    let lines =
+      OCRLanguageChoice.prefersKorean(japanese: japanese.map(\.scored), korean: korean.map(\.scored))
+      ? korean : japanese
+    return OCRResult(pixelWidth: image.width, pixelHeight: image.height, lines: lines)
+  }
+
+  /// 한 언어 설정으로 사진 전체를 읽는다. 긴 사진은 겹치는 타일로 나눠 읽고 합친다.
+  func read(_ image: CGImage, detectLanguage: Bool) throws -> [OCRLine] {
     let width = image.width
     let height = image.height
     let tileHeight = height > width * 5 / 2 ? width * 2 : height
@@ -99,7 +115,7 @@ public struct VisionReceiptRecognizer: ReceiptRecognizer {
       guard let tile = top == 0 && bottom == height ? image : image.cropping(to: tileBounds)
       else { throw ProcessingFailure.recognitionError }
       var lines: [OCRLine] = []
-      for observation in try observations(in: tile) {
+      for observation in try observations(in: tile, detectLanguage: detectLanguage) {
         guard let candidate = observation.topCandidates(1).first else { continue }
         let b = observation.boundingBox
         func corners(_ rectangle: VNRectangleObservation) -> [CGPoint] {
@@ -118,70 +134,89 @@ public struct VisionReceiptRecognizer: ReceiptRecognizer {
           OCRLine(
             id: 0, text: text, x: b.minX, y: 1 - b.maxY, width: b.width,
             height: b.height, corners: corners(observation),
-            sensitiveCorners: sensitiveCorners))
+            sensitiveCorners: sensitiveCorners, confidence: Double(candidate.confidence)))
       }
       tiles.append(OCRTile(top: top, height: tile.height, lines: lines))
       if bottom == height { break }
       top = bottom - overlap
     }
-    let sorted = OCRTile.merge(tiles, imageHeight: height).enumerated().map { id, line in
+    return OCRTile.merge(tiles, imageHeight: height).enumerated().map { id, line in
       OCRLine(
         id: id, text: line.text, x: line.x, y: line.y, width: line.width, height: line.height, corners: line.corners,
-        sensitiveCorners: line.sensitiveCorners)
+        sensitiveCorners: line.sensitiveCorners, confidence: line.confidence)
     }
-    return OCRResult(pixelWidth: width, pixelHeight: height, lines: sorted)
   }
 
-  private func observations(in image: CGImage) throws -> [VNRecognizedTextObservation] {
-    func read(detectLanguage: Bool) throws -> [VNRecognizedTextObservation] {
-      let request = VNRecognizeTextRequest()
-      request.recognitionLevel = .accurate
-      request.automaticallyDetectsLanguage = detectLanguage
-      let supported = (try? request.supportedRecognitionLanguages()) ?? []
-      let languages = detectLanguage ? ["ja-JP", "en-US", "ko-KR"] : ["ja-JP", "en-US"]
-      request.recognitionLanguages = languages.filter { supported.contains($0) }
-      do {
-        try VNImageRequestHandler(cgImage: image, orientation: .up).perform([request])
-      } catch {
-        throw ProcessingFailure.recognitionError
-      }
-      return request.results ?? []
+  private func observations(in image: CGImage, detectLanguage: Bool) throws -> [VNRecognizedTextObservation] {
+    let request = VNRecognizeTextRequest()
+    request.recognitionLevel = .accurate
+    request.automaticallyDetectsLanguage = detectLanguage
+    let supported = (try? request.supportedRecognitionLanguages()) ?? []
+    let languages = detectLanguage ? ["ja-JP", "en-US", "ko-KR"] : ["ja-JP", "en-US"]
+    request.recognitionLanguages = languages.filter { supported.contains($0) }
+    do {
+      try VNImageRequestHandler(cgImage: image, orientation: .up).perform([request])
+    } catch {
+      throw ProcessingFailure.recognitionError
     }
-
-    func countLines(_ rows: [VNRecognizedTextObservation], containing script: ClosedRange<UInt32>) -> Int {
-      rows.count {
-        $0.topCandidates(1).first?.string.unicodeScalars.contains { script.contains($0.value) } == true
-      }
-    }
-
-    let primary = try read(detectLanguage: false)
-    // 일본어 품목 판독의 결과를 유지하면서 가나를 거의 읽지 못한 결제 화면은 한글도 확인한다.
-    if countLines(primary, containing: 0x3040...0x30ff) < 2,
-      let alternate = try? read(detectLanguage: true), countLines(alternate, containing: 0xac00...0xd7a3) >= 2
-    {
-      return alternate
-    }
-    return primary
+    return request.results ?? []
   }
 }
 
-/// OCR 줄에서 날짜·합계·가게와 가림 후보를 고른다. 읽지 못하면 이유를 `ProcessingFailure`로 알린다.
+extension OCRLine {
+  fileprivate var scored: OCRLanguageChoice.Line { .init(text: text, confidence: confidence ?? 0) }
+}
+
+/// 사진마다 일본어 우선 읽기와 한국어 포함 읽기 중 무엇을 쓸지 정하는 규칙(ADR-0013). Android `OcrLanguageChoice`와 같은
+/// 규칙이고, 두 앱의 시험이 같은 표(`apps/fixtures/korean/language-choice.json`)를 읽는다.
+///
+/// 결과마다 점수 = 줄마다 (공백을 뺀 글자 수 × 엔진 신뢰도)의 합. 한국어 결과의 한글 줄이 `minHangulLines` 이상이고
+/// 점수가 일본어 결과보다 높을 때만 한국어 결과를 쓴다. 같으면 일본어(기존 동작)다.
+enum OCRLanguageChoice {
+  static let minHangulLines = 2
+
+  struct Line: Equatable, Sendable {
+    let text: String
+    let confidence: Double
+  }
+
+  static func hangulLines(_ lines: [Line]) -> Int {
+    lines.count { $0.text.unicodeScalars.contains { (0xAC00...0xD7A3).contains($0.value) } }
+  }
+
+  static func score(_ lines: [Line]) -> Double {
+    lines.reduce(0) { sum, line in
+      sum + Double(line.text.unicodeScalars.count { !$0.properties.isWhitespace }) * min(max(line.confidence, 0), 1)
+    }
+  }
+
+  static func prefersKorean(japanese: [Line], korean: [Line]) -> Bool {
+    hangulLines(korean) >= minHangulLines && score(korean) > score(japanese)
+  }
+}
+
+/// OCR 줄에서 날짜·합계·통화·가게와 가림 후보를 고른다. 읽지 못하면 이유를 `ProcessingFailure`로 알린다.
+/// 합계 낱말·통화·날짜 규칙은 Android `ProposalBuilder`와 같고, 두 앱의 시험이 같은 표
+/// (`apps/fixtures/korean/proposal-fields.json`)를 읽는다(ADR-0013).
 enum ProposalBuilder {
   // 품목 추출에서 쓰던 제외 패턴은 그대로 유지한다.
   static let sensitivePattern =
     #"TEL|電話|カード|card|会員|承認|予約\s*(?:番号|ID|コード|No)|reservation|booking|PIN|\d{2,4}-\d{2,4}-\d{3,4}"#
-  static let datePattern = #"(\d{4})\s*[-/.年]\s*(\d{1,2})\s*[-/.月]\s*(\d{1,2})"#
-  static let totalKeyword = #"合計|お会計|支払額|決済金額|total"#
+  static let datePattern = #"(\d{4})\s*[-/.年년]\s*(\d{1,2})\s*[-/.月월]\s*(\d{1,2})"#
+  /// 한국어 결제 화면의 "총 결제 금액"·"결제금액"과 영수증의 "합계"를 포함한다.
+  static let totalKeyword = #"合計|お会計|支払額|決済金額|total|합계|결제\s*금액|총\s*금액"#
+  static let subtotalKeyword = "小計|소계"
 
   static func make(_ ocr: OCRResult) throws(ProcessingFailure) -> OCRProposal {
     guard !ocr.lines.isEmpty else { throw .unreadable }
-    guard let amount = total(ocr.lines) else { throw .missingTotal }
+    guard let total = total(ocr.lines) else { throw .missingTotal }
     guard let date = ocr.lines.lazy.compactMap({ isoDate($0.text) }).first else { throw .missingDate }
     let merchant = ocr.lines.first?.text.trimmingCharacters(in: .whitespaces)
     let masks = SensitiveLines(ocr)
+    let currency = currency(totalText: total.text, allTexts: ocr.lines.map(\.text))
     return OCRProposal(
       ocr: ocr,
-      fields: AllowedReceiptFields(date: date, amountMinor: amount, currency: "JPY", merchant: merchant),
+      fields: AllowedReceiptFields(date: date, amountMinor: total.amount, currency: currency, merchant: merchant),
       suggestedMaskLineIDs: masks.ids.sorted(), needsMaskReview: masks.unmatchedLabel || masks.isTilted)
   }
 
@@ -196,18 +231,48 @@ enum ProposalBuilder {
     return String(format: "%04d-%02d-%02d", parts[0], parts[1], parts[2])
   }
 
-  static func total(_ lines: [OCRLine]) -> Int? {
-    let candidates = lines.filter { matches(totalKeyword, $0.text) && !matches("小計", $0.text) }
+  /// 합계 금액과 그 금액을 읽은 글자(통화 판정용).
+  struct Total: Equatable {
+    let amount: Int
+    let text: String
+  }
+
+  static func total(_ lines: [OCRLine]) -> Total? {
+    let candidates = lines.filter { matches(totalKeyword, $0.text) && !matches(subtotalKeyword, $0.text) }
     for line in candidates {
-      if let value = number(after: totalKeyword, in: line.text) { return value }
+      if let value = number(after: totalKeyword, in: line.text) { return Total(amount: value, text: line.text) }
       // OCR이 "合計"와 금액을 같은 행의 두 상자로 나눈 경우.
       let row = lines.filter {
         $0.id != line.id && abs(($0.y + $0.height / 2) - (line.y + line.height / 2)) < line.height / 2
           && $0.x > line.x
       }
-      if let value = row.lazy.compactMap({ number(after: "", in: $0.text) }).first { return value }
+      if let found = row.lazy.compactMap({ other in
+        number(after: "", in: other.text).map { Total(amount: $0, text: other.text) }
+      })
+      .first {
+        return found
+      }
     }
     return nil
+  }
+
+  static let krwMark = #"원|₩|KRW|(?<![A-Za-z])W(?=\s*\d)"#
+  static let jpyMark = #"円|[¥￥]|JPY"#
+
+  /// 합계 통화. 합계를 읽은 글자의 표시(円·¥·JPY / 원·₩·KRW, OCR이 ₩를 W로 읽는 경우 포함)를 먼저 본다. 둘 다 있거나 없으면
+  /// 사진 전체에서 표시가 붙은 줄이 더 많은 쪽, 그래도 같으면 한글 줄이 2줄 이상이면 KRW, 아니면 JPY(기존 동작)다.
+  static func currency(totalText: String, allTexts: [String]) -> String {
+    func has(_ pattern: String, _ text: String) -> Bool {
+      text.range(of: pattern, options: .regularExpression) != nil
+    }
+    let krw = has(krwMark, totalText)
+    let jpy = has(jpyMark, totalText)
+    if krw != jpy { return krw ? "KRW" : "JPY" }
+    let krwLines = allTexts.count { has(krwMark, $0) }
+    let jpyLines = allTexts.count { has(jpyMark, $0) }
+    if krwLines != jpyLines { return krwLines > jpyLines ? "KRW" : "JPY" }
+    let hangulLines = allTexts.count { $0.unicodeScalars.contains { (0xAC00...0xD7A3).contains($0.value) } }
+    return hangulLines >= 2 ? "KRW" : "JPY"
   }
 
   static func number(after keyword: String, in text: String) -> Int? {

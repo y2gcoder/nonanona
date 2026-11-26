@@ -61,7 +61,9 @@ struct SensitiveLines {
         right = max(right, digit.right.x)
         foundDigit = true
       }
-      if label.text.valueRanges.isEmpty && fragments.isEmpty && !foundDigit {
+      // 결제 화면의 "라벨 ……… 값" 행처럼 같은 행의 먼 칸이 이미 강한 번호로 가려지면 짝이 있는 라벨이다(ADR-0013).
+      let strongOnRow = same.contains { $0.text.hasStrongNumber && $0.left.x >= label.right.x }
+      if label.text.valueRanges.isEmpty && fragments.isEmpty && !foundDigit && !strongOnRow {
         hasUnpairedLabel = true
       }
     }

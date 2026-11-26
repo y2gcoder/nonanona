@@ -3,7 +3,7 @@ import Foundation
 /// 가림 전용 문자 판정. 품목 추출의 OCR 전문과 문자열은 바꾸지 않는다.
 struct SensitiveText {
   private static let labels = expression(
-    #"(?<![A-Z])(?:TEL|phone|card|reservation|booking|PIN|approval|authori[sz]ation|member(?:ship)?|AUTH|APPR)(?![A-Z])|電話|カ[ー一\-]ド|会員|承認|予約\s*(?:番号|ID|コード|No)|お客様\s*番号|會員\s*(?:號碼|编号)|카드\s*번호|승인\s*번호|회원\s*번호|예약\s*번호|전화(?:\s*번호)?"#
+    #"(?<![A-Z])(?:TEL|phone|card|reservation|booking|PIN|approval|authori[sz]ation|member(?:ship)?|AUTH|APPR)(?![A-Z])|電話|カ[ー一\-]ド|会員|承認|予約\s*(?:番号|ID|コード|No)|お客様\s*番号|會員\s*(?:號碼|编号)|카드\s*번호|승인\s*번호|회원\s*번호|예약\s*번호|전화(?:\s*번호)?|연락처"#
   )
   private static let qualifiers = expression(#"^\s*(?:番号|號碼|CODE|NO\.?|ID)?[\s:：.#\-]*"#)
   private static let masked =
@@ -17,7 +17,7 @@ struct SensitiveText {
   private static let labelledValue = expression(
     "^(?:" + masked + "|" + phone + #"|[A-Z0-9*●•#×]+(?:[-‐–−|_][A-Z0-9*●•#×]+|\s+\d{2,})*)"#)
   // Vision은 날짜의 월·일 두 자리 사이에도 가끔 공백을 넣는다.
-  private static let dates = expression(#"(?<!\d)\d{4}\s*[-/.年]\s*\d(?:\s*\d)?\s*[-/.月]\s*\d(?:\s*\d)?(?!\d)"#)
+  private static let dates = expression(#"(?<!\d)\d{4}\s*[-/.年년]\s*\d(?:\s*\d)?\s*[-/.月월]\s*\d(?:\s*\d)?(?!\d)"#)
   private static let amounts = expression(
     #"[¥$€£₩]\s*\d[\d,.]*|\d[\d,.]*\s*(?:円|JPY\b|USD\b|KRW\b|EUR\b)|(?:合計|お会計|支払額|決済金額|小計|税|割引|釣銭|お預り|total)\s*\d[\d,.]*"#
   )

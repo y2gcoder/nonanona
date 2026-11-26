@@ -9,6 +9,7 @@ lifecycle = "2.11.0"             # 2026-06-17
 navigation3 = "1.2.1"            # 2026-11-04
 junit = "4.13.2"                 # 2021-02-13
 mlkit-text-japanese = "16.0.1"   # 2024-08-07. 번들 일본어 모델(기기 안 OCR). native-batch-import 실험에서 검증
+mlkit-text-korean = "16.0.1"     # 2024-08-07(확인일 2026-11-26). 번들 한국어 모델. 일본어 모델과 같은 판·같은 공통 엔진(text-recognition-bundled-common 17.0.0). ADR-0013
 org-json = "20260814"            # 2026-08-14. JVM 단위 테스트 전용(앱은 플랫폼 org.json을 쓴다)
 
 [libraries]
@@ -27,6 +28,7 @@ lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-com
 navigation3-ui = { module = "androidx.navigation3:navigation3-ui", version.ref = "navigation3" }
 junit = { module = "junit:junit", version.ref = "junit" }
 mlkit-text-japanese = { module = "com.google.mlkit:text-recognition-japanese", version.ref = "mlkit-text-japanese" }
+mlkit-text-korean = { module = "com.google.mlkit:text-recognition-korean", version.ref = "mlkit-text-korean" }
 org-json = { module = "org.json:json", version.ref = "org-json" }
 
 [plugins]

@@ -19,7 +19,7 @@ struct OCRTile {
         let translated = OCRLine(
           id: 0, text: line.text, x: line.x, y: fullY(line.y), width: line.width,
           height: line.height * Double(tile.height) / Double(imageHeight), corners: fullCorners(line.corners),
-          sensitiveCorners: fullCorners(line.sensitiveCorners))
+          sensitiveCorners: fullCorners(line.sensitiveCorners), confidence: line.confidence)
         let top = tile.top == 0 ? Double.infinity : line.y
         let bottom = tile.top + tile.height == imageHeight ? Double.infinity : 1 - line.y - line.height
         return Observation(

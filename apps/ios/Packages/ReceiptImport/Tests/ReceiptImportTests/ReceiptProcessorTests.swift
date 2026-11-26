@@ -64,6 +64,43 @@ private struct BlurredReceiptVisionCapture: ReceiptRecognizer {
   }
 }
 
+/// 가맹점 번호 상자(보존)와 겹친 숫자 없는 이름 줄(공통 예제 `user-selected-line-overlapping-store-number`). 1000×1000.
+private struct OverlappingNameRecognizer: ReceiptRecognizer {
+  func recognize(_ url: URL) throws -> OCRResult {
+    let boxes: [(String, [Double])] = [
+      ("架空商店", [40, 20, 140, 40]), ("2026/11/08", [40, 80, 145, 100]), ("合計 ¥3,280", [40, 120, 168, 140]),
+      ("가맹점 번호 1384", [40, 600, 220, 620]), ("가상 이름", [190, 600, 275, 620]),
+    ]
+    let lines = boxes.enumerated().map { id, entry in
+      let b = entry.1.map { $0 / 1000 }
+      return OCRLine(
+        id: id, text: entry.0, x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1],
+        corners: [
+          CGPoint(x: b[0], y: b[1]), CGPoint(x: b[2], y: b[1]), CGPoint(x: b[2], y: b[3]), CGPoint(x: b[0], y: b[3]),
+        ])
+    }
+    return OCRResult(pixelWidth: 1000, pixelHeight: 1000, lines: lines)
+  }
+}
+
+/// 흰 1000×1000에 빨간 칸(겹친 부분 [192,603,218,617])을 그린 PNG.
+private func overlappingNamePNG() throws -> Data {
+  let ctx = try #require(
+    CGContext(
+      data: nil, width: 1000, height: 1000, bitsPerComponent: 8, bytesPerRow: 0,
+      space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+  ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+  ctx.fill(CGRect(x: 0, y: 0, width: 1000, height: 1000))
+  ctx.setFillColor(CGColor(red: 0.86, green: 0.12, blue: 0.12, alpha: 1))
+  // CoreGraphics 원점은 왼쪽 아래.
+  ctx.fill(CGRect(x: 192, y: 1000 - 617, width: 26, height: 14))
+  let data = NSMutableData()
+  let encoder = try #require(CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil))
+  CGImageDestinationAddImage(encoder, try #require(ctx.makeImage()), nil)
+  #expect(CGImageDestinationFinalize(encoder))
+  return data as Data
+}
+
 /// 정답의 줄 위치로 만든 결정적 OCR 대역. 호출을 세고, 정한 호출부터 풀어 줄 때까지 붙잡아 둘 수 있다.
 private final class TruthRecognizer: ReceiptRecognizer, @unchecked Sendable {
   private let lock = NSLock()
@@ -146,6 +183,32 @@ struct ReceiptProcessorTests {
     }
     #expect(uncovered == 0, "흐린 승인 번호의 잉크가 사본에 남았다")
     #expect(proposal.needsMaskReview == true, "가림 확인 필요 표시가 없다")
+  }
+
+  /// 사용자가 추천 밖의 숫자 없는 줄만 켜고(사용자 띠 없음) 확인하면, 겹친 보존 상자(가맹점 번호)의 되돌림이 그 줄을 풀지 않는다.
+  @Test func userSelectedLineStaysBlackOverRestoredStoreBox() async throws {
+    let root = tempRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = ReceiptDraftStore(root: root)
+    let draft = try store.create(
+      source: .picker, photos: [IncomingPhoto(fileExtension: "png", content: .data(try overlappingNamePNG()))])
+    let processor = try ReceiptProcessor(store: store, draft: draft, recognizer: OverlappingNameRecognizer())
+    await processor.run()
+    let id = try #require(await processor.snapshot().items.first?.id)
+    let proposal = try await processor.proposal(id)
+    #expect(Set(proposal.suggestedMaskLineIDs).isDisjoint(with: [3, 4]), "추천에는 두 줄이 없다")
+    let lines = Set(proposal.suggestedMaskLineIDs).union([4])
+    let preview = try await processor.preview(id, maskLineIDs: lines, regions: [])
+    let masked = try rgba(preview.pngData)
+    let overlap = (603..<617).flatMap { y in (192..<218).map { x in (x, y) } }
+    #expect(overlap.filter { !masked.isBlack($0.0, $0.1) }.isEmpty, "겹친 부분 \(overlap.count)픽셀이 드러났다")
+    // 원본 위 겹침(검토 화면)도 같은 계획으로 그린다.
+    let plan = proposal.maskPlan(lineIDs: lines, regions: [])
+    #expect(overlap.allSatisfy { plan.covers(CGPoint(x: (Double($0.0) + 0.5) / 1000, y: (Double($0.1) + 0.5) / 1000)) })
+    let receipt = try await processor.confirm(id, fields: proposal.fields, maskLineIDs: lines)
+    let artifact = try Data(contentsOf: store.artifactURL(draft.id, try #require(receipt.artifactFileName)))
+    let confirmed = try rgba(artifact)
+    #expect(overlap.filter { !confirmed.isBlack($0.0, $0.1) }.isEmpty, "확인 사본에서 겹친 부분이 드러났다")
   }
 
   @Test func blurredPhotoNeedsMaskReviewUsingVision() async throws {

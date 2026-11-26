@@ -1173,15 +1173,15 @@
     },
     {
       "id": "quantity-overlapped-by-weak-label",
-      "reviews": ["review:codex-pr14-4", "review:codex-pr14-5", "adr:0013"],
-      "note": "수량 잉크가 예약 591 민감 OCR 상자 안에 있다. 불변식 1(민감 상자는 항상 다 덮음)에 따라 덮이며 상자 겹침 불가피로 본다.",
+      "reviews": ["review:codex-pr14-4", "review:codex-pr14-5", "review:codex-pr14-6", "adr:0013"],
+      "note": "수량 잉크 [226,661,233,679] 중 예약 591 민감 OCR 상자 [225,663,304,687] 안의 112픽셀은 불변식 1(민감 상자는 항상 다 덮음)에 따라 덮이는 상자 겹침 불가피다. 상자 밖 위쪽 두 행 14픽셀은 보존한다.",
       "size": [1000, 1000],
       "lines": [
         {"text": "数量", "box": [173, 662, 213, 686]},
         {"text": "2", "box": [224, 658, 235, 682]},
         {"text": "예약 591", "box": [225, 663, 304, 687]}
       ],
-      "expect": {"masked": {"booking": [273, 666, 302, 684]}, "visible": {}, "needsReview": false, "reasons": []}
+      "expect": {"masked": {"booking": [273, 666, 302, 684]}, "visible": {"quantityOutsideBooking": [226, 661, 233, 663]}, "needsReview": false, "reasons": []}
     },
     {
       "id": "separate-number-overlapping-merchant-number",
@@ -1237,6 +1237,18 @@
         {"text":  "결제 카드 0019", "box":  [92, 633, 228, 656],  "corners":  [[92, 633],  [228, 636],  [228, 656],  [92, 653]]}
       ],
       "expect": {"masked": {"card": [186, 638, 226, 652]}, "visible": {"quantity": [80, 635, 87, 649]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "user-selected-line-overlapping-store-number",
+      "reviews": ["review:codex-pr14-6", "adr:0013"],
+      "note": "select는 검토 화면에서 사용자가 추천 밖에서 켠 줄이다(사용자 띠 없음). 사용자가 켠 줄은 숫자가 없어도 가려야 할 상자라, 겹친 가맹점 번호 상자를 되돌린 뒤에 칠한다. 줄 밖 범위는 iOS가 행 전체 띠, Android가 보존 상자 앞에서 멈추는 띠라 두 앱이 달라 기대에 넣지 않는다.",
+      "size": [1000, 1000],
+      "select": ["가상 이름"],
+      "lines": [
+        {"text": "가맹점 번호 1384", "box": [40, 600, 220, 620]},
+        {"text": "가상 이름", "box": [190, 600, 275, 620]}
+      ],
+      "expect": {"masked": {"nameOverStoreBox": [192, 603, 218, 617], "name": [190, 600, 275, 620]}, "visible": {}, "needsReview": false, "reasons": []}
     }
   ]
 }

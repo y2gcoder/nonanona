@@ -38,7 +38,9 @@ struct CommonMaskPolicyTests {
     }
     let proposal = try ProposalBuilder.make(ocr)
     let ids = Set(proposal.suggestedMaskLineIDs)
-    let plan = proposal.maskPlan(lineIDs: ids, regions: [])
+    // `select`: 검토 화면에서 사용자가 추천 밖에서 더 켠 줄(글자로 찾는다). 사용자 띠는 더하지 않는다.
+    let userLines = (entry.select ?? []).map { text in ocr.lines.first { $0.text == text }!.id }
+    let plan = proposal.maskPlan(lineIDs: ids.union(userLines), regions: [])
     let polygons = plan.drawn
 
     var doubts: Set<String> = []
@@ -125,6 +127,7 @@ struct CommonMaskPolicyTests {
     let lines: [Line]
     let reread: [Line]?
     let tiles: [Tile]?
+    let select: [String]?
     let expect: Expectation
   }
 

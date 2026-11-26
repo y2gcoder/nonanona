@@ -67,7 +67,7 @@ class MaskContractTest {
         return shapes.covers(x * width, y * height)
     }
 
-    private fun shapesOf(p: OcrProposal) = Masking.shapes(p.ocr.lines, p.suggestedMaskLineIds.toSet(), width, height)
+    private fun shapesOf(p: OcrProposal) = p.suggestedMaskLineIds.toSet().let { Masking.shapes(p.ocr.lines, it, it, width, height) }
 
     private fun center(line: OcrLine) = (line.x + line.width / 2) to (line.y + line.height / 2)
 

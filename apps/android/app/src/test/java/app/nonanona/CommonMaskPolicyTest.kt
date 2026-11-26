@@ -56,7 +56,15 @@ class CommonMaskPolicyTest {
                 OcrTiles.merge(width, height, listOf(headerTile) + parts)
             }
         val proposal = ProposalBuilder.make(ocr)
-        val shapes = Masking.shapes(ocr.lines, proposal.suggestedMaskLineIds.toSet(), width, height)
+        // `select`: 검토 화면에서 사용자가 추천 밖에서 더 켠 줄(글자로 찾는다). 사용자 띠는 더하지 않는다.
+        val suggested = proposal.suggestedMaskLineIds.toSet()
+        val userLines =
+            case
+                .optJSONArray("select")
+                ?.let { texts ->
+                    (0 until texts.length()).map { i -> ocr.lines.single { it.text == texts.getString(i) }.id }
+                }.orEmpty()
+        val shapes = Masking.shapes(ocr.lines, suggested + userLines, suggested, width, height)
         val doubts = proposal.maskCheck.doubts.toMutableSet()
         case.optJSONArray("reread")?.let { lines ->
             if (rereadLeaks(proposal, shapes, readLines(width, height, lines.objects()))) {

@@ -49,11 +49,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
@@ -666,55 +668,93 @@ private fun OriginalPhoto(
             },
         ) {
             val shade = Color.Black
-            shapes.forEach { (xs, ys) ->
+            // 칠하는 순서대로: 보존 상자 되돌림은 앞서 칠한 검정을 지운다(Offscreen 레이어 안이라 사진은 지워지지 않는다).
+            shapes.forEach { (xs, ys, restore) ->
+                val blend = if (restore) BlendMode.Clear else DrawScope.DefaultBlendMode
                 if (xs.size == 2) {
                     // 사각형: xs = [l, r], ys = [t, b]
                     drawRect(
                         shade,
                         Offset((xs[0] * size.width).toFloat(), (ys[0] * size.height).toFloat()),
                         Size(((xs[1] - xs[0]) * size.width).toFloat(), ((ys[1] - ys[0]) * size.height).toFloat().coerceAtLeast(2f)),
+                        blendMode = blend,
                     )
                 } else {
                     val path = Path()
                     path.moveTo((xs[0] * size.width).toFloat(), (ys[0] * size.height).toFloat())
                     for (i in 1 until xs.size) path.lineTo((xs[i] * size.width).toFloat(), (ys[i] * size.height).toFloat())
                     path.close()
-                    drawPath(path, shade)
+                    drawPath(path, shade, blendMode = blend)
                 }
             }
         }
     }
 }
 
+/** 원본 위 겹침 도형 하나(0~1 좌표). 사각형은 ([l, r], [t, b]), 기울어진 띠는 네 점. [restore]면 앞서 칠한 검정을 지운다. */
+internal data class OverlayShape(
+    val xs: List<Double>,
+    val ys: List<Double>,
+    val restore: Boolean = false,
+)
+
+/** 그 점(0~1)이 겹침에서 검정인지. 칠하는 순서대로 마지막에 그 점을 담은 도형이 정한다(굽은 사본과 같다). */
+internal fun List<OverlayShape>.covers(
+    nx: Double,
+    ny: Double,
+): Boolean = lastOrNull { it.contains(nx, ny) }?.restore == false
+
+private fun OverlayShape.contains(
+    nx: Double,
+    ny: Double,
+): Boolean {
+    if (xs.size == 2) return nx >= xs[0] && nx < xs[1] && ny >= ys[0] && ny < ys[1]
+    var inside = false
+    var j = xs.size - 1
+    for (i in xs.indices) {
+        if ((ys[i] > ny) != (ys[j] > ny) && nx < (xs[j] - xs[i]) * (ny - ys[i]) / (ys[j] - ys[i]) + xs[i]) inside = !inside
+        j = i
+    }
+    return inside
+}
+
 /**
- * 확인 때 굽는 가림과 같은 모양(Masking.shapes·regionRects)을 0~1 좌표로. 사각형은 ([l, r], [t, b]), 기울어진 띠는 네 점.
+ * 확인 때 굽는 가림과 같은 도형(Masking.shapes·regionRects, 칠하는 순서 그대로)을 0~1 좌표로. 보존 상자 되돌림도 넣어,
+ * 사본에서 원본으로 돌아오는 곳을 가린 것처럼 보이지 않게 한다.
  */
 internal fun overlayShapes(
     proposal: OcrProposal?,
     masked: ResolvedReview?,
-): List<Pair<List<Double>, List<Double>>> {
+): List<OverlayShape> {
     if (masked == null) return emptyList()
     val width = proposal?.ocr?.pixelWidth?.coerceAtLeast(1) ?: 1
     val height = proposal?.ocr?.pixelHeight?.coerceAtLeast(1) ?: 1
     val lines = proposal?.ocr?.lines.orEmpty()
-    val regionShapes = masked.regions.map { listOf(0.0, 1.0) to listOf(it.topPercent / 100.0, it.bottomPercent / 100.0) }
-    // 원본 보기 위 표시용: 검정 도형만 그린다(되돌림 영역은 사본 미리보기에서 보인다).
-    return Masking.shapes(lines, masked.maskLineIds, width, height).filter { it !is MaskShape.Restore }.map { shape ->
+    val suggested = proposal?.suggestedMaskLineIds.orEmpty().toSet()
+    val regionShapes = masked.regions.map { OverlayShape(listOf(0.0, 1.0), listOf(it.topPercent / 100.0, it.bottomPercent / 100.0)) }
+
+    fun of(
+        shape: MaskShape,
+        restore: Boolean,
+    ): OverlayShape =
         when (shape) {
             is MaskShape.Rect -> {
-                listOf(shape.left.toDouble() / width, shape.right.toDouble() / width) to
-                    listOf(shape.top.toDouble() / height, shape.bottom.toDouble() / height)
+                OverlayShape(
+                    listOf(shape.left.toDouble() / width, shape.right.toDouble() / width),
+                    listOf(shape.top.toDouble() / height, shape.bottom.toDouble() / height),
+                    restore,
+                )
             }
 
             is MaskShape.Quad -> {
-                shape.xs.map { it / width } to shape.ys.map { it / height }
+                OverlayShape(shape.xs.map { it / width }, shape.ys.map { it / height }, restore)
             }
 
             is MaskShape.Restore -> {
-                error("filtered")
+                of(shape.area, restore = true)
             }
         }
-    } + regionShapes
+    return Masking.shapes(lines, masked.maskLineIds, suggested, width, height).map { of(it, restore = false) } + regionShapes
 }
 
 /** 화면용으로 줄여 읽되 OCR·굽기와 같은 디코딩(EXIF 방향 적용)을 쓴다. 읽지 못하면 null(빈 칸). */

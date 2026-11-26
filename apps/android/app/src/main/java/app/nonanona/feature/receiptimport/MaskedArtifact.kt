@@ -67,8 +67,10 @@ class MaskedArtifact private constructor(
 object Masking {
     /**
      * 가림 도형(칠하는 순서의 목록, ADR-0013). 두 불변식을 지킨다.
-     * 1. 가려야 할 민감 OCR 상자(번호가 든 고른 줄. 섞인 줄은 번호 부분 상자)는 항상 완전히 덮는다. 어떤 이유로도 줄이지 않는다.
-     *    숫자 없는 라벨 줄은 민감 값이 아니라 띠로만 덮는다.
+     * 1. 가려야 할 OCR 상자는 항상 완전히 덮는다. 어떤 이유로도 줄이지 않는다. 가려야 할 상자는 번호가 든 추천 줄(섞인 줄은 번호
+     *    부분 상자)과, 사용자가 검토 화면에서 켠 추천 밖의 줄 전부(숫자 유무와 무관, 줄 상자 전체)다. 숫자 없는 추천 라벨 줄
+     *    (승인, 결제 카드)만 민감 값이 아니라 띠로 덮는다.
+     *    [suggested]는 OCR 추천 줄(`OcrProposal.suggestedMaskLineIds`)이다. [selected]에서 그 밖의 줄은 사용자가 더한 줄이다.
      * 2. 민감 상자 밖에 더한 여백은 보존 상자(가격·날짜·가게 정보·필드명과 그 값) 중 민감 상자 밖 픽셀을 덮지 않는다.
      * 순서: 여백을 포함한 띠(검정) → 보존 상자를 원본으로 되돌림([MaskShape.Restore]) → 민감 상자(검정). 사용자가 더한 띠
      * ([regionRects])는 호출하는 쪽이 그 뒤에 붙인다. 띠는 고른 줄마다 줄 방향의 행 띠이고 글자 높이의 30%(최소 8픽셀) 여백을 둔다.
@@ -77,21 +79,24 @@ object Masking {
     fun shapes(
         lines: List<OcrLine>,
         selected: Set<Int>,
+        suggested: Set<Int>,
         width: Int,
         height: Int,
-    ): List<MaskShape> = plan(lines, selected, width, height).let { (bands, restores, covers) -> bands + restores + covers }
+    ): List<MaskShape> = plan(lines, selected, suggested, width, height).let { (bands, restores, covers) -> bands + restores + covers }
 
-    /** 반드시 덮는 민감 상자(불변식 1의 대상): 번호가 든 고른 줄과, 띠가 덮으려는 번호 조각 중 보존 상자와 겹친 것. */
+    /** 반드시 덮는 상자(불변식 1의 대상): 번호가 든 추천 줄, 사용자가 더한 줄, 띠가 덮으려는 번호 조각 중 보존 상자와 겹친 것. */
     fun mustCover(
         lines: List<OcrLine>,
         selected: Set<Int>,
+        suggested: Set<Int>,
         width: Int,
         height: Int,
-    ): List<MaskShape> = plan(lines, selected, width, height).third
+    ): List<MaskShape> = plan(lines, selected, suggested, width, height).third
 
     private fun plan(
         lines: List<OcrLine>,
         selected: Set<Int>,
+        suggested: Set<Int>,
         width: Int,
         height: Int,
     ): Triple<List<MaskShape>, List<MaskShape>, List<MaskShape>> {
@@ -151,11 +156,24 @@ object Masking {
                 }
             }
         val restores = keeps.map { MaskShape.Restore(boxShape(it.line, null, width, height)) }
-        // 반드시 덮을 상자: 번호(숫자·가림 기호)가 든 고른 줄. 숫자 없는 라벨 줄(승인, 결제 카드)은 띠로만 덮어 보존 상자는 되돌린다.
+        // 반드시 덮을 상자: 사용자가 더한 줄은 줄 상자 전체(숫자 유무와 무관, 사용자가 고른 것이라 되돌리지 않는다). 추천 줄은
+        // 번호(숫자·가림 기호)가 든 줄만(섞인 줄은 번호 부분). 숫자 없는 추천 라벨 줄(승인, 결제 카드)은 띠로만 덮어 보존 상자는 되돌린다.
         val covers =
-            chosen
-                .filter { line -> SensitiveText.normalized(line.text).any { it.isDigit() || it in "*●•#×" } }
-                .map { line -> boxShape(line, line.numberBox?.takeIf { it.size == 4 && SensitiveText.isMixed(line.text) }, width, height) }
+            chosen.mapNotNull { line ->
+                when {
+                    line.id !in suggested -> {
+                        boxShape(line, null, width, height)
+                    }
+
+                    SensitiveText.normalized(line.text).any { it.isDigit() || it in "*●•#×" } -> {
+                        boxShape(line, line.numberBox?.takeIf { it.size == 4 && SensitiveText.isMixed(line.text) }, width, height)
+                    }
+
+                    else -> {
+                        null
+                    }
+                }
+            }
         return Triple(bands, restores, covers + fragmentCovers.distinct().map { boxShape(it, null, width, height) })
     }
 

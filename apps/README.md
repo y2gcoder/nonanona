@@ -311,7 +311,7 @@ python3 -I scripts/capture-fx-correction-responses.py     # 두 앱 해석 시�
 - 미리보기 뒤의 늦은 지출은 스크립트가 가상 회원 계정으로 앱과 같은 RPC(`submit_manual_expense`)를 불러 넣었다. 회원 기기 화면으로 넣은 것은 아니다.
 - 화면으로 확인한 거절은 "오래된 revision으로 확정"뿐이다. 같은 지출을 두 방장 화면이 동시에 검토하는 경우(`stale_expense`), 두 확정 요청 동시 실행, 같은 키 재시도(`replayed`)·다른 내용(`idempotency_conflict`), 회원의 검토·확정 시도(`host_only`), 비구성원 접근은 서버 계약 시험(실제 HTTP)으로만 확인했다. 앱이 검토 거절 뒤 최신 값으로 다시 여는 화면, 응답을 못 받은 검토·확정을 같은 키로 다시 보내는 경로, 정산 중 세션 만료는 기기에서 재현하지 않았다.
 - 새 화면(장부·검토·송금표)의 접히는 기기 두 칸·세 칸과 다크 모드는 확인하지 않았다. 가로·큰 글자는 검토 화면의 사본 칸만 확인했다(위 "가린 사본 보기").
-여행방 화면에서 사진 없는 지출을 새로 적는 입력, 다른 기기에서 올린 영수증의 품목별 나누기(아래 "품목별 나누기"), 세 명 이상의 "반씩", 실시간 갱신(새로고침·다시 열기만)은 없다.
+- 여행방 화면에서 사진 없는 지출을 새로 적는 입력, 세 명 이상의 "반씩", 실시간 갱신(새로고침·다시 열기만)은 없다. 다른 기기에서 올린 영수증은 아래 "품목 나누기 제안" 흐름으로 분담할 수 있다.
 - 확정 뒤 다시 열기는 두 앱 프로세스를 SIGKILL한 뒤 같은 세션으로 다시 연 경우만이다. 다른 기기 로그인, 재설치는 확인하지 않았다.
 - 가게 이름은 기기 OCR 값 그대로 올라간다(Android ML Kit은 みなと珈琲를 みなと迦芽로 읽었다). 그래서 E2E는 지출을 금액으로 찾는다.
 - 테스트 모드(로컬 설정 없는 debug)에는 장부가 없고, release는 계속 연결 전 구현체다.
@@ -323,7 +323,7 @@ python3 -I scripts/capture-fx-correction-responses.py     # 두 앱 해석 시�
 - **품목 후보**(`ItemExtractor`, 두 앱 같은 규칙 `receipt-items-v1`): OCR 상자를 행으로 묶고, 행 끝에 ¥·円 또는 따로 읽힌 숫자 상자가 있을 때만 품목이다. 소계·세금·합계·결제·할인은 "영수증 요약(나누지 않음)"으로 따로 보인다. 첫 소계·합계 아래 줄, 전화·카드·날짜 줄은 품목이 아니다. 이름 없음·금액 못 읽음·수량 표시·합계 초과에는 표시를 붙이고, 고치거나 "확인함"을 눌러야 나눈다. 줄마다 영수증 원문, 고칠 수 있는 한국어 이름, 금액, 낼 사람(여럿이면 똑같이), "품목 아님"이 있다. "품목 더하기"·"조정 줄 더하기(세금·수수료·할인, 할인은 -)"로 직접 더한다.
 - **저장**: 확인한 영수증마다 초안 폴더 `items/<사진>.json`(iOS App Group 초안 폴더, Android `filesDir`)에 고칠 때마다 순번을 붙여 원자적으로 쓴다. 쓰지 못하면 "품목을 기기에 저장하지 못했어요 · 다시 저장". 앱을 죽였다 다시 열어도 계획이 남는다(검토 입력의 결제자·원화는 지금처럼 다시 적는다).
 - **계산**(`ItemAllocator`): 줄 합계가 확인한 영수증 합계와 같아야 한다. 다르면 차이를 보이고 계산하지 않는다(세금·할인을 저절로 나누지 않는다). 엔화는 방장이 검토에서 정한 원화를 줄 몫의 비율로 정확히 나눈다. 원 단위로 나눠떨어지면 그 몫이다. 두 사람 몫이 같고 원화가 홀수이며 결제자가 그중 한 명이면 ADR-0007(결제자 +1원)이다. 그 밖에는 내림한 몫과 남은 원을 보인다. 채우면 검토 화면이 "N원이 남았어요"를 보이고, 방장이 누가 낼지 적어야 포함할 수 있다.
-- **어디서 열리나**: 방장 지출 검토에 "영수증 품목으로 나누기"가 있다. 장부의 사본 해시와 확인한 값(날짜·금액·통화)이 이 기기의 확인한 영수증과 모두 같을 때만 열린다. 아니면 "이 영수증은 다른 기기에서 올려 품목으로 나눌 수 없어요". 화면은 iOS 지출 검토 위 쌓기, Android 세 번째 칸이다.
+- **어디서 열리나**: 방장 지출 검토의 "영수증 품목으로 나누기"는 장부의 사본 해시와 확인한 값(날짜·금액·통화)이 이 기기의 확인한 영수증과 모두 같을 때 열린다. 회원이 올린 영수증은 아래 "품목 나누기 제안"을 따른다. 화면은 iOS 지출 검토 위 쌓기, Android 세 번째 칸이다.
 - **번역**: iOS는 Apple Translation(`LanguageAvailability` → 언어가 있으면 `TranslationSession(installedSource:…, .highFidelity)`, iOS 26.4+. 지원하지만 없으면 "언어 받기"를 눌렀을 때만 시스템 창에서 받음). Android는 플랫폼 기기 번역(`TranslationManager`, API 31+, 새 의존성·네트워크 권한 없음. 받아야 하면 기기 번역 설정을 연다). 번역은 이름이 비었거나 기계가 채운 줄에만 들어가고 "기기 번역 제안"으로 표시된다. 실패하면 바꾸지 않고 "다시 번역하기". 쓸 수 없으면 "이름을 직접 적어 주세요". debug 미리보기 대역(정해 둔 사전 8개, iOS `NONANONA_ITEM_TRANSLATION=preview[-fail-once]`, Android `debug-processing.properties`의 `itemTranslation=preview[-fail-once]`)은 언제나 "미리보기 대역 · 실제 번역 아님"으로 보이고 release에 없다.
 
 ```sh
@@ -354,7 +354,26 @@ swift apps/fixtures/items/check_apple_translation.swift   # macOS 호스트의 �
 - **release**: iOS release 바이너리에 미리보기 대역 클래스·환경 변수 이름이 없다. Android release APK는 여전히 네트워크 권한이 없고 미리보기 대역이 없다.
 - **테스트 중 찾아 고친 것**: iOS는 품목 화면을 뿌리 화면에 붙였더니 "채우기"로 닫을 때 지출 검토까지 닫혔다(검토 화면에 붙여 고침). Android는 자판이 금액 칸을 가렸다(목록에 `imePadding`). iOS 가져오기 패키지 테스트에 실제 Vision 요청을 더 늘리면 Vision 안 작업 대기열이 협력 스레드를 모두 잡아 멈췄다(실제 OCR 확인을 기존 OCR 테스트 안에서 이어서 부르게 함).
 - **화면**: `docs/design/screens/{ios,android}-items-{translated,remainder,mismatch,exact}.png`.
-- **확인하지 않은 것**: 실기기의 실제 기기 번역(언어 받기 시스템 창 포함), 세 명 이상 방(로컬 시드 여행방은 두 명이라 세 명 몫은 단위 테스트로만), 회원이 올린 영수증(정의상 열리지 않음 — "다른 기기에서 올려" 안내만), 접히는 기기·가로·큰 글자·다크 모드의 품목 화면, KRW 영수증의 화면 흐름(단위 테스트만).
+- **확인하지 않은 것**: 실기기의 실제 기기 번역(언어 받기 시스템 창 포함), 세 명 이상 방(로컬 시드 여행방은 두 명이라 세 명 몫은 단위 테스트로만), 접히는 기기·가로·큰 글자·다크 모드의 품목 화면, KRW 영수증의 화면 흐름(단위 테스트만). 회원이 올린 영수증의 두 기기 검증은 아래에 있다.
+
+### 품목 나누기 제안 ([ADR-0011](../docs/adr/0011-cross-device-item-share-proposals.md))
+
+- 원화·엔화 영수증을 올린 회원은 확인한 영수증이 있는 기기에서 품목을 나눈다. 남은 원을 낼 사람을 고르고 따로 동의하면 원화 기준·합계와 사람마다 원 단위 몫을 보낸다. 품목 이름·금액·OCR 줄·번역·사진은 제안에 담기지 않는다.
+- 올린 사람과 방장만 최신 제안을 볼 수 있다. 방장은 제안과 검토 입력의 몫을 비교하고 직접 나누기에 채운다. 결제자를 고르고 "포함하기"를 눌러야 장부에 반영된다. 환율이 정정되거나 지출 버전이 바뀌면 올린 사람이 새 제안을 보낼 수 있다.
+- 두 기기 E2E에서 iOS와 Android의 올린 회원·방장 역할을 바꿔 두 방향을 확인했다. 기준환율 정정 뒤 제안 다시 보내기, 방장 반영과 확정, REST/RPC 본문과 서버 DB에 품목 글자 0건을 확인했다.
+
+```sh
+mise run local:up
+mise run e2e:proposals -- <시뮬레이터 UDID> ios [증거 폴더]       # 올린 회원 iOS, 방장 Android
+mise run e2e:proposals -- <시뮬레이터 UDID> android [증거 폴더]   # 올린 회원 Android, 방장 iOS
+mise run local:share-proposal-contract
+# 20261124180000 적용 직전의 로컬 DB에서 시작한다.
+mise run local:share-proposal-upgrade -- prepare
+mise exec -- supabase migration up
+mise run local:share-proposal-upgrade -- verify
+```
+
+Android 에뮬레이터가 여럿이면 `ANDROID_SERIAL`로 고른다. 업그레이드 검사는 이전 RPC로 만든 범위 밖 제안이 마이그레이션 뒤 장부에서 숨겨지고, 이전 요청의 재시도는 수렴하며 새 범위 밖 요청은 거절되는지 본다.
 
 ## 창 크기와 접기 (적응형 화면)
 
@@ -381,7 +400,7 @@ swift apps/fixtures/items/check_apple_translation.swift   # macOS 호스트의 �
 
 ```sh
 mise run ios:e2e-adaptive -- <시뮬레이터 UDID> [증거 폴더]       # 가로가 regular인 기기는 EXPECT_WIDE_LANDSCAPE=1
-mise run ios:e2e-posture -- <iPhone Duo 시뮬레이터 UDID> [증거 폴더]  # Device Hub 자세 버튼을 누른다(아래)
+mise run ios:e2e-posture -- <iPhone Duo 시뮬레이터 UDID> [증거 폴더]  # 선택, Orca 필요. Device Hub 자세 버튼(아래)
 mise run android:e2e-adaptive -- [증거 폴더]                    # 접히는 기기 에뮬레이터(emu fold/unfold/posture)
 ```
 
@@ -488,12 +507,13 @@ iOS 단위 테스트와 release 확인은 `IOS_DESTINATION`(기본 `platform=iOS
 
 ## 버전
 
-정확한 버전으로 고정했고, 모두 게시 후 7일이 지난 안정판이다(확인일 2026-11-21). Android 전이 의존성은 `apps/android/app/gradle.lockfile`(앱 346개), 플러그인 클래스패스는 `apps/android/buildscript-gradle.lockfile`(113개)에 고정한다(갱신: `./gradlew buildEnvironment :app:dependencies --write-locks`). 두 잠금 파일의 모든 항목이 게시 후 7일이 지났음을 Google Maven·Maven Central의 POM `Last-Modified`로 확인했다(가장 최근: navigation3 1.2.1, 2026-11-04). Dependabot은 `apps/android`의 Gradle 생태계를 7일 cooldown으로 본다. iOS는 원격 Swift 패키지가 없어 Dependabot 대상이 아니다.
+고정한 버전은 모두 게시 후 7일이 지난 안정판이다(확인일 2026-11-21). Android 전이 의존성은 `apps/android/app/gradle.lockfile`(앱 346개), 플러그인 클래스패스는 `apps/android/buildscript-gradle.lockfile`(113개)에 고정한다(갱신: `./gradlew buildEnvironment :app:dependencies --write-locks`). 두 잠금 파일의 모든 항목이 게시 후 7일이 지났음을 Google Maven·Maven Central의 POM `Last-Modified`로 확인했다(가장 최근: navigation3 1.2.1, 2026-11-04). Dependabot은 `apps/android`의 Gradle 생태계를 7일 cooldown으로 본다. iOS는 원격 Swift 패키지가 없어 Dependabot 대상이 아니다.
 
 | 도구·의존성 | 버전 | 게시일과 근거 |
 | --- | --- | --- |
 | Xcode (Swift 6, swift-format 6.4.4 포함) | 27.2 | 기존 설치. `mise run doctor`가 버전을 확인한다 |
 | iOS 최소 버전 | 17.0 | `@Observable`, `PhotosPicker` |
+| 시스템 Python 3 | 3.11 이상 | 로컬 Supabase 스크립트의 표준 라이브러리 `tomllib` |
 | JDK (`mise.toml`) | Temurin 21.0.9+10 | 2025-10. AGP 9.3은 JDK 17 이상 |
 | ktlint (`mise.toml`) | 1.8.0 | 2025-11-14 |
 | Gradle Wrapper | 9.7.0 | 2026-08-06. 배포본 SHA-256 고정, wrapper JAR은 공식 SHA-256과 일치 확인 |

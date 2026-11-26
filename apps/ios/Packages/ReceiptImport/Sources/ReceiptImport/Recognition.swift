@@ -288,7 +288,9 @@ enum ProposalBuilder {
     return OCRProposal(
       ocr: ocr,
       fields: AllowedReceiptFields(date: date, amountMinor: total.amount, currency: currency, merchant: merchant),
-      suggestedMaskLineIDs: masks.ids.sorted(), needsMaskReview: masks.unmatchedLabel || masks.isTilted)
+      suggestedMaskLineIDs: masks.ids.sorted(),
+      needsMaskReview: masks.unmatchedLabel || masks.isTilted
+        || Masking.overlapsKeptNeighbor(ocr: ocr, selected: masks.ids))
   }
 
   /// 결제일 라벨(결제일·결제일시·결제 일자, 라벨 끝을 확인해 `결제 일정`은 아니다). 숙소 화면의 체크인처럼 앞에 나오는 다른 날짜보다 우선한다.

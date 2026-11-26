@@ -1148,6 +1148,39 @@
         {"text": "6585", "box": [50, 661, 94, 681]}
       ],
       "expect": {"masked": {"approval": [227, 604, 375, 614]}, "visible": {}, "needsReview": true, "reasons": ["unpairedLabel"]}
+    },
+    {
+      "id": "quantity-beside-card-margin",
+      "reviews": ["review:codex-pr14-4", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "Qty", "box": [40, 635, 73, 655]},
+        {"text": "3", "box": [78, 632, 89, 652]},
+        {"text": "결제 카드 0019", "box": [92, 633, 228, 653]}
+      ],
+      "expect": {"masked": {"card": [186, 636, 226, 650]}, "visible": {"quantity": [80, 635, 87, 649]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "quantity-touching-card-box",
+      "reviews": ["review:codex-pr14-4", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "Qty", "box": [40, 635, 73, 655]},
+        {"text": "3", "box": [78, 632, 89, 652]},
+        {"text": "결제 카드 0019", "box": [88, 633, 224, 653]}
+      ],
+      "expect": {"masked": {"card": [182, 636, 222, 650]}, "visible": {"quantity": [80, 635, 87, 649]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "quantity-overlapped-by-weak-label",
+      "reviews": ["review:codex-pr14-4", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "数量", "box": [173, 662, 213, 686]},
+        {"text": "2", "box": [224, 658, 235, 682]},
+        {"text": "예약 591", "box": [225, 663, 304, 687]}
+      ],
+      "expect": {"masked": {"booking": [273, 666, 302, 684]}, "visible": {"quantity": [226, 661, 233, 679]}, "needsReview": false, "reasons": []}
     }
   ]
 }

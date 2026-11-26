@@ -116,7 +116,8 @@ object Masking {
                 } else {
                     val t = if (tilted) theta else 0.0
                     val (pFrom, pTo) = rowLimits(g, t, protected + otherColumns(g, t, unselected), pad)
-                    val (kFrom, kTo) = rowLimits(g, t, kept, 0.0)
+                    // 가게 정보·필드명·필드 값과 겹치면 왼쪽(라벨 쪽)은 그 상자 경계까지 줄이고, 오른쪽은 숫자 없는 라벨 줄만 줄인다(iOS와 같다).
+                    val (kFrom, kTo) = keptLimits(g, t, kept, labelOnly = line.text.none { it.isDigit() })
                     // 필드명 상자와 겹친 번호 조각(OCR 상자가 겹침)은 끝까지 덮는다. 가격·날짜 앞에서는 그대로 멈춘다.
                     val kToCovering =
                         kTo?.let { limit ->
@@ -207,6 +208,30 @@ object Masking {
                 to = minOf(to ?: Double.POSITIVE_INFINITY, maxOf(u1, p0 - pad))
             } else {
                 from = maxOf(from ?: Double.NEGATIVE_INFINITY, minOf(u0, p1 + pad))
+            }
+        }
+        return from to to
+    }
+
+    /** 가게 정보·필드 상자 쪽 한계: 떨어져 있으면 그 상자 경계, 겹치면 왼쪽은 상자 경계까지 줄이고 오른쪽은 [labelOnly]일 때만 줄인다. */
+    private fun keptLimits(
+        g: LineGeometry,
+        theta: Double,
+        kept: List<LineGeometry>,
+        labelOnly: Boolean,
+    ): Pair<Double?, Double?> {
+        val (top, bottom) = g.vRange(theta)
+        val (u0, u1) = g.uRange(theta)
+        var from: Double? = null
+        var to: Double? = null
+        for (p in kept) {
+            val (pt, pb) = p.vRange(theta)
+            if (abs((pt + pb) / 2 - (top + bottom) / 2) > 0.5 * maxOf(bottom - top, pb - pt)) continue
+            val (p0, p1) = p.uRange(theta)
+            if ((p0 + p1) / 2 >= (u0 + u1) / 2) {
+                to = minOf(to ?: Double.POSITIVE_INFINITY, if (labelOnly) p0 else maxOf(u1, p0))
+            } else {
+                from = maxOf(from ?: Double.NEGATIVE_INFINITY, p1)
             }
         }
         return from to to

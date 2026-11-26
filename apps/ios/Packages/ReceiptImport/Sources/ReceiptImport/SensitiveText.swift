@@ -30,7 +30,7 @@ struct SensitiveText {
   // Vision은 날짜의 월·일 두 자리 사이에도 가끔 공백을 넣는다.
   private static let dates = expression(#"(?<!\d)\d{4}\s*[-/.年년]\s*\d(?:\s*\d)?\s*[-/.月월]\s*\d(?:\s*\d)?(?!\d)"#)
   private static let amounts = expression(
-    #"[¥$€£₩]\s*\d[\d,.]*|\d[\d,.]*\s*(?:円|JPY\b|USD\b|KRW\b|EUR\b)|(?:合計|お会計|支払額|決済金額|小計|税|割引|釣銭|お預り|total)\s*\d[\d,.]*"#
+    #"[¥$€£₩]\s*\d[\d,.]*|\d[\d,.]*\s*(?:円|원|JPY\b|USD\b|KRW\b|EUR\b)|(?:合計|お会計|支払額|決済金額|小計|税|割引|釣銭|お預り|total)\s*\d[\d,.]*"#
   )
   private static let business = expression(#"住所|登録番号|レジ(?:\s|ID|NO|番号)|\b(?:register|terminal)\s*(?:ID|NO|#)"#)
   private static let itemCode = expression(#"\bJAN\s*(?:コード\s*)?[:：]?\s*(?:\d{13}|\d{8})(?!\d)"#)
@@ -124,6 +124,13 @@ struct SensitiveText {
   var isFieldName: Bool {
     !hasLabel && !text.contains { $0.isNumber }
       && Self.fieldNames.firstMatch(in: text, range: NSRange(location: 0, length: text.utf16.count)) != nil
+  }
+
+  private static let storeInfo = expression(#"(?:사업자\s*(?:등록\s*)?|등록\s*|가맹점\s*)번호|레지"#)
+
+  /// 한국어 가게 정보(가맹점·사업자·등록 번호, 레지). 가림 여백이 닿지 않게 지킨다(ADR-0005·0013).
+  var isStoreInfo: Bool {
+    !hasLabel && Self.storeInfo.firstMatch(in: text, range: NSRange(location: 0, length: text.utf16.count)) != nil
   }
 
   /// 숫자 없이 글자(한글·한자·가나·영문)만 든 필드명 상자. 다음 행 값이 그 행의 다른 필드 것인지 볼 때 쓴다.

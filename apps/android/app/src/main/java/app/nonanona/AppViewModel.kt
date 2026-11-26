@@ -227,6 +227,8 @@ data class AppUiState(
     val rowSummaries: Map<Route.Receipt, String> = emptyMap(),
     /** 검토 화면이 원본 대신 가린 사본 미리보기를 보이는지. 배치가 바뀌어도 남도록 상태에 둔다. */
     val showsMaskedPreview: Boolean = false,
+    /** 가림 확인 필요라 가린 사본을 먼저 보이는 사진(사용자가 보기를 고르면 지운다). */
+    val maskedPreviewFor: Route.Receipt? = null,
     /** "확인하고 다음"을 처리하는 중인 사진(두 번 누르기 막기). */
     val confirming: Route.Receipt? = null,
     /** 확인할 사진을 다 보고 목록으로 돌아온 초안. 목록이 남은 상태를 알린다. */
@@ -308,6 +310,7 @@ class AppViewModel(
                         recognizer = graph.recognizer,
                         flattener = graph.flattener,
                         hooks = graph.adapters.processingHooks,
+                        maskRecheck = true,
                         onChange = ::publish,
                     )
                 }
@@ -487,7 +490,7 @@ class AppViewModel(
         loadReview(target)
     }
 
-    fun setShowsMaskedPreview(value: Boolean) = mutableState.update { it.copy(showsMaskedPreview = value) }
+    fun setShowsMaskedPreview(value: Boolean) = mutableState.update { it.copy(showsMaskedPreview = value, maskedPreviewFor = null) }
 
     /** 디스크의 제안·검토 입력·확인한 사본을 불러온다. 이미 불러온 입력은 덮어쓰지 않는다(입력 중인 글자를 지키기 위해). */
     private fun loadReview(target: Route.Receipt) {
@@ -497,25 +500,32 @@ class AppViewModel(
             val saved = runCatching { processor.review(target.itemId) }.getOrNull()
             val artifact = runCatching { processor.confirmedArtifact(target.itemId) }.getOrNull()
             mutableState.update {
-                it.copy(
-                    proposals = if (proposal != null) it.proposals + (target to proposal) else it.proposals - target,
-                    reviewDrafts =
-                        if (it.reviewDrafts[target] == null &&
-                            saved != null
-                        ) {
-                            it.reviewDrafts + (target to saved)
-                        } else {
-                            it.reviewDrafts
-                        },
-                    confirmedArtifacts =
-                        if (artifact !=
-                            null
-                        ) {
-                            it.confirmedArtifacts + (target to artifact)
-                        } else {
-                            it.confirmedArtifacts - target
-                        },
-                )
+                // 가림 확인 필요 사진은 가린 사본 미리보기를 먼저 연다(확인 전 사진만). 사용자가 원본으로 바꿀 수 있다.
+                // 늦게 끝난 다른 사진 읽기는 지금 보는 사진의 기본 보기를 바꾸지 않는다.
+                it
+                    .reviewLoaded(
+                        target,
+                        backStack.lastOrNull(),
+                        proposal?.maskCheck?.needsReview == true && it.item(target)?.state == ItemState.Ready,
+                    ).copy(
+                        proposals = if (proposal != null) it.proposals + (target to proposal) else it.proposals - target,
+                        reviewDrafts =
+                            if (it.reviewDrafts[target] == null &&
+                                saved != null
+                            ) {
+                                it.reviewDrafts + (target to saved)
+                            } else {
+                                it.reviewDrafts
+                            },
+                        confirmedArtifacts =
+                            if (artifact !=
+                                null
+                            ) {
+                                it.confirmedArtifacts + (target to artifact)
+                            } else {
+                                it.confirmedArtifacts - target
+                            },
+                    )
             }
         }
     }
@@ -1249,3 +1259,24 @@ class AppViewModel(
         fun factory(graph: AppGraph) = viewModelFactory { initializer { AppViewModel(graph) } }
     }
 }
+
+/** 이 사진에서 가린 사본 미리보기를 보이는지. */
+fun AppUiState.showsMaskedPreviewFor(target: Route.Receipt): Boolean = showsMaskedPreview || maskedPreviewFor == target
+
+/** 읽기가 끝났을 때의 보기: 지금 보이는 화면([shown])이 그 사진일 때만 [reviewOpened]를 적용한다. */
+fun AppUiState.reviewLoaded(
+    target: Route.Receipt,
+    shown: Route?,
+    needsMaskReview: Boolean,
+): AppUiState = if (shown == target) reviewOpened(target, needsMaskReview) else this
+
+/** 검토 화면을 열 때의 미리보기 보기: 가림 확인 필요 사진만 사본을 먼저 보이고, 사용자가 고른 보기는 그대로 둔다. */
+fun AppUiState.reviewOpened(
+    target: Route.Receipt,
+    needsMaskReview: Boolean,
+): AppUiState =
+    when {
+        needsMaskReview -> copy(maskedPreviewFor = target)
+        maskedPreviewFor == target -> copy(maskedPreviewFor = null)
+        else -> this
+    }

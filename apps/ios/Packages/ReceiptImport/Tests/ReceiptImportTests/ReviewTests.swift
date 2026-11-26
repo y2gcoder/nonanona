@@ -19,10 +19,12 @@ private func tempRoot() -> URL {
 }
 
 /// 이 파일의 테스트는 실제 Vision OCR(macOS)로 r01(읽힘)과 r10(초점 나감, 읽지 못함)을 쓴다.
-private func processed(_ names: [String]) async throws -> (ReceiptDraftStore, ReceiptDraft, ReceiptProcessor) {
+private func processed(_ names: [String], hooks: ProcessingHooks = ProcessingHooks()) async throws -> (
+  ReceiptDraftStore, ReceiptDraft, ReceiptProcessor
+) {
   let store = ReceiptDraftStore(root: tempRoot())
   let draft = try store.create(source: .share, photos: names.map(fixture))
-  let processor = try ReceiptProcessor(store: store, draft: draft, recognizer: VisionReceiptRecognizer())
+  let processor = try ReceiptProcessor(store: store, draft: draft, recognizer: VisionReceiptRecognizer(), hooks: hooks)
   await processor.run()
   return (store, draft, processor)
 }
@@ -94,9 +96,12 @@ struct ReviewProcessorTests {
   /// 제안이 놓친 민감한 줄(전화·카드)을 사용자가 고친다: 전화 줄은 OCR 줄로, 카드 줄은 직접 더한 띠로 가린다.
   /// 미리보기와 확인한 사본이 같은 픽셀이고, 두 줄 모두 검정이다.
   @Test func correctedMissedMasksAreBakedLikeThePreview() async throws {
-    let (store, draft, processor) = try await processed(["receipt-r01.png"])
+    let (store, draft, processor) = try await processed(
+      ["receipt-r01.png"], hooks: ProcessingHooks(dropSuggestionsAtPosition: 1))
     let id = item(await processor.snapshot(), .ready).id
     let proposal = try await processor.proposal(id)
+    #expect(proposal.suggestedMaskLineIDs.isEmpty)
+    #expect(proposal.needsMaskReview == true, "가리지 않고 구운 사본의 번호를 재OCR에서 감지한다")
     let tel = try #require(proposal.ocr.lines.first { $0.text.contains("TEL") })
     let region = MaskRegion(id: "card", topPercent: 79, heightPercent: 6)
 

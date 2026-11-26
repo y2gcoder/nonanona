@@ -66,6 +66,11 @@ struct ReceiptReviewView: View {
               .accessibilityIdentifier("review-progress")
           }
           Text(item.reviewGuidance).textRole(.supporting)
+          if item.state == .ready, let proposal = content.proposal, proposal.needsMaskReview != false {
+            Text("가림이 충분한지 확실하지 않아요. 번호가 보이지 않는지 확인해 주세요.")
+              .textRole(.supporting)
+              .accessibilityIdentifier("review-mask-warning")
+          }
         }
       }
       imageSection
@@ -413,13 +418,16 @@ private struct OriginalPhoto: View {
       }
       .overlay {
         GeometryReader { proxy in
-          ForEach(bands, id: \.self) { band in
-            Rectangle()
-              .fill(Color.black.opacity(0.55))
-              .frame(width: proxy.size.width, height: max(2, (band.upperBound - band.lowerBound) * proxy.size.height))
-              .offset(y: band.lowerBound * proxy.size.height)
+          ForEach(polygons.indices, id: \.self) { index in
+            let points = polygons[index].map { CGPoint(x: $0.x * proxy.size.width, y: $0.y * proxy.size.height) }
+            Path { path in
+              path.addLines(points)
+              path.closeSubpath()
+            }
+            .fill(Color.black.opacity(0.55))
           }
         }
+        .clipped()
       }
       .task(id: url) { image = await Self.load(url) }
   }
@@ -429,14 +437,9 @@ private struct OriginalPhoto: View {
     return CGFloat(proposal.ocr.pixelWidth) / CGFloat(proposal.ocr.pixelHeight)
   }
 
-  /// 0~1 세로 구간. 확인 때 굽는 띠와 같은 기준(줄은 위아래 여백 포함, 띠는 정수 퍼센트).
-  private var bands: [ClosedRange<Double>] {
-    guard let masked else { return [] }
-    let lines = (proposal?.ocr.lines ?? []).filter { masked.maskLineIDs.contains($0.id) }.map { line in
-      let pad = max(8 / Double(max(1, proposal?.ocr.pixelHeight ?? 1)), line.height * 0.3)
-      return max(0, line.y - pad)...min(1, line.y + line.height + pad)
-    }
-    return lines + masked.regions.map { Double($0.topPercent) / 100...Double($0.bottomPercent) / 100 }
+  private var polygons: [[CGPoint]] {
+    guard let masked, let proposal else { return [] }
+    return proposal.maskPolygons(lineIDs: masked.maskLineIDs, regions: masked.regions)
   }
 
   private static func load(_ url: URL) async -> UIImage? {

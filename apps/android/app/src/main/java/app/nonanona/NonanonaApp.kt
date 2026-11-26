@@ -176,7 +176,7 @@ fun NonanonaApp(viewModel: AppViewModel) {
                                     confirmedCount = manifest.count(ItemState.Confirmed),
                                     totalCount = manifest.items.size,
                                     busy = state.confirming != null,
-                                    showsMaskedPreview = state.showsMaskedPreview,
+                                    showsMaskedPreview = state.showsMaskedPreviewFor(route),
                                     saveFailed = route in state.draftSaveFailed,
                                     confirmFailed = route in state.confirmFailed,
                                 ),

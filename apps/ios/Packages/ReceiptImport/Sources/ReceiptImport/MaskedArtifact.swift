@@ -35,16 +35,51 @@ public struct MaskedArtifact: Equatable, Sendable {
 }
 
 enum Masking {
-  /// 고른 OCR 줄마다 가로 전체 띠. 글자 가장자리까지 덮도록 여백을 둔다. 픽셀 좌표, 왼쪽 위 기준.
-  static func rects(for lines: [OCRLine], selected: Set<Int>, width: Int, height: Int) -> [CGRect] {
-    lines.filter { selected.contains($0.id) }.map { line in
-      let top = line.y * Double(height)
-      let bottom = (line.y + line.height) * Double(height)
-      let pad = max(8, (bottom - top) * 0.3)
-      let y0 = max(0, floor(top - pad))
-      let y1 = min(Double(height), ceil(bottom + pad))
-      return CGRect(x: 0, y: y0, width: Double(width), height: y1 - y0)
+  static func polygons(ocr: OCRResult, selected: Set<Int>, automatic: Set<Int>, regions: [MaskRegion]) -> [[CGPoint]] {
+    let width = Double(ocr.pixelWidth)
+    let height = Double(ocr.pixelHeight)
+    let lines = ocr.lines.filter { selected.contains($0.id) }.map { line -> [CGPoint] in
+      guard automatic.contains(line.id), line.corners != nil else {
+        // 제안을 보완하려고 켠 줄과 옛 초안은 기존 가로 띠를 유지한다.
+        let pad = max(8, line.height * height * 0.3)
+        return corners(
+          CGRect(
+            x: 0, y: floor(line.y * height - pad), width: width,
+            height: ceil((line.y + line.height) * height + pad) - floor(line.y * height - pad)))
+      }
+      let partial = line.sensitiveCorners != nil
+      let q = (line.sensitiveCorners ?? line.maskCorners).map { CGPoint(x: $0.x * width, y: $0.y * height) }
+      let textHeight = (hypot(q[3].x - q[0].x, q[3].y - q[0].y) + hypot(q[2].x - q[1].x, q[2].y - q[1].y)) / 2
+      let side = partial ? 2 : max(9, textHeight * 0.42)
+      let vertical = partial ? 3 : max(8, textHeight * 0.30)
+      return [
+        expanded(q[0], awayFrom: q[1], by: side, and: q[3], by: vertical),
+        expanded(q[1], awayFrom: q[0], by: side, and: q[2], by: vertical),
+        expanded(q[2], awayFrom: q[3], by: side, and: q[1], by: vertical),
+        expanded(q[3], awayFrom: q[2], by: side, and: q[0], by: vertical),
+      ]
     }
+    let manual = rects(for: regions, width: ocr.pixelWidth, height: ocr.pixelHeight).map(corners)
+    return (lines + manual).map { points in points.map { CGPoint(x: $0.x / width, y: $0.y / height) } }
+  }
+
+  private static func expanded(
+    _ point: CGPoint, awayFrom horizontal: CGPoint, by side: Double, and vertical: CGPoint, by pad: Double
+  ) -> CGPoint {
+    let x = point.x - horizontal.x
+    let y = point.y - horizontal.y
+    let dx = point.x - vertical.x
+    let dy = point.y - vertical.y
+    let along = side / max(1, hypot(x, y))
+    let across = pad / max(1, hypot(dx, dy))
+    return CGPoint(x: point.x + x * along + dx * across, y: point.y + y * along + dy * across)
+  }
+
+  private static func corners(_ rect: CGRect) -> [CGPoint] {
+    [
+      CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
+      CGPoint(x: rect.maxX, y: rect.maxY), CGPoint(x: rect.minX, y: rect.maxY),
+    ]
   }
 
   /// 사용자가 더한 띠(정수 퍼센트)를 픽셀 사각형으로. 위는 내림, 아래는 올림이라 경계 픽셀까지 덮는다.
@@ -57,8 +92,18 @@ enum Masking {
   }
 
   /// 확인(사본)과 검토 화면 미리보기만 부른다. 새 비트맵에 검은 사각형을 굽고 원본 메타데이터 없이 PNG로 인코딩한다.
-  static func flatten(original: URL, rects: [CGRect]) throws -> MaskedArtifact {
-    let image = try ImageLoading.cgImage(original)
+  static func flatten(original: URL, polygons: [[CGPoint]]) throws -> MaskedArtifact {
+    let flattened = try render(ImageLoading.cgImage(original), polygons: polygons)
+    let data = NSMutableData()
+    guard
+      let encoder = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)
+    else { throw ProcessingFailure.invalidImage }
+    CGImageDestinationAddImage(encoder, flattened, nil)
+    guard CGImageDestinationFinalize(encoder) else { throw ProcessingFailure.invalidImage }
+    return MaskedArtifact(pngData: try PNGChunks.stripAncillary(data as Data))
+  }
+
+  static func render(_ image: CGImage, polygons: [[CGPoint]]) throws -> CGImage {
     let width = image.width
     let height = image.height
     guard
@@ -70,18 +115,15 @@ enum Masking {
     ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
     ctx.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
     ctx.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 1))
-    for rect in rects {
+    ctx.setShouldAntialias(false)
+    for polygon in polygons {
       // CGContext는 왼쪽 아래 기준이다.
-      ctx.fill(CGRect(x: rect.minX, y: Double(height) - rect.maxY, width: rect.width, height: rect.height))
+      ctx.addLines(between: polygon.map { CGPoint(x: $0.x * Double(width), y: (1 - $0.y) * Double(height)) })
+      ctx.closePath()
+      ctx.fillPath()
     }
     guard let flattened = ctx.makeImage() else { throw ProcessingFailure.invalidImage }
-    let data = NSMutableData()
-    guard
-      let encoder = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)
-    else { throw ProcessingFailure.invalidImage }
-    CGImageDestinationAddImage(encoder, flattened, nil)
-    guard CGImageDestinationFinalize(encoder) else { throw ProcessingFailure.invalidImage }
-    return MaskedArtifact(pngData: try PNGChunks.stripAncillary(data as Data))
+    return flattened
   }
 }
 

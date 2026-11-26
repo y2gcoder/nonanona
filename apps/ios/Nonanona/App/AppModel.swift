@@ -136,7 +136,11 @@ final class AppModel {
 
   /// 검토 화면에 열린 영수증. 고른 초안이 바뀌면 닫는다.
   var reviewing: ReviewTarget? {
-    didSet { if reviewing != oldValue { reviewing.map(loadReview) } }
+    didSet {
+      guard reviewing != oldValue else { return }
+      reviewPreviewOverride = nil
+      reviewing.map(loadReview)
+    }
   }
   /// 저장된 검토 입력(디스크와 같음), OCR 제안(기기 안에서만, OCR 전문 포함), 미리보기, 확인한 사본.
   private(set) var reviewDrafts: [ReviewTarget: ReviewDraft] = [:]
@@ -144,7 +148,23 @@ final class AppModel {
   private(set) var previews: [ReviewTarget: MaskPreview] = [:]
   private(set) var confirmedArtifacts: [ReviewTarget: Data] = [:]
   /// 검토 화면이 원본 대신 가린 사본 미리보기를 보이는지. 배치가 바뀌어도 남도록 모델에 둔다.
-  var showsMaskedPreview = false
+  private var preferredMaskedPreview = false
+  private var reviewPreviewOverride: Bool?
+  var showsMaskedPreview: Bool {
+    get {
+      if let reviewPreviewOverride { return reviewPreviewOverride }
+      if let reviewing, item(reviewing)?.state == .ready, let proposal = proposals[reviewing],
+        proposal.needsMaskReview != false
+      {
+        return true
+      }
+      return preferredMaskedPreview
+    }
+    set {
+      preferredMaskedPreview = newValue
+      reviewPreviewOverride = newValue
+    }
+  }
   /// "확인하고 다음"을 처리하는 중인 사진(두 번 누르기 막기).
   private(set) var confirming: ReviewTarget?
   /// 검토 입력을 디스크에 쓰지 못한 사진(입력은 메모리에 남아 있다). 다음 저장이 성공하면 지운다.
@@ -301,11 +321,14 @@ final class AppModel {
 
   /// 디스크의 제안·검토 입력·확인한 사본을 불러온다. 이미 불러온 입력은 덮어쓰지 않는다(입력 중인 글자를 지키기 위해).
   private func loadReview(_ target: ReviewTarget) {
-    guard let processor = processors[target.draftID] else { return }
+    guard let processor = processors[target.draftID], let loading = item(target) else { return }
     Task {
       let proposal = try? await processor.proposal(target.itemID)
       let saved = try? await processor.review(target.itemID)
       let artifact = (try? await processor.confirmedArtifact(target.itemID)) ?? nil
+      guard let current = item(target), current.state == loading.state, current.attempts == loading.attempts else {
+        return
+      }
       proposals[target] = proposal
       if reviewDrafts[target] == nil, let saved { reviewDrafts[target] = saved }
       confirmedArtifacts[target] = artifact
@@ -571,7 +594,12 @@ final class AppModel {
   func retryPhoto(draftID: String, itemID: String) {
     guard let processor = processors[draftID] else { return }
     Task {
-      try? await processor.retry(itemID)
+      do { try await processor.retry(itemID) } catch { return }
+      let target = ReviewTarget(draftID: draftID, itemID: itemID)
+      proposals[target] = nil
+      previews[target] = nil
+      rowSummaries[target] = nil
+      if reviewing == target { reviewPreviewOverride = nil }
       await processor.run()
     }
   }

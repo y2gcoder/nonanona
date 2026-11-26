@@ -75,6 +75,8 @@ final class ReceiptReviewUITests: XCTestCase {
     // 보통은 방금 열린 다음 사진이다. 가림 제안을 비운 사진이면 스크립트가 그 뒤 사진을 고른다.
     if currentTitle() != "사진 \(env["EDIT_POSITION"]!)" { openFromList(Int(env["EDIT_POSITION"]!)!) }
     let title = currentTitle()
+    XCTAssertTrue(app.segmentedControls["review-view-mode"].waitForExistence(timeout: 10))
+    XCTAssertFalse(app.staticTexts["review-mask-warning"].exists, "선명한 기준 사진의 가림 안내는 숨긴다")
     let amount = scrollTo(app.textFields["review-amount"])
     let original = Int((amount.value as? String ?? "").filter(\.isNumber))!
     replaceText(amount, String(original + 10))
@@ -92,6 +94,8 @@ final class ReceiptReviewUITests: XCTestCase {
   func testV5_CorrectMissedMaskWithPreview() throws {
     app.activate()
     if currentTitle() != "사진 \(env["MISSED_POSITION"]!)" { openFromList(Int(env["MISSED_POSITION"]!)!) }
+    XCTAssertTrue(app.staticTexts["review-mask-warning"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.images["review-preview"].waitForExistence(timeout: 20))
     XCTAssertEqual(scrollTo(app.staticTexts["mask-count"]).label, "가림 0곳", "제안이 놓친 상태에서 시작한다")
     XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "mask-warning").firstMatch.exists)
     snapshot("ios-review-missed-mask")

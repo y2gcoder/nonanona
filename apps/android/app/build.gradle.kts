@@ -68,6 +68,13 @@ android {
     }
 }
 
+// 공통 시험표만 바뀌어도 단위 시험을 다시 실행한다.
+tasks.withType<Test>().configureEach {
+    inputs
+        .file(layout.projectDirectory.file("../../fixtures/masking/common-policy.json"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+}
+
 dependencies {
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

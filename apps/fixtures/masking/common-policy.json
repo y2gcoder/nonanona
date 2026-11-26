@@ -1,0 +1,742 @@
+{
+  "version": 1,
+  "size": [800, 1200],
+  "header": [
+    {"text": "架空商店", "box": [40, 20, 140, 40]},
+    {"text": "2026/11/08", "box": [40, 80, 145, 100]},
+    {"text": "合計 ¥3,280", "box": [40, 120, 168, 140]}
+  ],
+  "cases": [
+    {
+      "id": "approval-date-fallback",
+      "reviews": ["ios:B1"],
+      "lines": [
+        {"text": "ご利用日 2026/11/08 承認番号 0123456", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": true, "reasons": ["mixedLine"]}
+    },
+    {
+      "id": "booking-date-time-fallback",
+      "reviews": ["ios:B1"],
+      "lines": [
+        {"text": "予約番号 RSV-12345 2026-11-08 19:00", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": true, "reasons": ["mixedLine"]}
+    },
+    {
+      "id": "card-price-fallback",
+      "reviews": ["ios:B1"],
+      "lines": [
+        {"text": "カード ************1234 ¥3,280", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": true, "reasons": ["mixedLine"]}
+    },
+    {
+      "id": "member-price-fallback",
+      "reviews": ["ios:B1"],
+      "lines": [
+        {"text": "会員番号 12345678 ポイント対象 ¥3,000", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": true, "reasons": ["mixedLine"]}
+    },
+    {
+      "id": "amount-before-number-fallback",
+      "reviews": ["android:B2", "ios:B1"],
+      "lines": [
+        {"text": "¥3,280 0123456", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": true, "reasons": ["mixedLine"]}
+    },
+    {
+      "id": "amount-before-split-number-fallback",
+      "reviews": ["android:B2", "ios:B1"],
+      "lines": [
+        {"text": "¥3,280 012 3456", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": true, "reasons": ["mixedLine"]}
+    },
+    {
+      "id": "visa-number-price-fallback",
+      "reviews": ["android:B2", "ios:B1"],
+      "lines": [
+        {"text": "VISA 12345678 ¥3,280", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": true, "reasons": ["mixedLine"]}
+    },
+    {
+      "id": "date-and-approval-known-ranges",
+      "reviews": ["android:B2", "ios:B1"],
+      "lines": [
+        {"text": "ご利用日 2026/11/08 承認番号 0123456", "box": [40, 600, 460, 620], "numberBox": [345, 600, 453, 620]}
+      ],
+      "expect": {"masked": {"approval": [347, 603, 449, 617]}, "visible": {"date": [110, 603, 193, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "price-and-card-known-ranges",
+      "reviews": ["android:B2", "ios:B1"],
+      "lines": [
+        {"text": "カード ************1234 ¥3,280", "box": [40, 600, 460, 620], "numberBox": [146, 600, 333, 620]}
+      ],
+      "expect": {"masked": {"card": [148, 603, 330, 617]}, "visible": {"price": [364, 603, 454, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "card-hyphen",
+      "reviews": ["android:B3", "ios:B2"],
+      "lines": [
+        {"text": "VISA ****-****-****-1234", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "card-fullwidth-bar",
+      "reviews": ["android:B3", "ios:B2"],
+      "lines": [
+        {"text": "VISA ****｜********-1234", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "card-x-hyphen",
+      "reviews": ["android:B3", "ios:B2"],
+      "lines": [
+        {"text": "XXXX-XXXX-XXXX-1234", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "card-partial-pan",
+      "reviews": ["android:B3", "ios:B2"],
+      "lines": [
+        {"text": "1234-56**-****-7890", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "card-hash",
+      "reviews": ["android:B3", "ios:B2"],
+      "lines": [
+        {"text": "####-####-####-1234", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "card-two-mask-glyphs",
+      "reviews": ["android:B3", "ios:B2"],
+      "lines": [
+        {"text": "VISA ##-12", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "card-underscore-x",
+      "reviews": ["android:B3", "ios:B2"],
+      "lines": [
+        {"text": "XXXX_XXXX_1234", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "card-underscore-bullets",
+      "reviews": ["android:B3", "ios:B2"],
+      "lines": [
+        {"text": "••__••__12", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "card-fullwidth",
+      "reviews": ["android:B3", "ios:B2"],
+      "lines": [
+        {"text": "＊ ● Ｘ ＃ １２", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "standalone-long-number",
+      "reviews": ["contract:1"],
+      "lines": [
+        {"text": "123456789012", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-card",
+      "reviews": ["contract:6", "ios:I5"],
+      "lines": [
+        {"text": "카드번호 1234-56**-****-7890", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-approval",
+      "reviews": ["contract:6", "ios:I5"],
+      "lines": [
+        {"text": "승인번호 12345", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-member",
+      "reviews": ["contract:6", "ios:I5"],
+      "lines": [
+        {"text": "회원번호 12345", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-booking",
+      "reviews": ["contract:6", "ios:I5"],
+      "lines": [
+        {"text": "예약번호 AB123", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-phone",
+      "reviews": ["contract:6", "ios:I5"],
+      "lines": [
+        {"text": "전화 02-123-4567", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "misread-katakana",
+      "reviews": ["contract:6", "ios:I5"],
+      "lines": [
+        {"text": "カ一ド番号", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": true, "reasons": ["unpairedLabel"]}
+    },
+    {
+      "id": "halfwidth-katakana",
+      "reviews": ["contract:6", "ios:I5"],
+      "lines": [
+        {"text": "ｶｰﾄﾞ番号 ****1234", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "tel-no-space",
+      "reviews": ["contract:6", "ios:I5"],
+      "lines": [
+        {"text": "TEL03(1234)5678", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "telephone-no-label",
+      "reviews": ["contract:6", "ios:I5"],
+      "lines": [
+        {"text": "03(1234)5678", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "tel-unicode-dash",
+      "reviews": ["contract:6", "ios:I5"],
+      "lines": [
+        {"text": "TEL 03−1234−5678", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "auth-code",
+      "reviews": ["contract:6", "ios:I5"],
+      "lines": [
+        {"text": "AUTH CODE 0A12B3", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "appr-code",
+      "reviews": ["contract:6", "ios:I5"],
+      "lines": [
+        {"text": "APPR 0A12B3", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "traditional-member",
+      "reviews": ["contract:6", "ios:I5"],
+      "lines": [
+        {"text": "會員號碼 A12345", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "approval-no",
+      "reviews": ["contract:6", "ios:I5"],
+      "lines": [
+        {"text": "承認No.12345", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "customer-number",
+      "reviews": ["contract:6", "ios:I5"],
+      "lines": [
+        {"text": "お客様番号 A-12345", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "english-member",
+      "reviews": ["contract:6", "ios:I5"],
+      "lines": [
+        {"text": "member 1234", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "english-phone",
+      "reviews": ["contract:6", "ios:I5"],
+      "lines": [
+        {"text": "phone 5555", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "same-row-card-and-price",
+      "reviews": ["android:B4", "ios:I3"],
+      "lines": [
+        {"text": "VISA", "box": [40, 600, 104, 620]},
+        {"text": "************1234", "box": [160, 600, 400, 620]},
+        {"text": "¥3,280", "box": [560, 600, 680, 620]}
+      ],
+      "expect": {"masked": {"card": [163, 603, 397, 617]}, "visible": {"price": [563, 603, 677, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "same-row-approval-and-date",
+      "reviews": ["android:B4", "ios:I3"],
+      "lines": [
+        {"text": "承認番号", "box": [40, 600, 136, 620]},
+        {"text": "0123456", "box": [160, 600, 280, 620]},
+        {"text": "2026/11/08", "box": [400, 600, 640, 620]}
+      ],
+      "expect": {"masked": {"approval": [163, 603, 277, 617]}, "visible": {"date": [403, 603, 637, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "two-single-digits",
+      "reviews": ["android:B4", "ios:M5"],
+      "lines": [
+        {"text": "承認番号 01234", "box": [40, 600, 280, 620]},
+        {"text": "5", "box": [296, 600, 312, 620]},
+        {"text": "6", "box": [320, 600, 336, 620]}
+      ],
+      "expect": {"masked": {"approval": [160, 603, 278, 617], "fifth": [298, 603, 310, 617], "sixth": [322, 603, 334, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "single-digits-before-price",
+      "reviews": ["android:B4", "ios:M1", "ios:M5"],
+      "lines": [
+        {"text": "承認番号 012", "box": [40, 600, 160, 620]},
+        {"text": "3", "box": [366, 600, 376, 620]},
+        {"text": "4", "box": [385, 600, 395, 620]},
+        {"text": "5", "box": [405, 600, 415, 620]},
+        {"text": "¥3,280", "box": [480, 600, 560, 620]}
+      ],
+      "expect": {"masked": {"approval": [122, 603, 158, 617], "third": [368, 603, 374, 617], "fourth": [387, 603, 393, 617], "fifth": [407, 603, 413, 617]}, "visible": {"price": [496, 603, 551, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "tilted-approval-and-price",
+      "reviews": ["android:B4", "contract:1"],
+      "lines": [
+        {"text": "承認番号", "box": [40, 595, 160, 621], "corners": [[40, 595], [160, 601], [160, 621], [40, 615]]},
+        {"text": "AB12", "box": [167, 602, 223, 625], "corners": [[167, 602], [223, 605], [223, 625], [167, 622]]},
+        {"text": "¥3,280", "box": [400, 613, 460, 636], "corners": [[400, 613], [460, 616], [460, 636], [400, 633]]}
+      ],
+      "expect": {"masked": {"approval": [172, 607, 218, 621]}, "visible": {"price": [407, 619, 453, 631]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "overlapping-ocr-boxes",
+      "reviews": ["android:I2"],
+      "lines": [
+        {"text": "承認番号 012345", "box": [40, 600, 200, 620]},
+        {"text": "¥3,280", "box": [190, 600, 275, 620]}
+      ],
+      "expect": {"masked": {"approval": [109, 603, 197, 617]}, "visible": {"price": [221, 603, 270, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "next-row-short-continuation",
+      "reviews": ["android:B5"],
+      "lines": [
+        {"text": "承認番号 012", "box": [40, 600, 160, 620]},
+        {"text": "345", "box": [42, 632, 92, 652]}
+      ],
+      "expect": {"masked": {"start": [122, 603, 158, 617], "continuation": [45, 635, 89, 649]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "next-row-price-other-column",
+      "reviews": ["android:B5"],
+      "lines": [
+        {"text": "承認番号 012", "box": [40, 600, 160, 620]},
+        {"text": "¥500", "box": [600, 627, 650, 647]},
+        {"text": "4567", "box": [42, 632, 92, 652]}
+      ],
+      "expect": {"masked": {"start": [122, 603, 158, 617], "continuation": [45, 635, 89, 649]}, "visible": {"price": [605, 630, 645, 644]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "next-row-two-fragments",
+      "reviews": ["android:B5"],
+      "lines": [
+        {"text": "承認番号", "box": [40, 600, 160, 620]},
+        {"text": "0123", "box": [42, 634, 92, 654]},
+        {"text": "4567", "box": [102, 635, 152, 655]}
+      ],
+      "expect": {"masked": {"first": [45, 637, 89, 651], "second": [105, 638, 149, 652]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "intervening-total-stops-continuation",
+      "reviews": ["android:B5", "android:I5"],
+      "lines": [
+        {"text": "会員番号", "box": [40, 600, 160, 620]},
+        {"text": "小計 ¥500", "box": [40, 630, 160, 650]},
+        {"text": "02", "box": [40, 660, 72, 680]}
+      ],
+      "expect": {"masked": {}, "visible": {"subtotal": [46, 633, 155, 647], "quantity": [44, 663, 68, 677]}, "needsReview": true, "reasons": ["unpairedLabel"]}
+    },
+    {
+      "id": "label-with-other-column-quantity",
+      "reviews": ["android:I5"],
+      "lines": [
+        {"text": "承認番号", "box": [40, 600, 160, 620]},
+        {"text": "02", "box": [600, 600, 630, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"quantity": [602, 603, 628, 617]}, "needsReview": true, "reasons": ["unpairedLabel"]}
+    },
+    {
+      "id": "short-alphanumeric-payload",
+      "reviews": ["android:I5"],
+      "lines": [
+        {"text": "承認番号 AB12", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "merchant",
+      "reviews": ["android:I1", "contract:policy"],
+      "lines": [
+        {"text": "つばめ商店", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "address",
+      "reviews": ["android:I1", "contract:policy"],
+      "lines": [
+        {"text": "住所 東京都 1201234", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "register-id",
+      "reviews": ["android:I1", "contract:policy"],
+      "lines": [
+        {"text": "レジ番号 0312", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "terminal-id",
+      "reviews": ["android:I1", "contract:policy"],
+      "lines": [
+        {"text": "TERMINAL ID 123456", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "business-registration",
+      "reviews": ["android:I1", "contract:policy"],
+      "lines": [
+        {"text": "登録番号 T1234567890123", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "hotel-not-tel",
+      "reviews": ["android:I1", "contract:policy"],
+      "lines": [
+        {"text": "HOTEL SAKURA", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "cardamom-not-card",
+      "reviews": ["android:I1", "contract:policy"],
+      "lines": [
+        {"text": "CARDAMOM TEA ¥480", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "plain-total",
+      "reviews": ["android:I1", "contract:policy"],
+      "lines": [
+        {"text": "合計 123456", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "yen-total",
+      "reviews": ["android:I1", "contract:policy"],
+      "lines": [
+        {"text": "合計 123456円", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "dollar-amount",
+      "reviews": ["android:I1", "contract:policy"],
+      "lines": [
+        {"text": "$ 123456", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "date-contiguous",
+      "reviews": ["android:I1", "contract:policy"],
+      "lines": [
+        {"text": "2026-11-07 09:31", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "date-spaced-ocr",
+      "reviews": ["android:I1", "contract:policy"],
+      "lines": [
+        {"text": "2026-1 1-07 09:31", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "item-and-quantity",
+      "reviews": ["android:I1", "contract:policy"],
+      "lines": [
+        {"text": "コーヒー 02", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "item-and-price",
+      "reviews": ["android:I1", "contract:policy"],
+      "lines": [
+        {"text": "ケーキ ¥480", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "jan-and-price",
+      "reviews": ["android:I1", "contract:policy"],
+      "lines": [
+        {"text": "JAN 4901234567890 ¥198", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "reread-number-in-currency-noise",
+      "reviews": ["android:I4", "ios:I2"],
+      "lines": [
+        {"text": "承認番号 012345", "box": [40, 600, 190, 620]}
+      ],
+      "reread": [
+        {"text": "¥012345", "box": [110, 600, 188, 620]}
+      ],
+      "expect": {"masked": {"approval": [110, 603, 188, 617]}, "visible": {}, "needsReview": true, "reasons": ["reread"]}
+    },
+    {
+      "id": "reread-spaced-three-digits",
+      "reviews": ["android:I4", "ios:I2"],
+      "lines": [
+        {"text": "承認番号 012345", "box": [40, 600, 190, 620]}
+      ],
+      "reread": [
+        {"text": "3 4 5", "box": [120, 600, 164, 620]}
+      ],
+      "expect": {"masked": {"approval": [110, 603, 188, 617]}, "visible": {}, "needsReview": true, "reasons": ["reread"]}
+    },
+    {
+      "id": "reread-linked-four-characters",
+      "reviews": ["android:I4", "ios:I2"],
+      "lines": [
+        {"text": "予約番号", "box": [40, 600, 125, 620]},
+        {"text": "AB12", "box": [130, 600, 168, 620]}
+      ],
+      "reread": [
+        {"text": "AB12", "box": [130, 600, 168, 620]}
+      ],
+      "expect": {"masked": {"booking": [135, 603, 165, 617]}, "visible": {}, "needsReview": true, "reasons": ["reread"]}
+    },
+    {
+      "id": "reread-unrelated-price",
+      "reviews": ["android:I4", "ios:I2"],
+      "lines": [
+        {"text": "承認番号 012345", "box": [40, 600, 190, 620]},
+        {"text": "¥3,280", "box": [560, 600, 680, 620]}
+      ],
+      "reread": [
+        {"text": "¥3,280", "box": [560, 600, 680, 620]}
+      ],
+      "expect": {"masked": {"approval": [110, 603, 188, 617]}, "visible": {"price": [563, 603, 677, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "tile-seam-fuller-box",
+      "reviews": ["android:I6", "ios:I4"],
+      "size": [720, 3200],
+      "lines": [
+        {"text": "承認番号 012345", "box": [72, 1074, 360, 1114]}
+      ],
+      "tiles": [
+        {"top": 0, "height": 1080, "lines": [{"text": "承認番号 012345", "box": [72, 1074, 360, 1080]}]},
+        {"top": 810, "height": 1080, "lines": [{"text": "承認番号 012345", "box": [72, 264, 360, 304]}]}
+      ],
+      "expect": {"masked": {"approval": [190, 1077, 351, 1110]}, "visible": {"nextRow": [405, 1145, 445, 1159]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "tile-seam-conflicting-text",
+      "reviews": ["android:I6", "ios:I4"],
+      "size": [720, 3200],
+      "lines": [
+        {"text": "承認番号 012345", "box": [72, 1074, 360, 1114]}
+      ],
+      "tiles": [
+        {"top": 0, "height": 1080, "lines": [{"text": "承認番号", "box": [72, 1074, 160, 1080]}]},
+        {"top": 810, "height": 1080, "lines": [{"text": "承認番号 012345", "box": [72, 264, 360, 304]}]}
+      ],
+      "expect": {"masked": {"approval": [190, 1077, 351, 1110]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "tile-seam-single-observation",
+      "reviews": ["android:I6", "ios:I4"],
+      "size": [720, 3200],
+      "lines": [
+        {"text": "承認番号 012345", "box": [72, 1040, 360, 1060]}
+      ],
+      "tiles": [
+        {"top": 0, "height": 1080, "lines": [{"text": "承認番号 012345", "box": [72, 1040, 360, 1060]}]},
+        {"top": 810, "height": 1080, "lines": []}
+      ],
+      "expect": {"masked": {"approval": [190, 1043, 351, 1057]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "reread-distant-partial-four",
+      "reviews": ["android:I4", "ios:I2", "contract:11"],
+      "lines": [
+        {"text": "承認番号 990123", "box": [40, 600, 190, 620]}
+      ],
+      "reread": [
+        {"text": "ABC01234", "box": [110, 820, 204, 840]}
+      ],
+      "expect": {"masked": {"approval": [110, 603, 188, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "reread-local-partial-four",
+      "reviews": ["android:I4", "ios:I2", "contract:11"],
+      "lines": [
+        {"text": "予約番号 AB12C3", "box": [40, 600, 190, 620]}
+      ],
+      "reread": [
+        {"text": "B12C", "box": [110, 600, 170, 620]}
+      ],
+      "expect": {"masked": {"booking": [110, 603, 188, 617]}, "visible": {}, "needsReview": true, "reasons": ["reread"]}
+    },
+    {
+      "id": "reread-distant-whole-value",
+      "reviews": ["android:I4", "ios:I2", "contract:11"],
+      "lines": [
+        {"text": "予約番号 AB-12C3", "box": [40, 600, 190, 620]}
+      ],
+      "reread": [
+        {"text": "AB12C3", "box": [110, 820, 201, 840]}
+      ],
+      "expect": {"masked": {"booking": [110, 603, 188, 617]}, "visible": {}, "needsReview": true, "reasons": ["reread"]}
+    },
+    {
+      "id": "reread-distant-whole-four",
+      "reviews": ["android:I4", "ios:I2", "contract:11"],
+      "lines": [
+        {"text": "承認番号 0123", "box": [40, 600, 190, 620]}
+      ],
+      "reread": [
+        {"text": "0123", "box": [110, 820, 172, 840]}
+      ],
+      "expect": {"masked": {"approval": [110, 603, 188, 617]}, "visible": {}, "needsReview": true, "reasons": ["reread"]}
+    },
+    {
+      "id": "reread-distant-whole-three",
+      "reviews": ["android:I4", "ios:I2", "contract:11"],
+      "lines": [
+        {"text": "承認番号 123", "box": [40, 600, 190, 620]}
+      ],
+      "reread": [
+        {"text": "123", "box": [110, 820, 157, 840]}
+      ],
+      "expect": {"masked": {"approval": [110, 603, 188, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "booking-unlabelled-five-digits",
+      "reviews": ["contract:12", "android:I1"],
+      "lines": [
+        {"text": "RSV-12345", "box": [40, 600, 190, 620]}
+      ],
+      "expect": {"masked": {"booking": [43, 603, 187, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "booking-unlabelled-one-letter",
+      "reviews": ["contract:12", "android:I1"],
+      "lines": [
+        {"text": "A-12345", "box": [40, 600, 190, 620]}
+      ],
+      "expect": {"masked": {"booking": [43, 603, 187, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "booking-unlabelled-five-letters",
+      "reviews": ["contract:12", "android:I1"],
+      "lines": [
+        {"text": "ABCDE-12345", "box": [40, 600, 190, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"code": [43, 603, 187, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "booking-unlabelled-three-digits",
+      "reviews": ["contract:12", "android:I1"],
+      "lines": [
+        {"text": "ABC-123", "box": [40, 600, 190, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"code": [43, 603, 187, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "booking-unlabelled-four-digits",
+      "reviews": ["contract:12", "android:I1"],
+      "lines": [
+        {"text": "ABC-1234", "box": [40, 600, 190, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"code": [43, 603, 187, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "booking-labelled-three-digits",
+      "reviews": ["contract:12", "android:I1"],
+      "lines": [
+        {"text": "予約番号 ABC-123", "box": [40, 600, 190, 620]}
+      ],
+      "expect": {"masked": {"booking": [110, 603, 188, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "item-code-beside-price",
+      "reviews": ["contract:12", "android:I1"],
+      "lines": [
+        {"text": "コーヒー", "box": [40, 600, 140, 620]},
+        {"text": "ABC-12345", "box": [167, 600, 270, 620]},
+        {"text": "¥198", "box": [310, 600, 380, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"item": [45, 603, 135, 617], "code": [170, 603, 267, 617], "price": [314, 603, 376, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "item-code-in-priced-line",
+      "reviews": ["contract:12", "android:I1"],
+      "lines": [
+        {"text": "コーヒー ABC-12345 ¥198", "box": [40, 600, 380, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [43, 603, 377, 617]}, "needsReview": false, "reasons": []}
+    }
+  ]
+}

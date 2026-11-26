@@ -23,6 +23,11 @@ class ReceiptProcessor(
     private val flattener: ReceiptFlattener,
     private val limit: Int = 2,
     private val hooks: ProcessingHooks = ProcessingHooks(),
+    /**
+     * 읽은 뒤 제안한 가림으로 사본을 한 번 구워 같은 엔진으로 다시 읽고, 민감 형식 문자열이 나오면 "가림 확인 필요"로 둔다.
+     * 사진마다 OCR이 두 번이 된다. 앱은 켜고, OCR 호출 수를 세는 시험은 끈다.
+     */
+    private val maskRecheck: Boolean = false,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val onChange: (ProcessingManifest) -> Unit = {},
 ) {
@@ -55,6 +60,40 @@ class ReceiptProcessor(
 
     suspend fun snapshot(): ProcessingManifest = mutex.withLock { manifest }
 
+    /**
+     * 제안한 가림으로 미리보기와 같은 굽기 함수로 사본을 만들어 다시 읽는다. 사본은 초안 폴더 안 숨김 임시 파일로만 잠깐 두고 지운다
+     * (엔진이 파일을 읽는다). 다시 읽기에 실패해도 확인 필요로 둔다.
+     */
+    private suspend fun recheck(
+        file: java.io.File,
+        proposal: OcrProposal,
+    ): OcrProposal {
+        val (width, height) = proposal.ocr.pixelWidth to proposal.ocr.pixelHeight
+        val shapes = Masking.shapes(proposal.ocr.lines, proposal.suggestedMaskLineIds.toSet(), width, height)
+        val leaked =
+            try {
+                runInterruptible(dispatcher) {
+                    val temp = java.io.File(file.parentFile, ".recheck-${file.nameWithoutExtension}.png")
+                    try {
+                        temp.writeBytes(
+                            MaskedArtifact
+                                .flatten(flattener, file) { w, h ->
+                                    Masking.shapes(proposal.ocr.lines, proposal.suggestedMaskLineIds.toSet(), w, h)
+                                }.pngBytes,
+                        )
+                        rereadLeaks(proposal, shapes, recognizer.recognize(temp))
+                    } finally {
+                        temp.delete()
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                true
+            }
+        return if (leaked) proposal.copy(maskCheck = proposal.maskCheck.with(MaskDoubt.Reread)) else proposal
+    }
+
     /** 대기 중인 사진을 모두 처리할 때까지 돌고 끝난다. 이미 돌고 있으면 바로 돌아온다. */
     suspend fun run() {
         if (!running.compareAndSet(false, true)) return
@@ -75,16 +114,10 @@ class ReceiptProcessor(
                         throw ProcessingException(ProcessingFailure.RecognitionError)
                     }
                     val file = store.photoFile(draftId, item.photoFileName)
-                    val proposal = ProposalBuilder.make(runInterruptible(dispatcher) { recognizer.recognize(file) })
-                    Result.success(
-                        if (hooks.dropSuggestionsAtPosition ==
-                            item.position
-                        ) {
-                            proposal.copy(suggestedMaskLineIds = emptyList())
-                        } else {
-                            proposal
-                        },
-                    )
+                    val made = ProposalBuilder.make(runInterruptible(dispatcher) { recognizer.recognize(file) })
+                    val proposal =
+                        if (hooks.dropSuggestionsAtPosition == item.position) made.copy(suggestedMaskLineIds = emptyList()) else made
+                    Result.success(if (maskRecheck) recheck(file, proposal) else proposal)
                 } catch (e: CancellationException) {
                     // 디스크에는 Processing으로 남는다. 다음에 처리기를 만들 때 대기열로 돌아간다.
                     throw e
@@ -255,9 +288,12 @@ class ReceiptProcessor(
         regions: List<MaskRegion>,
     ): MaskedArtifact {
         val proposal = OcrProposal.fromJson(store.proposalFile(draftId, item.id).readText())
-        val (width, height) = proposal.ocr.pixelWidth to proposal.ocr.pixelHeight
-        val rects = Masking.rects(proposal.ocr.lines, maskLineIds, width, height) + Masking.regionRects(regions, width, height)
-        return runInterruptible(dispatcher) { MaskedArtifact.flatten(flattener, store.photoFile(draftId, item.photoFileName), rects) }
+        // 저장한 픽셀 크기가 아니라 지금 디코딩한 크기로 투영한다(이전 디코딩 규칙의 초안도 같은 자리, B1).
+        return runInterruptible(dispatcher) {
+            MaskedArtifact.flatten(flattener, store.photoFile(draftId, item.photoFileName)) { width, height ->
+                Masking.shapes(proposal.ocr.lines, maskLineIds, width, height) + Masking.regionRects(regions, width, height)
+            }
+        }
     }
 
     /**

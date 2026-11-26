@@ -1,6 +1,12 @@
 package app.nonanona.testing
 
 import app.nonanona.feature.account.AuthGateway
+import app.nonanona.feature.receiptimport.ReceiptDraftStore
+import app.nonanona.feature.settlement.ExpenseStatus
+import app.nonanona.feature.settlement.LedgerExpense
+import app.nonanona.feature.settlement.LedgerMember
+import app.nonanona.feature.settlement.MemberId
+import app.nonanona.feature.settlement.ReceiptArtifactRef
 import app.nonanona.feature.settlement.RoomLedger
 import app.nonanona.feature.trip.InviteAcceptException
 import app.nonanona.feature.trip.InviteAcceptFailure
@@ -17,7 +23,9 @@ import app.nonanona.feature.trip.TripId
 import app.nonanona.feature.trip.TripMember
 import app.nonanona.feature.trip.TripRoom
 import app.nonanona.feature.trip.TripSummary
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.util.UUID
 
 /**
@@ -30,6 +38,7 @@ import java.util.UUID
  */
 class TestTripGateway(
     private val auth: AuthGateway,
+    private val retranslationFixtures: ReceiptDraftStore? = null,
 ) : TripGateway {
     private val failedOnce = mutableSetOf<InviteCode>()
 
@@ -75,10 +84,52 @@ class TestTripGateway(
         }
     }
 
-    /** 테스트 구현체에는 서버 장부가 없다(정산 흐름은 로컬 Supabase 모드에서만 검증한다). */
-    override suspend fun myTrips(): List<TripSummary> = emptyList()
+    override suspend fun myTrips(): List<TripSummary> =
+        if (retranslationFixtures != null && auth.restoreSession() != null) listOf(retranslationTrip) else emptyList()
 
-    override suspend fun ledger(trip: TripId): RoomLedger = throw RoomLoadException(RoomLoadFailure.Unavailable)
+    /** 재번역 E2E에서 확인된 가상 영수증의 허용 필드로 같은 장부를 다시 만든다. */
+    override suspend fun ledger(trip: TripId): RoomLedger {
+        val store = retranslationFixtures ?: throw RoomLoadException(RoomLoadFailure.Unavailable)
+        if (trip != retranslationTrip.id) throw RoomLoadException(RoomLoadFailure.NotFound)
+        val session = auth.restoreSession() ?: throw RoomLoadException(RoomLoadFailure.SessionExpired)
+        val me = MemberId(session.accountId.value)
+        val expenses =
+            withContext(Dispatchers.IO) {
+                store.list().flatMap { draft ->
+                    store.loadProcessing(draft.id)?.items.orEmpty().mapNotNull { item ->
+                        val confirmed = item.confirmed ?: return@mapNotNull null
+                        val sha = confirmed.artifactSha256 ?: return@mapNotNull null
+                        val fields = confirmed.fields
+                        LedgerExpense(
+                            id = "${draft.id}/${item.id}",
+                            version = 1,
+                            isManual = false,
+                            uploadedBy = me,
+                            date = fields.date,
+                            amountMinor = fields.amountMinor,
+                            currency = fields.currency,
+                            merchant = fields.merchant,
+                            status = ExpenseStatus.Pending,
+                            payer = null,
+                            krwAmount = null,
+                            krwBasis = null,
+                            shares = emptyList(),
+                            artifact = ReceiptArtifactRef("retranslation-fixture/${item.id}", sha),
+                        )
+                    }
+                }
+            }
+        return RoomLedger(
+            tripId = trip,
+            name = retranslationTrip.name,
+            isFinalized = false,
+            revision = 1,
+            isHost = true,
+            me = me,
+            members = listOf(LedgerMember(me, session.displayName, isHost = true)),
+            expenses = expenses,
+        )
+    }
 
     override suspend fun maskedReceipt(
         artifact: app.nonanona.feature.settlement.ReceiptArtifactRef,
@@ -97,5 +148,6 @@ class TestTripGateway(
 
     private companion object {
         const val SIMULATED_LATENCY_MILLIS = 400L
+        val retranslationTrip = TripSummary(TripId("test-trip-retranslation"), "가상 재번역 여행", isHost = true, isFinalized = false)
     }
 }

@@ -391,6 +391,92 @@ struct ReceiptItemsTests {
     }
   }
 
+  @Test func acceptedRetranslationKeepsAmountCheckAndRejectsSnapshotAfterEdit() async throws {
+    let (processor, item, _) = try await confirmedItemReceipt(ReceiptDraftStore(root: tempRoot()))
+    var plan = try #require(try await processor.itemPlan(item.id))
+    let snapshot = try #require(plan.lines.first { !$0.originalName.isEmpty })
+    #expect(!snapshot.checked)
+    let accepted = plan.acceptRetranslation("오늘의 정식", matching: snapshot)
+    #expect(accepted)
+    var expected = snapshot
+    expected.name = "오늘의 정식"
+    expected.nameSource = .user
+    #expect(plan.line(snapshot.id) == expected)
+
+    plan.setName(snapshot.id, "직접 적은 이름")
+    let staleAccepted = plan.acceptRetranslation("오래된 제안", matching: expected)
+    #expect(!staleAccepted)
+    #expect(plan.line(snapshot.id)?.name == "직접 적은 이름")
+  }
+
+  /// 받은 재번역 결과는 초안 폴더(`retranslations/<사진>.json`)에 품목 계획과 같은 보호 쓰기로 남고, 다시 실행해(새 처리기)
+  /// 읽어도 같다. 원문 스냅샷에 묶여, 그 줄이 없거나 원문이 다른 계획에는 맞지 않는다. 늦게 도착한 옛 저장은 덮지 않고, 지우면 파일이 없다.
+  @Test func retranslationRecordIsKeptLikeThePlanAndBoundToTheOriginalSnapshot() async throws {
+    let root = tempRoot()
+    let failing = LockedFlag()
+    let store = ReceiptDraftStore(
+      root: root, writeFault: { url in url.path.contains("/retranslations/") && failing.value })
+    let (processor, item, draft) = try await confirmedItemReceipt(store)
+    let plan = try #require(try await processor.itemPlan(item.id))
+    let line = try #require(plan.lines.first { !$0.originalName.isEmpty })
+    let file = root.appending(path: "drafts/\(draft.id)/retranslations/\(item.id).json")
+    #expect(try await processor.itemRetranslation(item.id) == nil)
+
+    let requested = ItemRetranslationRecord(state: .requested, batch: false, requested: [line])
+    try await processor.saveItemRetranslation(item.id, requested, revision: 1)
+    var received = requested
+    received.state = .received
+    received.suggestions = [line.id: "오늘의 정식"]
+    try await processor.saveItemRetranslation(item.id, received, revision: 2)
+    try await processor.saveItemRetranslation(item.id, requested, revision: 1)
+    #expect(FileManager.default.fileExists(atPath: file.path))
+
+    let relaunched = try ReceiptProcessor(store: store, draft: draft, recognizer: RowsRecognizer())
+    #expect(try await relaunched.itemRetranslation(item.id) == received)
+    #expect(received.matches(plan))
+    var excluded = plan
+    excluded.setExcluded(line.id, true)
+    #expect(received.matches(excluded), "원문은 그대로다(적용할 때 스냅샷 검사가 따로 막는다)")
+    let changed = try JSONDecoder().decode(
+      ItemPlan.self,
+      from: Data(
+        String(decoding: try JSONEncoder().encode(plan), as: UTF8.self)
+          .replacingOccurrences(of: line.originalName, with: line.originalName + "X").utf8))
+    #expect(!received.matches(changed))
+
+    failing.value = true
+    await #expect(throws: ReceiptStorageError.writeFailed) {
+      try await relaunched.saveItemRetranslation(item.id, received, revision: 3)
+    }
+    await #expect(throws: ReceiptStorageError.writeFailed) {
+      try await relaunched.saveItemRetranslation(item.id, nil, revision: 3)
+    }
+    #expect(FileManager.default.fileExists(atPath: file.path), "지우지 못하면 파일이 그대로다")
+    failing.value = false
+    try await relaunched.saveItemRetranslation(item.id, nil, revision: 4)
+    #expect(try await relaunched.itemRetranslation(item.id) == nil)
+    #expect(!FileManager.default.fileExists(atPath: file.path))
+  }
+
+  /// 풀 수 없는(손상된) 재번역 기록은 지우지 않고 `ProcessorError.itemRetranslationInvalid`를 던진다(앱이 받지 못했다고 알리고,
+  /// 사용자가 닫거나 새 요청이 덮을 때까지 남긴다). 덮어 쓰거나 지우면 평소처럼 읽는다.
+  @Test func malformedRetranslationRecordIsKeptAndReported() async throws {
+    let root = tempRoot()
+    let store = ReceiptDraftStore(root: root)
+    let (processor, item, draft) = try await confirmedItemReceipt(store)
+    let plan = try #require(try await processor.itemPlan(item.id))
+    let line = try #require(plan.lines.first { !$0.originalName.isEmpty })
+    let file = root.appending(path: "drafts/\(draft.id)/retranslations/\(item.id).json")
+    try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try Data("{\"state\":".utf8).write(to: file)
+
+    await #expect(throws: ProcessorError.itemRetranslationInvalid) { try await processor.itemRetranslation(item.id) }
+    #expect(FileManager.default.fileExists(atPath: file.path), "손상된 기록도 그대로 둔다")
+    let requested = ItemRetranslationRecord(state: .requested, batch: false, requested: [line])
+    try await processor.saveItemRetranslation(item.id, requested)
+    #expect(try await processor.itemRetranslation(item.id) == requested, "새 요청이 덮는다")
+  }
+
   /// 직접 입력(사본 없음)은 OCR이 없어 품목 계획이 없다.
   @Test func manualEntryHasNoPlan() async throws {
     let store = ReceiptDraftStore(root: tempRoot())

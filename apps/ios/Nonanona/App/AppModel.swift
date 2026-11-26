@@ -203,15 +203,23 @@ final class AppModel {
   let graph: AppGraph
   /// 여행방 목록·장부·검토·송금표.
   let rooms: RoomModel
+  /// 품목명 다시 번역의 요청과 결과(시트보다 오래 산다).
+  let retranslation: ItemRetranslationModel
   var signInProviders: [SignInProvider] { graph.auth.providers }
   var testOnlyNotice: String? { graph.auth.testOnlyNotice }
 
   init(graph: AppGraph) {
     self.graph = graph
     rooms = RoomModel(trips: graph.trips, settlement: graph.settlement)
+    retranslation = ItemRetranslationModel(translate: graph.previewRetranslation)
     rooms.onSessionExpired = { [weak self] in await self?.sessionEnded() }
     // 사본은 지금 계정·연 여행방 맥락에서만 받고 보인다(응답이 올 때 다시 확인한다).
     rooms.receiptContext = { [weak self] in ReceiptContext(account: self?.session?.accountID, trip: self?.room?.id) }
+    retranslation.plan = { [weak self] in self?.itemPlans[$0] }
+    retranslation.processor = { [weak self] in self?.processors[$0.draftID] }
+    retranslation.applyName = { [weak self] target, line, name in
+      await self?.applyRetranslation(target, line, name) ?? .saveFailed
+    }
   }
 
   /// 서버가 세션을 받지 않았다. 세션만 지운다(초안·보관한 초대는 그대로). 다시 로그인하면 이어서 쓴다.
@@ -728,14 +736,40 @@ final class AppModel {
     Task {
       await loadItemPlan(receipt, with: processor)
       itemSplit = ItemSplitTarget(expense: expense, receipt: receipt)
+      await retranslation.restore(receipt)
       await checkTranslation(receipt)
     }
   }
 
   /// 읽지 못했던 계획을 다시 읽는다. 실패하면 같은 안내를 그대로 둔다.
   func retryItemPlanLoad(_ target: ReviewTarget) {
+    Task { await prepareItemPlan(target) }
+  }
+
+  /// 품목 화면에 들어올 때와 같이 계획을 읽고, 그 영수증에 남긴 재번역을 복원한다.
+  func prepareItemPlan(_ target: ReviewTarget) async {
     guard let processor = processors[target.draftID] else { return }
-    Task { await loadItemPlan(target, with: processor) }
+    await loadItemPlan(target, with: processor)
+    await retranslation.restore(target)
+  }
+
+  /// 남긴 재번역 기록을 읽지 못했을 때 다시 읽는다.
+  func retryRetranslationLoad(_ target: ReviewTarget) {
+    Task { await retranslation.restore(target) }
+  }
+
+  /// 재번역 "이 이름 사용": 스냅샷이 지금 줄과 같으면 계획에 쓰고, 기기에 남은 것을 확인한 뒤에 `applied`다. 이미 메모리에
+  /// 적용돼 있으면(앞선 쓰기가 실패한 ‘다시 저장’) 그 계획을 다시 쓴다. 쓰지 못하면 품목 화면의 저장 실패 안내도 함께 보인다.
+  func applyRetranslation(_ target: ReviewTarget, _ line: ItemPlanLine, _ name: String) async
+    -> ItemRetranslationModel.ApplyOutcome
+  {
+    guard var plan = itemPlans[target], let processor = processors[target.draftID] else { return .saveFailed }
+    if plan.line(line.id) != line.applyingRetranslation(name) {
+      guard plan.acceptRetranslation(name, matching: line) else { return .rejected }
+      itemPlans[target] = plan
+    }
+    let saved = await persistItemPlan(target, plan, with: processor, revision: nextItemPlanRevision())
+    return saved ? .applied : .saveFailed
   }
 
   /// 화면에 있던(아직 쓰는 중일 수 있는) 입력을 디스크 값으로 덮지 않는다. 파일이 없을 때만 OCR로 새로 만든 계획이 온다.
@@ -767,20 +801,32 @@ final class AppModel {
 
   /// 검토 입력과 같은 방식: 순번을 붙여 쓰고, 실패 안내는 가장 최근 순번의 결과로만 바꾼다.
   private func saveItemPlan(_ target: ReviewTarget, _ plan: ItemPlan, with processor: ReceiptProcessor) {
+    let revision = nextItemPlanRevision()
+    Task { _ = await persistItemPlan(target, plan, with: processor, revision: revision) }
+  }
+
+  /// 순번은 부를 때(입력 순서대로) 정한다.
+  private func nextItemPlanRevision() -> Int {
     itemPlanRevision += 1
-    let revision = itemPlanRevision
-    Task {
-      let ok: Bool
-      do {
-        try await processor.saveItemPlan(target.itemID, plan, revision: revision)
-        ok = true
-      } catch {
-        ok = false
-      }
-      guard revision >= itemPlanSettled[target] ?? 0 else { return }
+    return itemPlanRevision
+  }
+
+  /// 계획을 쓰고 그 쓰기가 성공했는지 돌려준다(더 새 순번이 이미 썼으면 쓰지 않고 성공이다. 그 계획이 이 변경을 담고 있다).
+  private func persistItemPlan(
+    _ target: ReviewTarget, _ plan: ItemPlan, with processor: ReceiptProcessor, revision: Int
+  ) async -> Bool {
+    let ok: Bool
+    do {
+      try await processor.saveItemPlan(target.itemID, plan, revision: revision)
+      ok = true
+    } catch {
+      ok = false
+    }
+    if revision >= itemPlanSettled[target] ?? 0 {
       itemPlanSettled[target] = revision
       if ok { itemPlanSaveFailed.remove(target) } else { itemPlanSaveFailed.insert(target) }
     }
+    return ok
   }
 
   func checkTranslation(_ target: ReviewTarget) async {
@@ -843,6 +889,7 @@ final class AppModel {
       await loadItemPlan(receipt, with: processor)
       rooms.clearProposalState(target)
       proposalSplit = ItemSplitTarget(expense: target, receipt: receipt, purpose: .proposal)
+      await retranslation.restore(receipt)
       await checkTranslation(receipt)
     }
   }

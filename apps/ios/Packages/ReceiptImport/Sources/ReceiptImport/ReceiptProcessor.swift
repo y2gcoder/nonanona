@@ -185,6 +185,32 @@ public actor ReceiptProcessor {
     if let revision { savedRevisions[key] = revision }
   }
 
+  /// 끝내지 않은 품목 재번역(확인한 영수증만). 없으면 nil. 있는데 읽지 못하면 `ReceiptStorageError.readFailed`를 던지고
+  /// 파일은 그대로 둔다. 풀 수 없으면(손상) `ProcessorError.itemRetranslationInvalid`를 던지고 역시 그대로 둔다(앱이 받지
+  /// 못했다고 알리고, 사용자가 닫거나 새 요청이 덮을 때 정리한다).
+  public func itemRetranslation(_ id: String) throws -> ItemRetranslationRecord? {
+    _ = try indexOf(id, in: [.confirmed])
+    guard let data = try store.readIfPresent(store.retranslationURL(draftID, id)) else { return nil }
+    guard let record = try? JSONDecoder().decode(ItemRetranslationRecord.self, from: data) else {
+      throw ProcessorError.itemRetranslationInvalid
+    }
+    return record
+  }
+
+  /// 품목 계획과 같은 방식으로 쓴다(원자적·보호, 순번이 오래되면 쓰지 않는다). `nil`이면 지운다(적용하거나 닫아 끝냈다).
+  public func saveItemRetranslation(_ id: String, _ record: ItemRetranslationRecord?, revision: Int? = nil) throws {
+    _ = try indexOf(id, in: [.confirmed])
+    let key = "retranslations/" + id
+    if let revision, let saved = savedRevisions[key], revision <= saved { return }
+    let url = store.retranslationURL(draftID, id)
+    if let record {
+      try store.writeProtected(JSONEncoder().encode(record), to: url)
+    } else {
+      try store.removeIfPresent(url)
+    }
+    if let revision { savedRevisions[key] = revision }
+  }
+
   private static func check(_ fields: AllowedReceiptFields) throws {
     let valid = ReviewForm.validate(
       date: fields.date, amount: ReviewForm.amountText(minor: fields.amountMinor, currency: fields.currency),

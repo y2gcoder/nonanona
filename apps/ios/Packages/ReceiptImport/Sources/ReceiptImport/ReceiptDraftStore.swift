@@ -143,6 +143,9 @@ public struct ReceiptDraftStore: Sendable {
   func proposalURL(_ id: String, _ itemID: String) -> URL { draftURL(id).appending(path: "proposals/\(itemID).json") }
   func reviewURL(_ id: String, _ itemID: String) -> URL { draftURL(id).appending(path: "reviews/\(itemID).json") }
   func itemPlanURL(_ id: String, _ itemID: String) -> URL { draftURL(id).appending(path: "items/\(itemID).json") }
+  func retranslationURL(_ id: String, _ itemID: String) -> URL {
+    draftURL(id).appending(path: "retranslations/\(itemID).json")
+  }
   func artifactURL(_ id: String, _ fileName: String) -> URL { draftURL(id).appending(path: "confirmed/\(fileName)") }
   private func processingURL(_ id: String) -> URL { draftURL(id).appending(path: "processing.json") }
 
@@ -176,6 +179,17 @@ public struct ReceiptDraftStore: Sendable {
     #else
       try data.write(to: url, options: .atomic)
     #endif
+  }
+
+  /// 있으면 지운다. 쓰기와 같은 실패 주입을 받고, 지우지 못하면 `writeFailed`를 던진다(파일은 그대로).
+  func removeIfPresent(_ url: URL) throws {
+    guard FileManager.default.fileExists(atPath: url.path) else { return }
+    if let writeFault, writeFault(url) { throw ReceiptStorageError.writeFailed }
+    do {
+      try FileManager.default.removeItem(at: url)
+    } catch {
+      throw ReceiptStorageError.writeFailed
+    }
   }
 
   private static func safeExtension(_ raw: String) -> String {

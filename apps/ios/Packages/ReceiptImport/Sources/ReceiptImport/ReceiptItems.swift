@@ -244,6 +244,14 @@ public struct ItemPlanLine: Codable, Equatable, Identifiable, Sendable {
   /// 이 줄을 나눠 낼 사람(여행방 구성원 ID). 여럿이면 똑같이 나눈다(정확한 분수로 계산).
   public var assignees: [String]
 
+  /// 재번역 제안을 "이 이름 사용"으로 적용한 직후의 줄(이름만 바뀌고 사용자가 정한 이름이 된다).
+  public func applyingRetranslation(_ name: String) -> ItemPlanLine {
+    var line = self
+    line.name = name
+    line.nameSource = .user
+    return line
+  }
+
   public var needsCheck: Bool { !flags.isEmpty && !checked }
   public var isManual: Bool { id.hasPrefix("manual-") }
 
@@ -286,6 +294,8 @@ public struct ItemPlan: Codable, Equatable, Sendable {
   public var difference: Int { receiptTotalMinor - linesTotal }
 
   public func line(_ id: String) -> ItemPlanLine? { lines.first { $0.id == id } }
+  /// 다시 번역할 수 있는 줄(원문이 있고 빼지 않은 줄).
+  public var retranslatableLines: [ItemPlanLine] { lines.filter { !$0.originalName.isEmpty && !$0.excluded } }
 
   public mutating func setName(_ id: String, _ text: String) {
     update(id) {
@@ -293,6 +303,15 @@ public struct ItemPlan: Codable, Equatable, Sendable {
       $0.nameSource = .user
       $0.checked = true
     }
+  }
+
+  /// 제안을 사용자가 골라도 이름만 바꾸고 금액·수량 확인 상태는 보존한다.
+  public mutating func acceptRetranslation(_ name: String, matching snapshot: ItemPlanLine) -> Bool {
+    guard !name.isEmpty, !snapshot.originalName.isEmpty, !snapshot.excluded,
+      let index = lines.firstIndex(where: { $0.id == snapshot.id }), lines[index] == snapshot
+    else { return false }
+    lines[index] = snapshot.applyingRetranslation(name)
+    return true
   }
 
   public mutating func setAmount(_ id: String, _ text: String) {
@@ -472,4 +491,44 @@ public enum ItemAllocator {
 
   static func gcd(_ a: Int, _ b: Int) -> Int { b == 0 ? a : gcd(b, a % b) }
   static func lcm(_ a: Int, _ b: Int) -> Int { a / gcd(a, b) * b }
+}
+
+// MARK: - 품목 재번역 결과(기기 안)
+
+/// 품목 재번역 한 번의 요청과 받은 결과. 사용자가 끝내기(적용·닫기) 전까지 초안 폴더 `retranslations/<사진>.json`에
+/// 품목 계획과 같은 방식(원자적·보호 쓰기)으로만 둔다. 기기 밖으로 보내거나 동기화하지 않는다.
+/// 영수증(초안·사진)은 파일 위치로, 품목은 줄 ID로, 원문은 요청 때 줄 스냅샷(`requested`)으로 묶는다.
+public struct ItemRetranslationRecord: Codable, Equatable, Sendable {
+  public enum State: String, Codable, Sendable {
+    /// 보냈고 응답을 기다린다. 앱이 그사이 끝났으면 다시 보내지 않고 받지 못했다고 알린다.
+    case requested
+    /// 응답을 받았다. 사용자가 적용하거나 닫을 때까지 남긴다.
+    case received
+  }
+
+  public var state: State
+  /// 여러 품목 다시 번역(줄 선택)으로 연 요청인지.
+  public let batch: Bool
+  /// 요청한 줄(요청 때 품목 계획의 줄 그대로).
+  public let requested: [ItemPlanLine]
+  /// 줄 ID → 받은 이름 제안. 제안이 없는 줄은 원문 유지(보류)다.
+  public var suggestions: [String: String]
+  /// 줄 ID → "이 이름 사용"의 결과(적용함/품목이 바뀜). 아직 누르지 않은 줄은 없다.
+  public var accepted: [String: Bool]
+
+  public init(
+    state: State, batch: Bool, requested: [ItemPlanLine], suggestions: [String: String] = [:],
+    accepted: [String: Bool] = [:]
+  ) {
+    self.state = state
+    self.batch = batch
+    self.requested = requested
+    self.suggestions = suggestions
+    self.accepted = accepted
+  }
+
+  /// 요청한 줄이 지금 계획에 모두 남아 있고 원문이 같은지. 아니면 결과를 버린다.
+  public func matches(_ plan: ItemPlan) -> Bool {
+    !requested.isEmpty && requested.allSatisfy { plan.line($0.id)?.originalName == $0.originalName }
+  }
 }

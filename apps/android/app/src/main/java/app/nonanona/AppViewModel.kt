@@ -64,6 +64,7 @@ import app.nonanona.feature.trip.ReceiptUploadFailure
 import app.nonanona.feature.trip.TripId
 import app.nonanona.feature.trip.TripRoom
 import app.nonanona.feature.trip.TripSummary
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -73,6 +74,8 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
@@ -295,6 +298,14 @@ class AppViewModel(
     val backStack = mutableStateListOf<Route>(Route.Home)
     private val mutableState = MutableStateFlow(AppUiState())
     val state: StateFlow<AppUiState> = mutableState.asStateFlow()
+    internal val itemRetranslation =
+        ItemRetranslationState(
+            scope = viewModelScope,
+            store = graph.drafts,
+            translate = graph.adapters.previewRetranslation,
+            plan = { state.value.itemPlans[it] },
+            apply = ::acceptRetranslation,
+        )
     val signInProviders: List<SignInProvider> get() = graph.adapters.auth.providers
     val testOnlyNotice: String? get() = graph.adapters.auth.testOnlyNotice
 
@@ -913,13 +924,17 @@ class AppViewModel(
             loadItemPlan(receipt, processor)
             showOnly(Route.Home, Route.Room, Route.Expense(target), Route.ItemSplit(target, receipt))
             checkTranslation(receipt)
+            itemRetranslation.restore(receipt)
         }
     }
 
     /** 읽지 못했던 계획을 다시 읽는다. 실패하면 같은 안내를 그대로 둔다. */
     fun retryItemPlanLoad(receipt: Route.Receipt) {
         val processor = processors[receipt.draftId] ?: return
-        viewModelScope.launch { loadItemPlan(receipt, processor) }
+        viewModelScope.launch {
+            loadItemPlan(receipt, processor)
+            itemRetranslation.restore(receipt)
+        }
     }
 
     /**
@@ -951,25 +966,34 @@ class AppViewModel(
         }
     }
 
+    // Compose 메인 스레드에서 호출한다. 일반 입력은 Main.immediate와 다툼 없는 잠금으로 즉시 반영된다.
+    // 적용 중 잠금을 잡는 동안에는 재번역 대화상자가 입력을 가린다.
     fun editItemPlan(
         receipt: Route.Receipt,
         change: (ItemPlan) -> ItemPlan,
     ) {
         val processor = processors[receipt.draftId] ?: return
-        var next: ItemPlan? = null
-        mutableState.update { s ->
-            val plan = s.itemPlans[receipt] ?: return@update s
-            change(plan).also { next = it }.let { s.copy(itemPlans = s.itemPlans + (receipt to it)) }
+        viewModelScope.launch {
+            itemPlanEdits.withLock {
+                val plan = state.value.itemPlans[receipt] ?: return@withLock
+                val next = change(plan)
+                mutableState.update { it.copy(itemPlans = it.itemPlans + (receipt to next)) }
+                saveItemPlan(receipt, next, processor)
+            }
         }
-        next?.let { saveItemPlan(receipt, it, processor) }
     }
 
     fun retryItemPlanSave(receipt: Route.Receipt) {
         val processor = processors[receipt.draftId] ?: return
-        val plan = state.value.itemPlans[receipt] ?: return
-        saveItemPlan(receipt, plan, processor)
+        viewModelScope.launch {
+            itemPlanEdits.withLock {
+                val plan = state.value.itemPlans[receipt] ?: return@withLock
+                saveItemPlan(receipt, plan, processor)
+            }
+        }
     }
 
+    private val itemPlanEdits = Mutex()
     private var itemPlanRevision = 0L
     private val itemPlanSettled = mutableMapOf<Route.Receipt, Long>()
 
@@ -1021,6 +1045,36 @@ class AppViewModel(
 
     /** 언어를 받거나 관리하는 시스템 화면(기기 번역 서비스가 주면). */
     fun translationSettings() = graph.itemTranslator.settingsIntent()
+
+    private suspend fun acceptRetranslation(
+        receipt: Route.Receipt,
+        snapshot: ItemPlanLine,
+        name: String,
+    ): RetranslationApply =
+        itemPlanEdits.withLock {
+            val processor = processors[receipt.draftId] ?: return@withLock RetranslationApply.Changed
+            val plan = state.value.itemPlans[receipt] ?: return@withLock RetranslationApply.Changed
+            val updated = plan.acceptRetranslation(name, snapshot)
+            if (updated === plan) return@withLock RetranslationApply.Changed
+
+            // 사용자 선택을 계획에 먼저 남긴 뒤에만 제안을 처리한 것으로 표시한다.
+            val revision = ++itemPlanRevision
+            try {
+                processor.saveItemPlan(receipt.itemId, updated, revision)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Exception) {
+                return@withLock RetranslationApply.SaveFailed
+            }
+            itemPlanSettled[receipt] = revision
+            mutableState.update {
+                it.copy(
+                    itemPlans = it.itemPlans + (receipt to updated),
+                    itemPlanSaveFailed = it.itemPlanSaveFailed - receipt,
+                )
+            }
+            RetranslationApply.Applied
+        }
 
     val itemTranslatorIsPreview: Boolean get() = graph.itemTranslator.source == ItemPlanLine.NameSource.Preview
 
@@ -1082,6 +1136,7 @@ class AppViewModel(
             rooms.clearProposalState(target)
             showOnly(Route.Home, Route.Room, Route.ItemProposal(target, receipt))
             checkTranslation(receipt)
+            itemRetranslation.restore(receipt)
         }
     }
 

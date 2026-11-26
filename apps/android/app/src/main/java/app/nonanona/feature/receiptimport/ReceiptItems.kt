@@ -340,6 +340,15 @@ data class ItemPlan(
         text: String,
     ) = update(id) { it.copy(name = text, nameSource = ItemPlanLine.NameSource.User, checked = true) }
 
+    /** 제안을 사용자가 골라도 이름만 바꾸고 금액·수량 확인 상태는 보존한다. */
+    fun acceptRetranslation(
+        name: String,
+        snapshot: ItemPlanLine,
+    ): ItemPlan {
+        if (name.isEmpty() || snapshot.originalName.isEmpty() || snapshot.excluded || line(snapshot.id) != snapshot) return this
+        return update(snapshot.id) { it.copy(name = name, nameSource = ItemPlanLine.NameSource.User) }
+    }
+
     fun setAmount(
         id: String,
         text: String,

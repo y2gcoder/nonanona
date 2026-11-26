@@ -349,6 +349,21 @@ class ReceiptItemsTest {
                 assertEquals(ItemPlanLine.NameSource.OnDevice, plan.line(it.id)?.nameSource)
             }
         }
+
+    @Test
+    fun acceptedRetranslationKeepsAmountCheckAndRejectsSnapshotAfterEdit() =
+        runBlocking {
+            val (processor, id) = confirmedProcessor(ReceiptDraftStore(tmp.newFolder()))
+            val plan = processor.itemPlan(id)!!
+            val snapshot = plan.lines.first { it.originalName.isNotEmpty() }
+            assertTrue(!snapshot.checked)
+            val accepted = plan.acceptRetranslation("오늘의 정식", snapshot)
+            val expected = snapshot.copy(name = "오늘의 정식", nameSource = ItemPlanLine.NameSource.User)
+            assertEquals(expected, accepted.line(snapshot.id))
+
+            val edited = accepted.setName(snapshot.id, "직접 적은 이름")
+            assertEquals(edited, edited.acceptRetranslation("오래된 제안", expected))
+        }
 }
 
 private fun JSONObject.toMap(): Map<String, Any?> =

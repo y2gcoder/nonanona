@@ -34,6 +34,7 @@ struct Row {
 
 struct Input {
   let ref: String
+  // date: 지출 날짜 정답. 숙소 화면은 체크인이 아니라 결제일이다.
   let kind: String
   let width: Int
   let height: Int
@@ -52,7 +53,7 @@ let ja = "HiraginoSans-W3"
 
 let inputs = [
   Input(
-    ref: "k01", kind: "screen-lodging", width: 720, height: 1560, screen: true, date: "2026-11-03", total: 265_100,
+    ref: "k01", kind: "screen-lodging", width: 720, height: 1560, screen: true, date: "2026-10-20", total: 265_100,
     currency: "KRW", merchant: "가상호텔 미도리 신주쿠",
     rows: [
       Row("가상호텔 미도리 신주쿠", size: 34, bold: true, gap: 10),

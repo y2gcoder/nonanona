@@ -56,7 +56,8 @@ public actor ReceiptProcessor {
     await withTaskGroup(of: Void.self) { group in
       var active = 0
       while true {
-        while active < limit, let item = claimNext() {
+        // 취소된 뒤에는 새 사진을 가져오지 않는다.
+        while active < limit, !Task.isCancelled, let item = claimNext() {
           active += 1
           group.addTask { await self.process(item) }
         }
@@ -267,47 +268,75 @@ public actor ReceiptProcessor {
     return manifest.items[index]
   }
 
+  private enum Outcome: Sendable {
+    case finished(Result<OCRProposal, ProcessingFailure>)
+    case cancelled
+  }
+
   private func process(_ item: ProcessingItem) async {
     let url = store.photoURL(draftID, item.photoFileName)
     let recognizer = recognizer
     let hooks = hooks
-    if hooks.delayPerItem > .zero { try? await Task.sleep(for: hooks.delayPerItem) }
-    let result: Result<OCRProposal, ProcessingFailure> = await withCheckedContinuation { continuation in
-      // 동기 Vision 호출이 자체 작업 큐를 기다리는 동안 Swift 협력 스레드를 점유하지 않는다.
-      DispatchQueue.global(qos: .utility).async {
-        if hooks.failFirstAttemptAtPosition == item.position && item.attempts == 1 {
-          continuation.resume(returning: .failure(.recognitionError))
-          return
-        }
-        do {
-          var proposal = try ProposalBuilder.make(recognizer.recognize(url))
-          if hooks.dropSuggestionsAtPosition == item.position {
-            proposal = OCRProposal(
-              ocr: proposal.ocr, fields: proposal.fields, suggestedMaskLineIDs: [],
-              needsMaskReview: proposal.needsMaskReview)
+    if hooks.delayPerItem > .zero {
+      do { try await Task.sleep(for: hooks.delayPerItem) } catch { return abandon(item.id) }
+    }
+    if Task.isCancelled { return abandon(item.id) }
+    let cancellation = OCRCancellation()
+    let outcome: Outcome = await withTaskCancellationHandler {
+      await withCheckedContinuation { continuation in
+        // 동기 Vision 호출이 자체 작업 큐를 기다리는 동안 Swift 협력 스레드를 점유하지 않는다.
+        DispatchQueue.global(qos: .utility).async {
+          if cancellation.isCancelled { return continuation.resume(returning: .cancelled) }
+          if hooks.failFirstAttemptAtPosition == item.position && item.attempts == 1 {
+            continuation.resume(returning: .finished(.failure(.recognitionError)))
+            return
           }
-          if proposal.needsMaskReview == false {
-            proposal.needsMaskReview = Self.maskNeedsReview(proposal, original: url)
+          do {
+            var proposal = try ProposalBuilder.make(recognizer.recognize(url, cancellation: cancellation))
+            if hooks.dropSuggestionsAtPosition == item.position {
+              proposal = OCRProposal(
+                ocr: proposal.ocr, fields: proposal.fields, suggestedMaskLineIDs: [],
+                needsMaskReview: proposal.needsMaskReview)
+            }
+            try cancellation.check()
+            if proposal.needsMaskReview == false {
+              proposal.needsMaskReview = Self.maskNeedsReview(proposal, original: url, cancellation: cancellation)
+            }
+            try cancellation.check()
+            continuation.resume(returning: .finished(.success(proposal)))
+          } catch is CancellationError {
+            continuation.resume(returning: .cancelled)
+          } catch let failure as ProcessingFailure {
+            continuation.resume(returning: .finished(.failure(failure)))
+          } catch {
+            continuation.resume(returning: .finished(.failure(.recognitionError)))
           }
-          continuation.resume(returning: .success(proposal))
-        } catch let failure as ProcessingFailure {
-          continuation.resume(returning: .failure(failure))
-        } catch {
-          continuation.resume(returning: .failure(.recognitionError))
         }
       }
+    } onCancel: {
+      cancellation.cancel()
     }
+    // 상태를 쓰기 전에 다시 확인한다. 취소된 사진은 끝난 것으로 쓰지 않는다.
+    guard case .finished(let result) = outcome, !Task.isCancelled else { return abandon(item.id) }
     finish(item.id, result)
   }
 
-  private nonisolated static func maskNeedsReview(_ proposal: OCRProposal, original: URL) -> Bool {
+  /// 취소된 사진: 디스크에는 처리 중으로 남겨, 다음에 처리기를 만들 때 대기열로 돌아가게 한다(기존 복구 규칙, Android와 같다).
+  private func abandon(_ id: String) {
+    inFlight -= 1
+  }
+
+  private nonisolated static func maskNeedsReview(
+    _ proposal: OCRProposal, original: URL, cancellation: OCRCancellation
+  ) -> Bool {
     do {
       let image = try ImageLoading.cgImage(original)
       guard MaskImageQuality(image, ocr: proposal.ocr)?.needsReview == false else { return true }
       let lineIDs = Set(proposal.suggestedMaskLineIDs)
       let polygons = proposal.maskPolygons(lineIDs: lineIDs, regions: [])
       // 확인에 쓰는 렌더러와 같은 픽셀을 메모리에서 다시 읽는다.
-      let reread = try VisionReceiptRecognizer().recognize(Masking.render(image, polygons: polygons))
+      let reread = try VisionReceiptRecognizer().recognize(
+        Masking.render(image, polygons: polygons), cancellation: cancellation)
       return ResidualMaskCheck.hasResidue(original: proposal.ocr, reread: reread, lineIDs: lineIDs, polygons: polygons)
     } catch {
       return true

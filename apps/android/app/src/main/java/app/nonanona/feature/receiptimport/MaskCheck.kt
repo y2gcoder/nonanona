@@ -394,6 +394,25 @@ internal object SensitiveText {
             RegexOption.IGNORE_CASE,
         )
 
+    /**
+     * "번호" 없이 읽힌 한국어 라벨 낱말(OCR이 "번호"를 빠뜨렸거나 따로 읽은 경우). 바로 뒤에 번호 값(숫자 2자리 이상이 든 영문·숫자
+     * 3자 이상)이 붙어 있을 때만 그 줄이 라벨이다. 값이 따로 읽혔으면 [MaskSelector]가 같은 행에서 번호 조각을 찾을 때만 라벨로 본다.
+     * "예약 확정"·"가상카드 일시불"·"예약 2명"은 라벨이 아니다(ADR-0013, iOS와 같다). 사업자·등록·가맹점 번호는 가게 정보다.
+     */
+    private const val WEAK = "카드|승인|회원|예약|(?<!사업자|등록|가맹점)번호"
+    private val weakLabel = Regex(WEAK)
+    private val weakValue =
+        Regex("(?:$WEAK)\\s*[:：.#\\-]?\\s*(?:번호\\s*[:：.#\\-]?\\s*)?([A-Z0-9*●•#×][A-Z0-9*●•#×\\-‐–−|_]*)", RegexOption.IGNORE_CASE)
+
+    /** 약한 라벨 낱말이 있다(값이 붙었는지와 상관없이). */
+    fun hasWeakLabelWord(text: String) = weakLabel.containsMatchIn(prepared(text))
+
+    private fun hasWeakInlineValue(text: String): Boolean =
+        weakValue.findAll(withoutPricesAndDates(text)).any { m ->
+            val value = m.groupValues[1]
+            value.count { it in '0'..'9' } >= 2 && value.count { it.isLetterOrDigit() } >= 3
+        }
+
     /** 하이픈 전화번호 형식(라벨 없이도 라벨처럼 취급한다). */
     private val phone = Regex("\\d{2,4}-\\d{2,4}-\\d{3,4}")
 
@@ -503,7 +522,9 @@ internal object SensitiveText {
             (masks >= 4 && m.value.count { it in '0'..'9' } >= 2) || (masks >= 2 && cardTail.containsMatchIn(m.value))
         }
 
-    fun isLabel(text: String) = prepared(text).let { label.containsMatchIn(it) || phone.containsMatchIn(it) }
+    fun isLabel(text: String) =
+        prepared(text).let { label.containsMatchIn(it) || phone.containsMatchIn(it) } ||
+            (hasWeakLabelWord(text) && hasWeakInlineValue(text))
 
     private fun isStoreLine(text: String) = storeLine.containsMatchIn(prepared(text)) && !isLabel(text)
 
@@ -670,17 +691,27 @@ internal object MaskSelector {
         }
         for (g in geometry) {
             val text = g.line.text
-            if (!SensitiveText.isLabel(text)) continue
-            chosen += g.line.id
+            // 약한 라벨 낱말만 있는 줄(승인 | 4938처럼 값이 따로 읽힘)은 같은 행에서 번호 조각을 찾을 때만 라벨로 본다.
+            val strong = SensitiveText.isLabel(text)
+            if (!strong && !SensitiveText.hasWeakLabelWord(text)) continue
+            val picked = mutableListOf(g.line.id)
             val theta = directionOf(g, skew)
             val (top, bottom) = g.vRange(theta)
             val (left, right) = g.uRange(theta)
             val center = (top + bottom) / 2
             val h = maxOf(bottom - top, 1.0)
-            var paired = SensitiveText.hasPayload(text)
+            var paired = strong && SensitiveText.hasPayload(text)
             // 다음 행 후보: 라벨 아래, 라벨과 가로로 겹치거나 한 줄 높이 안에 있는 줄.
             val below = mutableListOf<Pair<LineGeometry, Double>>()
             val far = mutableListOf<Pair<LineGeometry, Double>>()
+            // 같은 행의 다른 라벨과 가격·날짜 상자는 이 라벨의 값이 닿는 범위의 경계다(다열 행에서 다른 항목의 번호를 짝으로 잡지 않는다).
+            val sameRow = geometry.filter { o -> o !== g && sameRow(g, o, theta) }
+            val walls =
+                sameRow
+                    .filter { o ->
+                        SensitiveText.isLabel(o.line.text) || SensitiveText.hasWeakLabelWord(o.line.text) ||
+                            SensitiveText.isProtectedBox(o.line.text)
+                    }.map { it.uRange(theta) }
             for (o in geometry) {
                 if (o === g) continue
                 val other = o.line.text
@@ -691,14 +722,17 @@ internal object MaskSelector {
                 if (abs(gap) <= 0.5 * maxOf(h, ob - ot)) {
                     // 같은 행: 가까운 번호 조각, 떨어져 있어도 강한 번호(4자리 이상·카드 표기), 라벨 아닌 번호 형식 줄.
                     if (SensitiveText.isLabel(other)) continue
+                    val blocked =
+                        walls.any { (wl, wr) -> if (ol >= right) wl >= right && wr <= ol else wr <= left && wl >= or }
+                    if (blocked) continue
                     val near = apart <= maxOf(right - left, 8 * h)
                     if ((near && SensitiveText.isNumberFragment(other)) || SensitiveText.isStrongFragment(other) ||
                         SensitiveText.isNumberFormat(other)
                     ) {
-                        chosen += o.line.id
+                        picked += o.line.id
                         paired = true
                     }
-                } else if (gap > 0 && gap <= 2.1 * h) {
+                } else if (strong && gap > 0 && gap <= 2.1 * h) {
                     if (apart <= h) below += o to gap else far += o to gap
                 }
             }
@@ -712,11 +746,12 @@ internal object MaskSelector {
                 if (SensitiveText.isLabel(other) || SensitiveText.hasDate(other)) continue
                 val aligned = below.any { it.first === o }
                 if ((aligned && SensitiveText.isNumberFragment(other, minDigits = 3)) || SensitiveText.isStrongFragment(other)) {
-                    chosen += o.line.id
+                    picked += o.line.id
                     paired = true
                 }
             }
-            if (!paired) unpaired = true
+            if (strong || paired) chosen += picked
+            if (strong && !paired) unpaired = true
         }
         val ids = ocr.lines.map { it.id }.filter { it in chosen }
         // 낱말 상자로 번호 부분을 나눈 줄([OcrLine.numberBox])은 그 부분만 덮으므로 섞인 줄 안내가 없다.
@@ -847,6 +882,21 @@ object OcrTiles {
         tops += height - tile
         return tops.distinct().map { Tile(it, tile) }
     }
+
+    /** 계획한 타일을 차례로 읽어 합친다. 타일마다 읽기 전에 인터럽트를 확인하고, 한 타일이라도 실패하면 그 읽기 전체가 실패한다. */
+    fun read(
+        width: Int,
+        height: Int,
+        readTile: (Tile) -> OcrResult,
+    ): OcrResult =
+        merge(
+            width,
+            height,
+            plan(width, height).map { tile ->
+                OcrLanguageChoice.checkInterrupted()
+                tile to readTile(tile)
+            },
+        )
 
     /**
      * 타일마다 읽은 결과(타일 안 0~1 좌표)를 사진 좌표로 합친다. 겹친 곳에서 두 번 읽힌 줄(같은 글자이거나 한쪽 글자가 다른 쪽에

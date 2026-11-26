@@ -805,6 +805,103 @@
         {"text": "결제수단 가상카드 일시불", "box": [40, 600, 370, 620]}
       ],
       "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-short-approval-inline",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "승인 4938", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-short-booking-colon",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "예약: AB12", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-short-label-value-split",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "승인", "box": [40, 600, 100, 620]},
+        {"text": "4938", "box": [120, 600, 180, 620]}
+      ],
+      "expect": {"masked": {"label": [45, 603, 95, 617], "value": [125, 603, 175, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-number-word-read-separately",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "승인", "box": [40, 600, 100, 620]},
+        {"text": "번호 4938", "box": [110, 600, 230, 620]}
+      ],
+      "expect": {"masked": {"value": [115, 603, 225, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-booking-count-not-label",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "예약 2명", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-short-approval-reread-whole",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "승인 4938", "box": [40, 600, 370, 620]}
+      ],
+      "reread": [
+        {"text": "승인 4938", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": true, "reasons": ["reread"]}
+    },
+    {
+      "id": "korean-short-approval-reread-value",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "승인 4938", "box": [40, 600, 370, 620]}
+      ],
+      "reread": [
+        {"text": "4938", "box": [200, 820, 260, 840]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": true, "reasons": ["reread"]}
+    },
+    {
+      "id": "multicolumn-short-value-keeps-review",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "承認番号", "box": [40, 600, 120, 620]},
+        {"text": "512", "box": [300, 600, 330, 620]},
+        {"text": "会員番号", "box": [480, 600, 560, 620]},
+        {"text": "87654321", "box": [640, 600, 740, 620]}
+      ],
+      "expect": {"masked": {"member": [645, 603, 735, 617]}, "visible": {}, "needsReview": true, "reasons": ["unpairedLabel"]}
+    },
+    {
+      "id": "korean-multicolumn-short-value-keeps-review",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "승인번호", "box": [40, 600, 120, 620]},
+        {"text": "512", "box": [300, 600, 330, 620]},
+        {"text": "회원번호", "box": [480, 600, 560, 620]},
+        {"text": "87654321", "box": [640, 600, 740, 620]}
+      ],
+      "expect": {"masked": {"member": [645, 603, 735, 617]}, "visible": {}, "needsReview": true, "reasons": ["unpairedLabel"]}
+    },
+    {
+      "id": "multicolumn-both-values-paired",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "承認番号", "box": [40, 600, 120, 620]},
+        {"text": "4938", "box": [250, 600, 280, 620]},
+        {"text": "会員番号", "box": [480, 600, 560, 620]},
+        {"text": "87654321", "box": [640, 600, 740, 620]}
+      ],
+      "expect": {"masked": {"approval": [255, 603, 275, 617], "member": [645, 603, 735, 617]}, "visible": {}, "needsReview": false, "reasons": []}
     }
   ]
 }

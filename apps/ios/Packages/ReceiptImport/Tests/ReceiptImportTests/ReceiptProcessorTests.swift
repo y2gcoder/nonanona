@@ -99,6 +99,20 @@ private final class TruthRecognizer: ReceiptRecognizer, @unchecked Sendable {
   }
 }
 
+/// 취소 신호가 올 때까지 읽기를 붙잡는 대역. 받은 사진을 센다.
+private final class CancellableRecognizer: ReceiptRecognizer, @unchecked Sendable {
+  private let lock = NSLock()
+  private(set) var started: [String] = []
+
+  func recognize(_ url: URL) throws -> OCRResult { try recognize(url, cancellation: .none) }
+
+  func recognize(_ url: URL, cancellation: OCRCancellation) throws -> OCRResult {
+    lock.withLock { started.append(url.lastPathComponent) }
+    while !cancellation.isCancelled { Thread.sleep(forTimeInterval: 0.01) }
+    throw CancellationError()
+  }
+}
+
 private func waitUntil(_ timeout: Duration = .seconds(60), _ condition: () async -> Bool) async throws {
   let clock = ContinuousClock()
   let deadline = clock.now + timeout
@@ -211,6 +225,26 @@ struct ReceiptProcessorTests {
     #expect(after.items.first { $0.id == bad.id }?.attempts == 2)
     #expect(after.items.first { $0.id == bad.id }?.state == .failed)
     #expect(after.items.filter { $0.id != bad.id } == manifest.items.filter { $0.id != bad.id })
+  }
+
+  /// 처리 중 취소: 새 사진을 가져오지 않고, 읽던 사진은 끝난 것으로 쓰지 않으며, 다시 열면 기존 복구 규칙대로 대기열로 돌아간다.
+  @Test func cancelledRunStopsClaimingAndLeavesInFlightPhotosRecoverable() async throws {
+    let root = tempRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = ReceiptDraftStore(root: root)
+    let draft = try store.create(source: .picker, photos: truths.prefix(4).map(photo))
+    let recognizer = CancellableRecognizer()
+    let processor = try ReceiptProcessor(store: store, draft: draft, recognizer: recognizer)
+    let run = Task { await processor.run() }
+    try await waitUntil { recognizer.started.count == 2 }
+    run.cancel()
+    await run.value
+    #expect(recognizer.started.count == 2, "취소 뒤 새 사진을 읽기 시작했다")
+    let onDisk = try #require(try store.loadProcessing(draft.id))
+    #expect(onDisk.items.map(\.state) == [.processing, .processing, .queued, .queued])
+    let resumed = try ReceiptProcessor(store: store, draft: draft, recognizer: TruthRecognizer())
+    #expect(await resumed.snapshot().items.map(\.state) == [.queued, .queued, .queued, .queued])
+    #expect(await resumed.snapshot().recoveredCount == 2)
   }
 
   /// 4장을 끝내고 2장을 읽는 중인 디스크 상태를 복사해 다시 연다(프로세스 종료와 같다).

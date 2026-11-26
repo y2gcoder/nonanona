@@ -100,25 +100,18 @@ internal object ReceiptImages {
 
 /**
  * ML Kit 번들 일본어·한국어 모델(ADR-0013). 기기 안에서만 동작하고 모델을 내려받지 않는다.
- * 사진마다 두 모델로 모두 읽고 [OcrLanguageChoice] 규칙(iOS와 같다)으로 한쪽 결과를 고른다. 일본어 모델은 한글을 가나·한자로,
+ * 사진마다 두 모델로 모두 읽고 [OcrLanguageChoice.choose]로 한쪽 결과를 고른다. 일본어 모델은 한글을 가나·한자로,
  * 한국어 모델은 한자·가나를 한글로 잘못 읽어 한 모델의 결과만으로는 다른 언어 사진을 가려낼 수 없었다(ADR-0013의 측정).
+ * 모델은 처음 쓸 때 만들고, 한 모델의 준비·읽기가 실패해도 다른 모델의 결과를 쓴다.
  */
 class MlKitReceiptRecognizer : ReceiptRecognizer {
-    private val japanese = TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
-    private val korean = TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
+    private val japanese by lazy { TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build()) }
+    private val korean by lazy { TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build()) }
 
     override fun recognize(file: File): OcrResult {
         val bitmap = ReceiptImages.decode(file)
-        val japanese = read(bitmap, OcrScript.Japanese)
-        // 한국어 모델이 실패하면 일본어 결과를 쓴다(예전과 같다).
-        val korean =
-            try {
-                read(bitmap, OcrScript.Korean)
-            } catch (e: ProcessingException) {
-                null
-            }
-        val lines =
-            if (korean != null && OcrLanguageChoice.prefersKorean(japanese.scored(), korean.scored())) korean.lines else japanese.lines
+        val lines = OcrLanguageChoice.choose({ read(bitmap, OcrScript.Japanese) }, { read(bitmap, OcrScript.Korean) }).lines
+        OcrLanguageChoice.checkInterrupted()
         val perLine =
             PhotoQuality.measureLines(lines, bitmap.width, bitmap.height) { x, y, rw, rh ->
                 val argb = IntArray(rw * rh)
@@ -144,18 +137,11 @@ class MlKitReceiptRecognizer : ReceiptRecognizer {
                 OcrScript.Japanese -> japanese
                 OcrScript.Korean -> korean
             }
-        val tiles = OcrTiles.plan(bitmap.width, bitmap.height)
-        return OcrTiles.merge(
-            bitmap.width,
-            bitmap.height,
-            tiles.map { tile ->
-                val part = if (tiles.size == 1) bitmap else Bitmap.createBitmap(bitmap, 0, tile.top, bitmap.width, tile.height)
-                tile to read(part, client)
-            },
-        )
+        return OcrTiles.read(bitmap.width, bitmap.height) { tile ->
+            val whole = tile.top == 0 && tile.height == bitmap.height
+            read(if (whole) bitmap else Bitmap.createBitmap(bitmap, 0, tile.top, bitmap.width, tile.height), client)
+        }
     }
-
-    private fun OcrResult.scored() = lines.map { OcrLanguageChoice.Line(it.text, it.confidence ?: 0.0) }
 
     /** 비트맵 하나(사진 전체 또는 타일)를 읽어 그 비트맵 안 0~1 좌표로. */
     private fun read(

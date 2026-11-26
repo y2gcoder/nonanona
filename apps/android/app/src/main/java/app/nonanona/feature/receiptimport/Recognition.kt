@@ -125,7 +125,7 @@ object ProposalBuilder {
     fun make(ocr: OcrResult): OcrProposal {
         if (ocr.lines.isEmpty()) throw ProcessingException(ProcessingFailure.Unreadable)
         val total = total(ocr.lines) ?: throw ProcessingException(ProcessingFailure.MissingTotal)
-        val date = ocr.lines.firstNotNullOfOrNull { isoDate(it.text) } ?: throw ProcessingException(ProcessingFailure.MissingDate)
+        val date = date(ocr.lines) ?: throw ProcessingException(ProcessingFailure.MissingDate)
         // 민감 라벨 줄과 같은 기울기 행·다음 행의 번호 조각, 라벨 없는 번호 형식(MaskCheck.kt).
         val selection = MaskSelector.select(ocr)
         val skew = selection.skew?.let(MaskSelector::degrees)
@@ -149,6 +149,26 @@ object ProposalBuilder {
             selection.lineIds,
             MaskCheck(doubts, skew, ocr.quality, spread, sensitive),
         )
+    }
+
+    /** 결제일 라벨(결제일·결제일시·결제 일자). 숙소 화면의 체크인처럼 앞에 나오는 다른 날짜보다 우선한다. */
+    private val paymentDateLabel = Regex("결제\\s*일")
+
+    /**
+     * 지출 날짜: 결제일 라벨 줄의 날짜, 없으면 그 줄과 같은 행 오른쪽 상자의 날짜(가까운 순), 결제일 라벨이 없거나 날짜를 못 찾으면
+     * 위에서부터 첫 날짜.
+     */
+    fun date(lines: List<OcrLine>): String? {
+        for (line in lines.filter { paymentDateLabel.containsMatchIn(it.text) }) {
+            isoDate(line.text)?.let { return it }
+            val mid = line.y + line.height / 2
+            lines
+                .filter { it.id != line.id && it.x > line.x && abs(it.y + it.height / 2 - mid) < line.height / 2 }
+                .sortedBy { it.x }
+                .firstNotNullOfOrNull { isoDate(it.text) }
+                ?.let { return it }
+        }
+        return lines.firstNotNullOfOrNull { isoDate(it.text) }
     }
 
     fun isoDate(text: String): String? {
@@ -179,11 +199,12 @@ object ProposalBuilder {
         return null
     }
 
-    private val krwMark = Regex("원|₩|KRW|(?<![A-Za-z])W(?=\\s*\\d)")
-    private val jpyMark = Regex("円|[¥￥]|JPY")
+    /** 원·円은 숫자 뒤 금액 접미사, ₩·¥는 숫자 앞, 통화 코드는 독립 토큰, W는 숫자 바로 앞(₩ 오독)만 센다(회원번호의 '원'은 아니다). */
+    private val krwMark = Regex("(?<=\\d)\\s*원|₩\\s*\\d|(?<![A-Za-z])KRW(?![A-Za-z])|(?<![A-Za-z])W(?=\\s*\\d)")
+    private val jpyMark = Regex("(?<=\\d)\\s*円|[¥￥]\\s*\\d|(?<![A-Za-z])JPY(?![A-Za-z])")
 
     /**
-     * 합계 통화. 합계를 읽은 글자의 표시(円·¥·JPY / 원·₩·KRW, ML Kit이 ₩를 W로 읽는 경우 포함)를 먼저 본다. 둘 다 있거나 없으면
+     * 합계 통화. 합계를 읽은 글자의 표시(금액에 붙은 円·¥, JPY / 원·₩, KRW, ML Kit이 ₩를 W로 읽는 경우 포함)를 먼저 본다. 둘 다 있거나 없으면
      * 사진 전체에서 표시가 붙은 줄이 더 많은 쪽, 그래도 같으면 한글 줄이 2줄 이상이면 KRW, 아니면 JPY(기존 동작)다.
      */
     fun currency(

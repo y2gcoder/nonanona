@@ -1,6 +1,6 @@
 {
  "version": 1,
- "rule": "점수 = 줄마다 (공백을 뺀 글자 수 × 엔진 줄 신뢰도 0~1)의 합. 한국어 결과의 한글(U+AC00–U+D7A3) 줄이 2줄 이상이고 점수가 일본어 결과보다 높을 때만 한국어 결과를 쓴다. 같으면 일본어. ADR-0013.",
+ "rule": "점수 = 줄마다 (공백을 뺀 유니코드 코드 포인트 수 × 엔진 줄 신뢰도 0~1)의 합. 공백은 유니코드 White_Space 25자(U+0009–000D, 0020, 0085, 00A0, 1680, 2000–200A, 2028, 2029, 202F, 205F, 3000)이고 그 밖의 글자(U+200B 등)는 센다. 한국어 결과의 한글(U+AC00–U+D7A3) 줄이 2줄 이상이고 점수가 일본어 결과보다 높을 때만 한국어 결과를 쓴다. 같으면 일본어. ADR-0013.",
  "cases": [
   {
    "id": "japanese-receipt",
@@ -421,6 +421,69 @@
     }
    ],
    "expect": "korean"
+  },
+  {
+   "id": "supplementary-plane-kanji-is-one-character",
+   "note": "𠮷(U+20BB7)는 UTF-16 두 단위지만 1자다. 일본어 2점 < 한국어 3점.",
+   "japanese": [
+    {
+     "text": "𠮷店",
+     "confidence": 1.0
+    }
+   ],
+   "korean": [
+    {
+     "text": "한글",
+     "confidence": 1.0
+    },
+    {
+     "text": "가",
+     "confidence": 1.0
+    }
+   ],
+   "expect": "korean"
+  },
+  {
+   "id": "special-spaces-do-not-count",
+   "note": "U+3000·U+00A0·U+2009는 공백. 일본어 2점 = 한국어 2점이라 일본어.",
+   "japanese": [
+    {
+     "text": "合　計  ",
+     "confidence": 1.0
+    }
+   ],
+   "korean": [
+    {
+     "text": "가　",
+     "confidence": 1.0
+    },
+    {
+     "text": "나 ",
+     "confidence": 1.0
+    }
+   ],
+   "expect": "japanese"
+  },
+  {
+   "id": "zero-width-space-counts",
+   "note": "U+200B는 White_Space가 아니라 센다. 일본어 3점 > 한국어 2점.",
+   "japanese": [
+    {
+     "text": "合​計",
+     "confidence": 1.0
+    }
+   ],
+   "korean": [
+    {
+     "text": "가",
+     "confidence": 1.0
+    },
+    {
+     "text": "나",
+     "confidence": 1.0
+    }
+   ],
+   "expect": "japanese"
   }
  ]
 }

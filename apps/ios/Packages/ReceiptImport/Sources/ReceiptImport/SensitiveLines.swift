@@ -22,9 +22,32 @@ struct SensitiveLines {
           || (row.text.hasBookingCode && !commercialRows.contains { row.sameRow(as: $0) })
       }.map(\.line.id))
     var hasUnpairedLabel = false
-    for label in rows where label.text.hasLabel {
+    // 약한 라벨 낱말만 있는 행(승인 | 4938처럼 값이 따로 읽힘)은 같은 행에서 번호 조각을 찾을 때만 라벨로 본다(ADR-0013).
+    for label in rows where label.text.hasLabel || label.text.hasWeakLabelWord {
+      let strong = label.text.hasLabel
       let neighbors = rows.filter { $0.line.id != label.line.id }
-      let same = neighbors.filter { label.sameRow(as: $0) }
+      let row = neighbors.filter { label.sameRow(as: $0) }
+      // 같은 행의 다른 라벨과 가격·날짜 상자는 이 라벨의 값이 닿는 범위의 경계다(다열 행에서 다른 항목의 번호를 짝으로 잡지 않는다).
+      let walls = row.filter { $0.text.hasLabel || $0.text.hasWeakLabelWord || $0.text.isProtected }
+      let same = row.filter { candidate in
+        !walls.contains { wall in
+          wall.line.id != candidate.line.id
+            && (candidate.left.x >= label.right.x
+              ? wall.left.x >= label.right.x && wall.right.x <= candidate.left.x
+              : wall.right.x <= label.left.x && wall.left.x >= candidate.right.x)
+        }
+      }
+      if !strong {
+        let fragments = same.filter { candidate in
+          label.isNear(candidate) && !candidate.text.hasLabel
+            && (candidate.text.hasNumber || candidate.text.isFragment(minDigits: 2))
+        }
+        if !fragments.isEmpty {
+          selected.insert(label.line.id)
+          selected.formUnion(fragments.map(\.line.id))
+        }
+        continue
+      }
       // 가장 가까운 다음 행이 다른 항목이면 그 너머의 숫자를 끌어오지 않는다.
       let below = neighbors.filter {
         !label.sameRow(as: $0) && label.verticalOffset(to: $0) > 0 && label.isAligned(with: $0)

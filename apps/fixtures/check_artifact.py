@@ -2,7 +2,7 @@
 """가림을 구운 사본(PNG)을 원본·정답과 비교한다. Python 표준 라이브러리만 쓴다(E2E 호스트 검사용).
 
 사용: python3 -I apps/fixtures/check_artifact.py <기기에서 꺼낸 원본 사진> <기기에서 꺼낸 가림 사본>
-원본 바이트로 가상 영수증(ground-truth.json)을 찾고, 다음을 확인해 JSON 한 줄로 낸다.
+원본 바이트로 가상 영수증·한국어 입력(receipts/·korean/의 ground-truth.json)을 찾고, 다음을 확인해 JSON 한 줄로 낸다.
 - 사본이 원본과 다른 바이트이고 PNG 청크가 그리기에 필요한 것뿐인지(메타데이터 청크 없음)
 - 원본에 심어 둔 가상 메타데이터 표지 문자열이 사본에 없는지
 - 정답의 민감한 줄 안 글자 픽셀이 모두 검정인지, 가림 띠 밖 픽셀이 원본과 같은지
@@ -15,7 +15,8 @@ from pathlib import Path
 
 ALLOWED = {"IHDR", "PLTE", "tRNS", "sRGB", "IDAT", "IEND"}
 MARKERS = [b"SYNTHETIC-ORIGINAL-METADATA", b"SyntheticCam", b"NNA-r"]
-HERE = Path(__file__).resolve().parent / "receipts"
+# 가상 영수증(receipts)과 한국어 입력(korean, ADR-0013)의 정답. 원본 바이트로 어느 쪽인지 찾는다.
+FOLDERS = [Path(__file__).resolve().parent / name for name in ("receipts", "korean")]
 
 
 def chunks(data):
@@ -72,8 +73,10 @@ def decode(data):
 
 def main():
     original, artifact = Path(sys.argv[1]).read_bytes(), Path(sys.argv[2]).read_bytes()
-    truths = json.loads((HERE / "ground-truth.json").read_text())
-    truth = next(t for t in truths if (HERE / t["file"]).read_bytes() == original)
+    truth = next(
+        t for folder in FOLDERS for t in json.loads((folder / "ground-truth.json").read_text())
+        if (folder / t["file"]).read_bytes() == original
+    )
     names = [n for n, _ in chunks(artifact)]
     ow, oh, src = decode(original)
     aw, ah, art = decode(artifact)

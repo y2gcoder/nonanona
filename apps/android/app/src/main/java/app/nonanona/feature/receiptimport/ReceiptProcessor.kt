@@ -69,7 +69,8 @@ class ReceiptProcessor(
         proposal: OcrProposal,
     ): OcrProposal {
         val (width, height) = proposal.ocr.pixelWidth to proposal.ocr.pixelHeight
-        val shapes = Masking.shapes(proposal.ocr.lines, proposal.suggestedMaskLineIds.toSet(), width, height)
+        val suggested = proposal.suggestedMaskLineIds.toSet()
+        val shapes = Masking.shapes(proposal.ocr.lines, suggested, suggested, width, height)
         val leaked =
             try {
                 runInterruptible(dispatcher) {
@@ -78,7 +79,7 @@ class ReceiptProcessor(
                         temp.writeBytes(
                             MaskedArtifact
                                 .flatten(flattener, file) { w, h ->
-                                    Masking.shapes(proposal.ocr.lines, proposal.suggestedMaskLineIds.toSet(), w, h)
+                                    Masking.shapes(proposal.ocr.lines, suggested, suggested, w, h)
                                 }.pngBytes,
                         )
                         rereadLeaks(proposal, shapes, recognizer.recognize(temp))
@@ -291,7 +292,9 @@ class ReceiptProcessor(
         // 저장한 픽셀 크기가 아니라 지금 디코딩한 크기로 투영한다(이전 디코딩 규칙의 초안도 같은 자리, B1).
         return runInterruptible(dispatcher) {
             MaskedArtifact.flatten(flattener, store.photoFile(draftId, item.photoFileName)) { width, height ->
-                Masking.shapes(proposal.ocr.lines, maskLineIds, width, height) + Masking.regionRects(regions, width, height)
+                // 추천 밖에서 사용자가 켠 줄은 마지막 검정에 들어가 보존 상자 되돌림에 풀리지 않는다.
+                Masking.shapes(proposal.ocr.lines, maskLineIds, proposal.suggestedMaskLineIds.toSet(), width, height) +
+                    Masking.regionRects(regions, width, height)
             }
         }
     }

@@ -1,0 +1,489 @@
+{
+ "version": 1,
+ "rule": "점수 = 줄마다 (공백을 뺀 유니코드 코드 포인트 수 × 엔진 줄 신뢰도 0~1)의 합. 공백은 유니코드 White_Space 25자(U+0009–000D, 0020, 0085, 00A0, 1680, 2000–200A, 2028, 2029, 202F, 205F, 3000)이고 그 밖의 글자(U+200B 등)는 센다. 한국어 결과의 한글(U+AC00–U+D7A3) 줄이 2줄 이상이고 점수가 일본어 결과보다 높을 때만 한국어 결과를 쓴다. 같으면 일본어. ADR-0013.",
+ "cases": [
+  {
+   "id": "japanese-receipt",
+   "note": "Android ML Kit 실제 결과(r01). 한국어 모델은 가나·한자를 한글로 잘못 읽지만 점수가 낮다.",
+   "japanese": [
+    {
+     "text": "さくら食堂",
+     "confidence": 0.84
+    },
+    {
+     "text": "架空県みどり市なのは町01-2",
+     "confidence": 0.82
+    },
+    {
+     "text": "TEL 03-5550-0101",
+     "confidence": 0.85
+    },
+    {
+     "text": "2026年11月3日 12:41",
+     "confidence": 0.88
+    },
+    {
+     "text": "領収書 レジRO1",
+     "confidence": 0.74
+    },
+    {
+     "text": "日替わり定食 980円",
+     "confidence": 0.85
+    },
+    {
+     "text": "緑茶300円",
+     "confidence": 0.73
+    },
+    {
+     "text": "小計 1,280円",
+     "confidence": 0.8
+    },
+    {
+     "text": "消費税等128円",
+     "confidence": 0.85
+    },
+    {
+     "text": "合計1,408円",
+     "confidence": 0.78
+    },
+    {
+     "text": "カード番号",
+     "confidence": 0.86
+    },
+    {
+     "text": "k*** **** ***",
+     "confidence": 0.49
+    },
+    {
+     "text": "ありがとうございました",
+     "confidence": 0.89
+    },
+    {
+     "text": "4821",
+     "confidence": 0.87
+    }
+   ],
+   "korean": [
+    {
+     "text": "흐<6후",
+     "confidence": 0.11
+    },
+    {
+     "text": "휴문투굿2D 라gm01 -2",
+     "confidence": 0.2
+    },
+    {
+     "text": "TEL 03-5550-0101",
+     "confidence": 0.85
+    },
+    {
+     "text": "2026F11A3E 12:41",
+     "confidence": 0.64
+    },
+    {
+     "text": "E흡pH 980",
+     "confidence": 0.35
+    },
+    {
+     "text": "RR 30OH",
+     "confidence": 0.42
+    },
+    {
+     "text": "RO1",
+     "confidence": 0.52
+    },
+    {
+     "text": "J\\āt 1,280",
+     "confidence": 0.49
+    },
+    {
+     "text": "퍼쪽 128H",
+     "confidence": 0.45
+    },
+    {
+     "text": "1,408H",
+     "confidence": 0.62
+    },
+    {
+     "text": "h-품를",
+     "confidence": 0.12
+    },
+    {
+     "text": "하pife3tuaUt",
+     "confidence": 0.13
+    },
+    {
+     "text": "4821",
+     "confidence": 0.87
+    }
+   ],
+   "expect": "japanese"
+  },
+  {
+   "id": "korean-receipt",
+   "note": "Android ML Kit 실제 결과(k03). 일본어 모델은 한글을 가나·한자로 잘못 읽어 가나 줄이 생긴다.",
+   "japanese": [
+    {
+     "text": "季全フトきA 〒昌子望製星12",
+     "confidence": 0.27
+    },
+    {
+     "text": "型02-555-0186",
+     "confidence": 0.76
+    },
+    {
+     "text": "2026-11-02 08:15",
+     "confidence": 0.88
+    },
+    {
+     "text": "令500ml",
+     "confidence": 0.7
+    },
+    {
+     "text": "早フトA",
+     "confidence": 0.33
+    },
+    {
+     "text": "三出念4521-87+*_*キ*ャー3310",
+     "confidence": 0.53
+    },
+    {
+     "text": "合性豆52906634",
+     "confidence": 0.68
+    },
+    {
+     "text": "SYNTHETIC KOREAN k03",
+     "confidence": 0.81
+    },
+    {
+     "text": "1,200",
+     "confidence": 0.84
+    },
+    {
+     "text": "1,500",
+     "confidence": 0.76
+    },
+    {
+     "text": "4,200",
+     "confidence": 0.9
+    },
+    {
+     "text": "6,273",
+     "confidence": 0.87
+    },
+    {
+     "text": "627",
+     "confidence": 0.89
+    },
+    {
+     "text": "6,900",
+     "confidence": 0.86
+    }
+   ],
+   "korean": [
+    {
+     "text": "가상편의점 하늘공항점",
+     "confidence": 0.78
+    },
+    {
+     "text": "주소 가상시 구름구 별빛로 12",
+     "confidence": 0.81
+    },
+    {
+     "text": "전화 02-555-0186",
+     "confidence": 0.83
+    },
+    {
+     "text": "2026-11-02 08:15",
+     "confidence": 0.88
+    },
+    {
+     "text": "W 500ml",
+     "confidence": 0.7
+    },
+    {
+     "text": "삼각김밥",
+     "confidence": 0.72
+    },
+    {
+     "text": "커피 우유",
+     "confidence": 0.82
+    },
+    {
+     "text": "과세물품",
+     "confidence": 0.79
+    },
+    {
+     "text": "부가세",
+     "confidence": 0.86
+    },
+    {
+     "text": "합계",
+     "confidence": 0.68
+    },
+    {
+     "text": "카드번호 4521-87**_*#** -3 310",
+     "confidence": 0.62
+    },
+    {
+     "text": "승인번호 52906634",
+     "confidence": 0.88
+    },
+    {
+     "text": "SYNTHETIC KOREAN k03",
+     "confidence": 0.81
+    },
+    {
+     "text": "1,200",
+     "confidence": 0.84
+    },
+    {
+     "text": "1,500",
+     "confidence": 0.76
+    },
+    {
+     "text": "4,200",
+     "confidence": 0.9
+    },
+    {
+     "text": "6,273",
+     "confidence": 0.87
+    },
+    {
+     "text": "627",
+     "confidence": 0.89
+    },
+    {
+     "text": "6,900",
+     "confidence": 0.86
+    }
+   ],
+   "expect": "korean"
+  },
+  {
+   "id": "korean-screen-with-japanese-lines",
+   "note": "Android ML Kit 실제 결과(k04). 가나 줄이 2줄이어도 한국어 결과의 점수가 높다.",
+   "japanese": [
+    {
+     "text": "みどり書店しぶや店",
+     "confidence": 0.82
+    },
+    {
+     "text": "SYNTHETIC KOREAN K04",
+     "confidence": 0.8
+    },
+    {
+     "text": "2026.11.06 13:05",
+     "confidence": 0.88
+    },
+    {
+     "text": "¥2,480",
+     "confidence": 0.71
+    },
+    {
+     "text": "22,940!",
+     "confidence": 0.79
+    },
+    {
+     "text": "6011-55**_****ー7204",
+     "confidence": 0.54
+    },
+    {
+     "text": "87120456",
+     "confidence": 0.9
+    },
+    {
+     "text": "ガイドブック",
+     "confidence": 0.81
+    }
+   ],
+   "korean": [
+    {
+     "text": "해외 결제 상세",
+     "confidence": 0.78
+    },
+    {
+     "text": "결제일시",
+     "confidence": 0.79
+    },
+    {
+     "text": "결제금액",
+     "confidence": 0.85
+    },
+    {
+     "text": "원화 환산",
+     "confidence": 0.79
+    },
+    {
+     "text": "카드번호",
+     "confidence": 0.82
+    },
+    {
+     "text": "승인번호",
+     "confidence": 0.79
+    },
+    {
+     "text": "상품",
+     "confidence": 0.8
+    },
+    {
+     "text": "SYNTHETIC KOREAN K04",
+     "confidence": 0.8
+    },
+    {
+     "text": "2026.11.06 13:05",
+     "confidence": 0.88
+    },
+    {
+     "text": "¥2,480",
+     "confidence": 0.71
+    },
+    {
+     "text": "22,940!",
+     "confidence": 0.79
+    },
+    {
+     "text": "6011-55**-***-7204",
+     "confidence": 0.7
+    },
+    {
+     "text": "87120456",
+     "confidence": 0.9
+    }
+   ],
+   "expect": "korean"
+  },
+  {
+   "id": "nothing-read",
+   "japanese": [],
+   "korean": [],
+   "expect": "japanese"
+  },
+  {
+   "id": "one-hangul-line",
+   "note": "한글 줄이 1줄뿐이면 점수가 높아도 일본어(흐린 일본어 사진의 잡음).",
+   "japanese": [
+    {
+     "text": "1,408",
+     "confidence": 0.5
+    }
+   ],
+   "korean": [
+    {
+     "text": "합계 1,408",
+     "confidence": 0.9
+    },
+    {
+     "text": "TEL 03-5550-0101",
+     "confidence": 0.9
+    }
+   ],
+   "expect": "japanese"
+  },
+  {
+   "id": "tie-keeps-japanese",
+   "japanese": [
+    {
+     "text": "合計 1,000",
+     "confidence": 1.0
+    }
+   ],
+   "korean": [
+    {
+     "text": "합계 100",
+     "confidence": 1.0
+    },
+    {
+     "text": "카드",
+     "confidence": 1.0
+    }
+   ],
+   "expect": "japanese",
+   "note": "점수가 같으면(7.0 = 7.0) 일본어."
+  },
+  {
+   "id": "spaces-do-not-count",
+   "note": "점수는 공백을 뺀 글자 수 × 신뢰도.",
+   "japanese": [
+    {
+     "text": "a b c d e f",
+     "confidence": 1.0
+    }
+   ],
+   "korean": [
+    {
+     "text": "가나다",
+     "confidence": 1.0
+    },
+    {
+     "text": "라마바라",
+     "confidence": 1.0
+    }
+   ],
+   "expect": "korean"
+  },
+  {
+   "id": "supplementary-plane-kanji-is-one-character",
+   "note": "𠮷(U+20BB7)는 UTF-16 두 단위지만 1자다. 일본어 2점 < 한국어 3점.",
+   "japanese": [
+    {
+     "text": "𠮷店",
+     "confidence": 1.0
+    }
+   ],
+   "korean": [
+    {
+     "text": "한글",
+     "confidence": 1.0
+    },
+    {
+     "text": "가",
+     "confidence": 1.0
+    }
+   ],
+   "expect": "korean"
+  },
+  {
+   "id": "special-spaces-do-not-count",
+   "note": "U+3000·U+00A0·U+2009는 공백. 일본어 2점 = 한국어 2점이라 일본어.",
+   "japanese": [
+    {
+     "text": "合　計  ",
+     "confidence": 1.0
+    }
+   ],
+   "korean": [
+    {
+     "text": "가　",
+     "confidence": 1.0
+    },
+    {
+     "text": "나 ",
+     "confidence": 1.0
+    }
+   ],
+   "expect": "japanese"
+  },
+  {
+   "id": "zero-width-space-counts",
+   "note": "U+200B는 White_Space가 아니라 센다. 일본어 3점 > 한국어 2점.",
+   "japanese": [
+    {
+     "text": "合​計",
+     "confidence": 1.0
+    }
+   ],
+   "korean": [
+    {
+     "text": "가",
+     "confidence": 1.0
+    },
+    {
+     "text": "나",
+     "confidence": 1.0
+    }
+   ],
+   "expect": "japanese"
+  }
+ ]
+}

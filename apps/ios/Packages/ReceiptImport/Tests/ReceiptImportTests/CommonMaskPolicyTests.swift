@@ -38,13 +38,10 @@ struct CommonMaskPolicyTests {
     }
     let proposal = try ProposalBuilder.make(ocr)
     let ids = Set(proposal.suggestedMaskLineIDs)
-    let polygons = proposal.maskPolygons(lineIDs: ids, regions: [])
-    let paths = polygons.map { points in
-      let path = CGMutablePath()
-      path.addLines(between: points)
-      path.closeSubpath()
-      return path
-    }
+    // `select`: 검토 화면에서 사용자가 추천 밖에서 더 켠 줄(글자로 찾는다). 사용자 띠는 더하지 않는다.
+    let userLines = (entry.select ?? []).map { text in ocr.lines.first { $0.text == text }!.id }
+    let plan = proposal.maskPlan(lineIDs: ids.union(userLines), regions: [])
+    let polygons = plan.drawn
 
     var doubts: Set<String> = []
     if proposal.needsMaskReview == true {
@@ -72,7 +69,7 @@ struct CommonMaskPolicyTests {
         let wrongPixel = (box[1]..<box[3]).contains { y in
           (box[0]..<box[2]).contains { x in
             let point = CGPoint(x: (Double(x) + 0.5) / Double(size[0]), y: (Double(y) + 0.5) / Double(size[1]))
-            return paths.contains { $0.contains(point) } != masked
+            return plan.covers(point) != masked
           }
         }
         if wrongPixel { failures.append("\(entry.id):\(kind).\(name)") }
@@ -130,6 +127,7 @@ struct CommonMaskPolicyTests {
     let lines: [Line]
     let reread: [Line]?
     let tiles: [Tile]?
+    let select: [String]?
     let expect: Expectation
   }
 

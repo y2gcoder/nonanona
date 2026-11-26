@@ -64,6 +64,43 @@ private struct BlurredReceiptVisionCapture: ReceiptRecognizer {
   }
 }
 
+/// 가맹점 번호 상자(보존)와 겹친 숫자 없는 이름 줄(공통 예제 `user-selected-line-overlapping-store-number`). 1000×1000.
+private struct OverlappingNameRecognizer: ReceiptRecognizer {
+  func recognize(_ url: URL) throws -> OCRResult {
+    let boxes: [(String, [Double])] = [
+      ("架空商店", [40, 20, 140, 40]), ("2026/11/08", [40, 80, 145, 100]), ("合計 ¥3,280", [40, 120, 168, 140]),
+      ("가맹점 번호 1384", [40, 600, 220, 620]), ("가상 이름", [190, 600, 275, 620]),
+    ]
+    let lines = boxes.enumerated().map { id, entry in
+      let b = entry.1.map { $0 / 1000 }
+      return OCRLine(
+        id: id, text: entry.0, x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1],
+        corners: [
+          CGPoint(x: b[0], y: b[1]), CGPoint(x: b[2], y: b[1]), CGPoint(x: b[2], y: b[3]), CGPoint(x: b[0], y: b[3]),
+        ])
+    }
+    return OCRResult(pixelWidth: 1000, pixelHeight: 1000, lines: lines)
+  }
+}
+
+/// 흰 1000×1000에 빨간 칸(겹친 부분 [192,603,218,617])을 그린 PNG.
+private func overlappingNamePNG() throws -> Data {
+  let ctx = try #require(
+    CGContext(
+      data: nil, width: 1000, height: 1000, bitsPerComponent: 8, bytesPerRow: 0,
+      space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+  ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+  ctx.fill(CGRect(x: 0, y: 0, width: 1000, height: 1000))
+  ctx.setFillColor(CGColor(red: 0.86, green: 0.12, blue: 0.12, alpha: 1))
+  // CoreGraphics 원점은 왼쪽 아래.
+  ctx.fill(CGRect(x: 192, y: 1000 - 617, width: 26, height: 14))
+  let data = NSMutableData()
+  let encoder = try #require(CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil))
+  CGImageDestinationAddImage(encoder, try #require(ctx.makeImage()), nil)
+  #expect(CGImageDestinationFinalize(encoder))
+  return data as Data
+}
+
 /// 정답의 줄 위치로 만든 결정적 OCR 대역. 호출을 세고, 정한 호출부터 풀어 줄 때까지 붙잡아 둘 수 있다.
 private final class TruthRecognizer: ReceiptRecognizer, @unchecked Sendable {
   private let lock = NSLock()
@@ -99,6 +136,23 @@ private final class TruthRecognizer: ReceiptRecognizer, @unchecked Sendable {
   }
 }
 
+/// 취소 신호가 올 때까지 읽기를 붙잡는 대역. 받은 사진을 센다.
+private final class CancellableRecognizer: ReceiptRecognizer, @unchecked Sendable {
+  private let lock = NSLock()
+  private var started: [String] = []
+
+  /// 시작한 읽기 수. 대역은 GCD 스레드에서 바꾸므로 락 안에서 읽는다.
+  var startedCount: Int { lock.withLock { started.count } }
+
+  func recognize(_ url: URL) throws -> OCRResult { try recognize(url, cancellation: .none) }
+
+  func recognize(_ url: URL, cancellation: OCRCancellation) throws -> OCRResult {
+    lock.withLock { started.append(url.lastPathComponent) }
+    while !cancellation.isCancelled { Thread.sleep(forTimeInterval: 0.01) }
+    throw CancellationError()
+  }
+}
+
 private func waitUntil(_ timeout: Duration = .seconds(60), _ condition: () async -> Bool) async throws {
   let clock = ContinuousClock()
   let deadline = clock.now + timeout
@@ -129,6 +183,32 @@ struct ReceiptProcessorTests {
     }
     #expect(uncovered == 0, "흐린 승인 번호의 잉크가 사본에 남았다")
     #expect(proposal.needsMaskReview == true, "가림 확인 필요 표시가 없다")
+  }
+
+  /// 사용자가 추천 밖의 숫자 없는 줄만 켜고(사용자 띠 없음) 확인하면, 겹친 보존 상자(가맹점 번호)의 되돌림이 그 줄을 풀지 않는다.
+  @Test func userSelectedLineStaysBlackOverRestoredStoreBox() async throws {
+    let root = tempRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = ReceiptDraftStore(root: root)
+    let draft = try store.create(
+      source: .picker, photos: [IncomingPhoto(fileExtension: "png", content: .data(try overlappingNamePNG()))])
+    let processor = try ReceiptProcessor(store: store, draft: draft, recognizer: OverlappingNameRecognizer())
+    await processor.run()
+    let id = try #require(await processor.snapshot().items.first?.id)
+    let proposal = try await processor.proposal(id)
+    #expect(Set(proposal.suggestedMaskLineIDs).isDisjoint(with: [3, 4]), "추천에는 두 줄이 없다")
+    let lines = Set(proposal.suggestedMaskLineIDs).union([4])
+    let preview = try await processor.preview(id, maskLineIDs: lines, regions: [])
+    let masked = try rgba(preview.pngData)
+    let overlap = (603..<617).flatMap { y in (192..<218).map { x in (x, y) } }
+    #expect(overlap.filter { !masked.isBlack($0.0, $0.1) }.isEmpty, "겹친 부분 \(overlap.count)픽셀이 드러났다")
+    // 원본 위 겹침(검토 화면)도 같은 계획으로 그린다.
+    let plan = proposal.maskPlan(lineIDs: lines, regions: [])
+    #expect(overlap.allSatisfy { plan.covers(CGPoint(x: (Double($0.0) + 0.5) / 1000, y: (Double($0.1) + 0.5) / 1000)) })
+    let receipt = try await processor.confirm(id, fields: proposal.fields, maskLineIDs: lines)
+    let artifact = try Data(contentsOf: store.artifactURL(draft.id, try #require(receipt.artifactFileName)))
+    let confirmed = try rgba(artifact)
+    #expect(overlap.filter { !confirmed.isBlack($0.0, $0.1) }.isEmpty, "확인 사본에서 겹친 부분이 드러났다")
   }
 
   @Test func blurredPhotoNeedsMaskReviewUsingVision() async throws {
@@ -211,6 +291,33 @@ struct ReceiptProcessorTests {
     #expect(after.items.first { $0.id == bad.id }?.attempts == 2)
     #expect(after.items.first { $0.id == bad.id }?.state == .failed)
     #expect(after.items.filter { $0.id != bad.id } == manifest.items.filter { $0.id != bad.id })
+  }
+
+  /// 처리 중 취소: 새 사진을 가져오지 않고, 읽던 사진은 끝난 것으로 쓰지 않으며, 다시 열면 기존 복구 규칙대로 대기열로 돌아간다.
+  @Test func cancelledRunStopsClaimingAndLeavesInFlightPhotosRecoverable() async throws {
+    let root = tempRoot()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = ReceiptDraftStore(root: root)
+    let draft = try store.create(source: .picker, photos: truths.prefix(4).map(photo))
+    let recognizer = CancellableRecognizer()
+    let processor = try ReceiptProcessor(store: store, draft: draft, recognizer: recognizer)
+    let run = Task { await processor.run() }
+    do {
+      try await waitUntil { recognizer.startedCount == 2 }
+    } catch {
+      // 기다리다 실패해도 붙잡힌 대역이 남지 않게 취소하고 끝날 때까지 기다린다.
+      run.cancel()
+      await run.value
+      throw error
+    }
+    run.cancel()
+    await run.value
+    #expect(recognizer.startedCount == 2, "취소 뒤 새 사진을 읽기 시작했다")
+    let onDisk = try #require(try store.loadProcessing(draft.id))
+    #expect(onDisk.items.map(\.state) == [.processing, .processing, .queued, .queued])
+    let resumed = try ReceiptProcessor(store: store, draft: draft, recognizer: TruthRecognizer())
+    #expect(await resumed.snapshot().items.map(\.state) == [.queued, .queued, .queued, .queued])
+    #expect(await resumed.snapshot().recoveredCount == 2)
   }
 
   /// 4장을 끝내고 2장을 읽는 중인 디스크 상태를 복사해 다시 연다(프로세스 종료와 같다).

@@ -11,6 +11,7 @@ import app.nonanona.feature.receiptimport.OcrResult
 import app.nonanona.feature.receiptimport.ReceiptDraftStore
 import app.nonanona.feature.receiptimport.ReceiptProcessor
 import app.nonanona.feature.receiptimport.ResolvedReview
+import app.nonanona.feature.receiptimport.covers
 import app.nonanona.feature.receiptimport.overlayShapes
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
@@ -119,7 +120,7 @@ class LegacyDraftTest {
                     (0 until height).count { y ->
                         val nx = (x + 0.5) / width
                         val ny = (y + 0.5) / height
-                        val covered = overlay.any { (xs, ys) -> inside(xs, ys, nx, ny) }
+                        val covered = overlay.covers(nx, ny)
                         covered != black(image, x, y)
                     }
                 assertTrue("x=$x 겹침과 PNG가 다른 행 $mismatched", mismatched <= 8)
@@ -129,30 +130,4 @@ class LegacyDraftTest {
             val receipt = processor.confirm(item.id, AllowedReceiptFields("2026-11-08", 3280, "JPY", "架空商店"), lines, regions)
             assertArrayEquals(preview.pngBytes, store.artifactFile(draft.id, receipt.artifactFileName!!).readBytes())
         }
-
-    /** 겹침 모양 하나: 사각형은 ([l, r], [t, b]), 기울어진 띠는 네 점. */
-    private fun inside(
-        xs: List<Double>,
-        ys: List<Double>,
-        x: Double,
-        y: Double,
-    ): Boolean {
-        if (xs.size == 2) return x >= xs[0] && x < xs[1] && y >= ys[0] && y < ys[1]
-        var sign = 0
-        for (i in xs.indices) {
-            val j = (i + 1) % xs.size
-            val c = (xs[j] - xs[i]) * (y - ys[i]) - (ys[j] - ys[i]) * (x - xs[i])
-            val k =
-                if (c > 0) {
-                    1
-                } else if (c < 0) {
-                    -1
-                } else {
-                    0
-                }
-            if (k != 0 && sign != 0 && k != sign) return false
-            if (k != 0) sign = k
-        }
-        return true
-    }
 }

@@ -23,6 +23,8 @@ data class OcrLine(
      * 있다([NumberSpan]). 있으면 그 부분만 덮고 섞인 줄 안내를 하지 않는다.
      */
     val numberBox: List<Double>? = null,
+    /** 엔진이 준 줄 신뢰도(0~1). 언어 선택([OcrLanguageChoice])에 쓴다. 예전 제안 파일에는 없다(null). */
+    val confidence: Double? = null,
 )
 
 data class OcrResult(
@@ -60,6 +62,7 @@ data class OcrProposal(
                             .put("height", it.height)
                             .put("corners", it.corners?.let(::JSONArray) ?: JSONObject.NULL)
                             .put("numberBox", it.numberBox?.let(::JSONArray) ?: JSONObject.NULL)
+                            .put("confidence", it.confidence ?: JSONObject.NULL)
                     },
                 ),
             ).put("fields", fields.toJson())
@@ -87,6 +90,7 @@ data class OcrProposal(
                                 it.getDouble("height"),
                                 it.optJSONArray("corners")?.let { c -> (0 until c.length()).map(c::getDouble) },
                                 it.optJSONArray("numberBox")?.let { c -> (0 until c.length()).map(c::getDouble) },
+                                if (it.isNull("confidence")) null else it.getDouble("confidence"),
                             )
                         }
                     },
@@ -105,15 +109,23 @@ fun interface ReceiptRecognizer {
     fun recognize(file: File): OcrResult
 }
 
-/** OCR 줄에서 날짜·합계·가게와 가림 후보를 고른다(native-batch-import 실험에서 옮김). */
+/**
+ * OCR 줄에서 날짜·합계·통화·가게와 가림 후보를 고른다(native-batch-import 실험에서 옮김). 합계 낱말·통화·날짜 규칙은 iOS
+ * `ProposalBuilder`와 같고, 두 앱의 시험이 같은 표(`apps/fixtures/korean/proposal-fields.json`)를 읽는다.
+ */
 object ProposalBuilder {
-    private val datePattern = Regex("(\\d{4})\\s*[-/.年]\\s*(\\d{1,2})\\s*[-/.月]\\s*(\\d{1,2})")
-    private const val TOTAL = "合計|お会計|支払額|決済金額|total"
+    private val datePattern = Regex("(\\d{4})\\s*[-/.年년]\\s*(\\d{1,2})\\s*[-/.月월]\\s*(\\d{1,2})")
+
+    /** 합계 낱말. 한국어 결제 화면의 "총 결제 금액"·"결제금액"과 영수증의 "합계"를 포함한다(ADR-0013). */
+    private const val TOTAL = "合計|お会計|支払額|決済金額|total|합계|결제\\s*금액|총\\s*금액"
+
+    /** 소계 줄은 합계로 보지 않는다. */
+    private val subtotal = Regex("小計|소계")
 
     fun make(ocr: OcrResult): OcrProposal {
         if (ocr.lines.isEmpty()) throw ProcessingException(ProcessingFailure.Unreadable)
-        val amount = total(ocr.lines) ?: throw ProcessingException(ProcessingFailure.MissingTotal)
-        val date = ocr.lines.firstNotNullOfOrNull { isoDate(it.text) } ?: throw ProcessingException(ProcessingFailure.MissingDate)
+        val total = total(ocr.lines) ?: throw ProcessingException(ProcessingFailure.MissingTotal)
+        val date = date(ocr.lines) ?: throw ProcessingException(ProcessingFailure.MissingDate)
         // 민감 라벨 줄과 같은 기울기 행·다음 행의 번호 조각, 라벨 없는 번호 형식(MaskCheck.kt).
         val selection = MaskSelector.select(ocr)
         val skew = selection.skew?.let(MaskSelector::degrees)
@@ -127,8 +139,8 @@ object ProposalBuilder {
             ocr,
             AllowedReceiptFields(
                 date,
-                amount,
-                "JPY",
+                total.amount,
+                currency(total.text, ocr.lines.map { it.text }),
                 ocr.lines
                     .first()
                     .text
@@ -139,6 +151,26 @@ object ProposalBuilder {
         )
     }
 
+    /** 결제일 라벨(결제일·결제일시·결제 일자, 라벨 끝을 확인해 `결제 일정`은 아니다). 숙소 화면의 체크인처럼 앞에 나오는 다른 날짜보다 우선한다. */
+    private val paymentDateLabel = Regex("결제\\s*(?:일시|일자|일)(?![가-힣])")
+
+    /**
+     * 지출 날짜: 결제일 라벨 줄의 날짜, 없으면 그 줄과 같은 행 오른쪽 상자의 날짜(가까운 순), 결제일 라벨이 없거나 날짜를 못 찾으면
+     * 위에서부터 첫 날짜.
+     */
+    fun date(lines: List<OcrLine>): String? {
+        for (line in lines.filter { paymentDateLabel.containsMatchIn(it.text) }) {
+            isoDate(line.text)?.let { return it }
+            val mid = line.y + line.height / 2
+            lines
+                .filter { it.id != line.id && it.x > line.x && abs(it.y + it.height / 2 - mid) < line.height / 2 }
+                .sortedBy { it.x }
+                .firstNotNullOfOrNull { isoDate(it.text) }
+                ?.let { return it }
+        }
+        return lines.firstNotNullOfOrNull { isoDate(it.text) }
+    }
+
     fun isoDate(text: String): String? {
         // 실제 OCR 잡음(ML Kit에서 관찰): "2026-1 1-07" → 숫자 사이 공백을 붙인다.
         val m = datePattern.find(text.replace(Regex("(?<=\\d)\\s+(?=\\d)"), "")) ?: return null
@@ -147,18 +179,50 @@ object ProposalBuilder {
         return "%04d-%02d-%02d".format(y.toInt(), mo.toInt(), d.toInt())
     }
 
-    private fun total(lines: List<OcrLine>): Long? {
+    /** 합계 금액과 그 금액을 읽은 글자(통화 판정용). */
+    data class Total(
+        val amount: Long,
+        val text: String,
+    )
+
+    fun total(lines: List<OcrLine>): Total? {
         val keyword = Regex(TOTAL, RegexOption.IGNORE_CASE)
-        for (line in lines.filter { keyword.containsMatchIn(it.text) && !it.text.contains("小計") }) {
-            number(Regex("(?:$TOTAL)\\D*?([0-9][0-9,，.]*)", RegexOption.IGNORE_CASE), line.text)?.let { return it }
+        for (line in lines.filter { keyword.containsMatchIn(it.text) && !subtotal.containsMatchIn(it.text) }) {
+            number(Regex("(?:$TOTAL)\\D*?([0-9][0-9,，.]*)", RegexOption.IGNORE_CASE), line.text)?.let { return Total(it, line.text) }
             // OCR이 "合計"와 금액을 같은 행의 두 상자로 나눈 경우.
             val mid = line.y + line.height / 2
             lines
                 .filter { it.id != line.id && it.x > line.x && abs(it.y + it.height / 2 - mid) < line.height / 2 }
-                .firstNotNullOfOrNull { number(Regex("\\D*?([0-9][0-9,，.]*)"), it.text) }
+                .firstNotNullOfOrNull { other -> number(Regex("\\D*?([0-9][0-9,，.]*)"), other.text)?.let { Total(it, other.text) } }
                 ?.let { return it }
         }
         return null
+    }
+
+    /** 원·円은 숫자 뒤 금액 접미사, ₩·¥는 숫자 앞, 통화 코드는 앞이 영숫자가 아니거나(뒤에 금액 가능) 독립된 금액 토큰 바로 뒤의 토큰, W는 숫자 바로 앞(₩ 오독)만 센다. 회원번호의 '원', 상품 코드 A1KRW2·A1KRW는 아니다. */
+    private val krwMark =
+        Regex(
+            "(?<=\\d)\\s*원|₩\\s*\\d|(?<![A-Za-z0-9])KRW(?![A-Za-z])|(?<![A-Za-z0-9.,])\\d[\\d,.]*\\s*KRW(?![A-Za-z0-9])|(?<![A-Za-z])W(?=\\s*\\d)",
+        )
+    private val jpyMark =
+        Regex("(?<=\\d)\\s*円|[¥￥]\\s*\\d|(?<![A-Za-z0-9])JPY(?![A-Za-z])|(?<![A-Za-z0-9.,])\\d[\\d,.]*\\s*JPY(?![A-Za-z0-9])")
+
+    /**
+     * 합계 통화. 합계를 읽은 글자의 표시(금액에 붙은 円·¥, JPY / 원·₩, KRW, ML Kit이 ₩를 W로 읽는 경우 포함)를 먼저 본다. 둘 다 있거나 없으면
+     * 사진 전체에서 표시가 붙은 줄이 더 많은 쪽, 그래도 같으면 한글 줄이 2줄 이상이면 KRW, 아니면 JPY(기존 동작)다.
+     */
+    fun currency(
+        totalText: String,
+        allTexts: List<String>,
+    ): String {
+        val krw = krwMark.containsMatchIn(totalText)
+        val jpy = jpyMark.containsMatchIn(totalText)
+        if (krw != jpy) return if (krw) "KRW" else "JPY"
+        val krwLines = allTexts.count { krwMark.containsMatchIn(it) }
+        val jpyLines = allTexts.count { jpyMark.containsMatchIn(it) }
+        if (krwLines != jpyLines) return if (krwLines > jpyLines) "KRW" else "JPY"
+        val hangulLines = allTexts.count { text -> text.any { it in '\uAC00'..'\uD7A3' } }
+        return if (hangulLines >= 2) "KRW" else "JPY"
     }
 
     private fun number(

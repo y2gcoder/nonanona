@@ -26,6 +26,11 @@ sealed interface MaskShape {
         val xs: List<Double>,
         val ys: List<Double>,
     ) : MaskShape
+
+    /** 원본 픽셀로 되돌리는 영역([area]는 [Rect]·[Quad]). 목록은 칠하는 순서이며 나중 것이 앞의 것을 덮는다. */
+    data class Restore(
+        val area: MaskShape,
+    ) : MaskShape
 }
 
 /**
@@ -61,51 +66,182 @@ class MaskedArtifact private constructor(
 
 object Masking {
     /**
-     * 고른 OCR 줄마다 줄 방향의 전체 폭 띠. 글자 가장자리까지 덮도록 여백(글자 높이의 30%, 최소 8픽셀)을 둔다.
-     * 줄이 [MaskThresholds.MIN_TILT_DEGREES]보다 덜 기울었거나 모서리 정보가 없으면 예전과 같은 가로 전체 사각형이다.
-     * 기울었으면 줄 방향으로 되돌린 좌표(보정 좌표)에서 그 행 전체를 덮는 띠를 사진 좌표로 돌려 굽는다.
-     * 그래서 같은 행에서 OCR이 따로 읽었거나 읽지 못한 번호 조각도 덮고, 위아래 행(품목·합계)은 덮지 않는다.
+     * 가림 도형(칠하는 순서의 목록, ADR-0013). 두 불변식을 지킨다.
+     * 1. 가려야 할 OCR 상자는 항상 완전히 덮는다. 어떤 이유로도 줄이지 않는다. 가려야 할 상자는 번호가 든 추천 줄(섞인 줄은 번호
+     *    부분 상자)과, 사용자가 검토 화면에서 켠 추천 밖의 줄 전부(숫자 유무와 무관, 줄 상자 전체)다. 숫자 없는 추천 라벨 줄
+     *    (승인, 결제 카드)만 민감 값이 아니라 띠로 덮는다.
+     *    [suggested]는 OCR 추천 줄(`OcrProposal.suggestedMaskLineIds`)이다. [selected]에서 그 밖의 줄은 사용자가 더한 줄이다.
+     * 2. 민감 상자 밖에 더한 여백은 보존 상자(가격·날짜·가게 정보·필드명과 그 값) 중 민감 상자 밖 픽셀을 덮지 않는다.
+     * 순서: 여백을 포함한 띠(검정) → 보존 상자를 원본으로 되돌림([MaskShape.Restore]) → 민감 상자(검정). 사용자가 더한 띠
+     * ([regionRects])는 호출하는 쪽이 그 뒤에 붙인다. 띠는 고른 줄마다 줄 방향의 행 띠이고 글자 높이의 30%(최소 8픽셀) 여백을 둔다.
+     * 같은 행에서 OCR이 따로 읽었거나 읽지 못한 번호 조각도 덮고, 위아래 행(품목·합계)은 덮지 않는다.
      */
     fun shapes(
         lines: List<OcrLine>,
         selected: Set<Int>,
+        suggested: Set<Int>,
         width: Int,
         height: Int,
-    ): List<MaskShape> {
+    ): List<MaskShape> = plan(lines, selected, suggested, width, height).let { (bands, restores, covers) -> bands + restores + covers }
+
+    /** 반드시 덮는 상자(불변식 1의 대상): 번호가 든 추천 줄, 사용자가 더한 줄, 띠가 덮으려는 번호 조각 중 보존 상자와 겹친 것. */
+    fun mustCover(
+        lines: List<OcrLine>,
+        selected: Set<Int>,
+        suggested: Set<Int>,
+        width: Int,
+        height: Int,
+    ): List<MaskShape> = plan(lines, selected, suggested, width, height).third
+
+    private fun plan(
+        lines: List<OcrLine>,
+        selected: Set<Int>,
+        suggested: Set<Int>,
+        width: Int,
+        height: Int,
+    ): Triple<List<MaskShape>, List<MaskShape>, List<MaskShape>> {
         val chosen = lines.filter { it.id in selected }
-        if (chosen.isEmpty()) return emptyList()
+        if (chosen.isEmpty()) return Triple(emptyList(), emptyList(), emptyList())
         val geometry = lines.map { LineGeometry.of(it, width, height) }
         val skew = LineGeometry.skew(geometry)
-        // 같은 행이어도 덮지 않는 상자: 고르지 않은, 그 자체가 가격·날짜인 상자(계약 4).
+        val keeps = keptBoxes(geometry, selected)
         val protected = geometry.filter { it.line.id !in selected && SensitiveText.isProtectedBox(it.line.text) }
-        val unselected = geometry.filter { it.line.id !in selected && !SensitiveText.isProtectedBox(it.line.text) }
-        return chosen.map { line ->
-            val g = LineGeometry.of(line, width, height)
-            val theta = MaskSelector.directionOf(g, skew)
-            val tilted = line.corners != null && abs(MaskSelector.degrees(theta)) >= MaskThresholds.MIN_TILT_DEGREES
-            val pad = maxOf(8.0, g.textHeight * 0.3)
-            val numberBox = line.numberBox?.takeIf { it.size == 4 && SensitiveText.isMixed(line.text) }
-            val (uFrom, uTo) =
-                if (numberBox != null) {
-                    // 섞인 줄: 낱말 상자로 나눈 번호 부분만(앞뒤 여백), 같은 줄의 가격·날짜는 남긴다.
-                    numberRange(numberBox, if (tilted) theta else 0.0, width, height, pad)
+        val kept = keeps.filter { !SensitiveText.isProtectedBox(it.line.text) }
+        val unselected = geometry.filter { it.line.id !in selected && it !in keeps }
+        // 띠가 덮으려는 고르지 않은 번호 조각 중 가게 정보·필드명 상자와 겹친 것(OCR 상자가 겹침). 되돌림 뒤에도 덮이게 반드시 덮을
+        // 상자에 넣는다.
+        val fragmentCovers = mutableListOf<OcrLine>()
+        val bands =
+            chosen.map { line ->
+                val g = LineGeometry.of(line, width, height)
+                val theta = MaskSelector.directionOf(g, skew)
+                val tilted = line.corners != null && abs(MaskSelector.degrees(theta)) >= MaskThresholds.MIN_TILT_DEGREES
+                val pad = maxOf(8.0, g.textHeight * 0.3)
+                val numberBox = line.numberBox?.takeIf { it.size == 4 && SensitiveText.isMixed(line.text) }
+                val (uFrom, uTo) =
+                    if (numberBox != null) {
+                        // 섞인 줄: 낱말 상자로 나눈 번호 부분만(앞뒤 여백), 같은 줄의 가격·날짜는 남긴다.
+                        numberRange(numberBox, if (tilted) theta else 0.0, width, height, pad)
+                    } else {
+                        val t = if (tilted) theta else 0.0
+                        val (pFrom, pTo) = rowLimits(g, t, protected + otherColumns(g, t, unselected), pad)
+                        // 가게 정보·필드명·필드 값 앞에서도 띠를 멈춘다(그 상자는 뒤에서 되돌린다). 이 줄 상자 자체는 줄이지 않는다.
+                        val (kFrom, kTo) = rowLimits(g, t, kept, 0.0)
+                        val from = listOfNotNull(pFrom, kFrom).maxOrNull()
+                        val to = listOfNotNull(pTo, kTo).minOrNull()
+                        val (top, bottom) = g.vRange(t)
+                        unselected
+                            .filter { o ->
+                                val (ot, ob) = o.vRange(t)
+                                val (o0, o1) = o.uRange(t)
+                                abs((ot + ob) / 2 - (top + bottom) / 2) <= 0.5 * maxOf(bottom - top, ob - ot) &&
+                                    o1 > (from ?: Double.NEGATIVE_INFINITY) && o0 < (to ?: Double.POSITIVE_INFINITY) + pad &&
+                                    SensitiveText.isNumberFragment(o.line.text, minDigits = 1) &&
+                                    kept.any { k -> minOf(o1, k.uRange(t).second) > maxOf(o0, k.uRange(t).first) && sameRowOf(o, k, t) }
+                            }.forEach { fragmentCovers += it.line }
+                        from to to
+                    }
+                if (!tilted) {
+                    val top = line.y * height
+                    val bottom = (line.y + line.height) * height
+                    val vPad = maxOf(8.0, (bottom - top) * 0.3)
+                    MaskShape.Rect(
+                        floor(uFrom ?: 0.0).toInt().coerceIn(0, width),
+                        floor(top - vPad).toInt().coerceAtLeast(0),
+                        ceil(uTo ?: width.toDouble()).toInt().coerceIn(0, width),
+                        ceil(bottom + vPad).toInt().coerceAtMost(height),
+                    )
                 } else {
-                    rowLimits(g, if (tilted) theta else 0.0, protected + otherColumns(g, if (tilted) theta else 0.0, unselected), pad)
+                    band(g, theta, width, height, uFrom, uTo)
                 }
-            if (!tilted) {
-                val top = line.y * height
-                val bottom = (line.y + line.height) * height
-                val vPad = maxOf(8.0, (bottom - top) * 0.3)
-                MaskShape.Rect(
-                    floor(uFrom ?: 0.0).toInt().coerceIn(0, width),
-                    floor(top - vPad).toInt().coerceAtLeast(0),
-                    ceil(uTo ?: width.toDouble()).toInt().coerceIn(0, width),
-                    ceil(bottom + vPad).toInt().coerceAtMost(height),
-                )
-            } else {
-                band(g, theta, width, height, uFrom, uTo)
             }
+        val restores = keeps.map { MaskShape.Restore(boxShape(it.line, null, width, height)) }
+        // 반드시 덮을 상자: 사용자가 더한 줄은 줄 상자 전체(숫자 유무와 무관, 사용자가 고른 것이라 되돌리지 않는다). 추천 줄은
+        // 번호(숫자·가림 기호)가 든 줄만(섞인 줄은 번호 부분). 숫자 없는 추천 라벨 줄(승인, 결제 카드)은 띠로만 덮어 보존 상자는 되돌린다.
+        val covers =
+            chosen.mapNotNull { line ->
+                when {
+                    line.id !in suggested -> {
+                        boxShape(line, null, width, height)
+                    }
+
+                    SensitiveText.normalized(line.text).any { it.isDigit() || it in "*●•#×" } -> {
+                        boxShape(line, line.numberBox?.takeIf { it.size == 4 && SensitiveText.isMixed(line.text) }, width, height)
+                    }
+
+                    else -> {
+                        null
+                    }
+                }
+            }
+        return Triple(bands, restores, covers + fragmentCovers.distinct().map { boxShape(it, null, width, height) })
+    }
+
+    private fun sameRowOf(
+        a: LineGeometry,
+        b: LineGeometry,
+        theta: Double,
+    ): Boolean {
+        val (at, ab) = a.vRange(theta)
+        val (bt, bb) = b.vRange(theta)
+        return abs((at + ab) / 2 - (bt + bb) / 2) <= 0.5 * maxOf(ab - at, bb - bt)
+    }
+
+    /**
+     * 보존 상자: 고르지 않은 줄 중 가격·날짜(보호 상자), 가게 정보(가맹점·레지·등록번호), 필드명(수량·결제 금액 등), 그리고 바로 왼쪽
+     * 상자가 필드명인 값 상자(수량 | 120). iOS `Masking.keptNeighbors`와 같은 규칙이다.
+     */
+    private fun keptBoxes(
+        geometry: List<LineGeometry>,
+        selected: Set<Int>,
+    ): List<LineGeometry> =
+        geometry.filter { o ->
+            if (o.line.id in selected) return@filter false
+            val text = o.line.text
+            if (SensitiveText.isProtectedBox(text) || SensitiveText.isStoreBox(text) || SensitiveText.isFieldName(text)) return@filter true
+            val (o0, _) = o.uRange(0.0)
+            val (ot, ob) = o.vRange(0.0)
+            geometry
+                .filter { b ->
+                    b !== o && b.uRange(0.0).second <= o0 + 0.5 * (ob - ot) &&
+                        abs((b.vRange(0.0).first + b.vRange(0.0).second) / 2 - (ot + ob) / 2) <= 0.5 * (ob - ot)
+                }.maxByOrNull { it.uRange(0.0).second }
+                ?.let { SensitiveText.isFieldName(it.line.text) } == true
         }
+
+    /** OCR 상자 그대로의 도형(픽셀 좌표). 모서리가 있으면 네 점, 없으면 축 정렬 사각형. [part]가 있으면 그 부분 상자(0~1). */
+    private fun boxShape(
+        line: OcrLine,
+        part: List<Double>?,
+        width: Int,
+        height: Int,
+    ): MaskShape {
+        if (part != null) {
+            return MaskShape.Rect(
+                floor(part[0] * width).toInt(),
+                floor(part[1] * height).toInt(),
+                ceil(part[2] * width).toInt(),
+                ceil(part[3] * height).toInt(),
+            )
+        }
+        val c = line.corners
+        if (c != null && c.size == 8) {
+            return MaskShape.Quad(
+                listOf(c[0] * width, c[2] * width, c[4] * width, c[6] * width),
+                listOf(
+                    c[1] * height,
+                    c[3] * height,
+                    c[5] * height,
+                    c[7] * height,
+                ),
+            )
+        }
+        return MaskShape.Rect(
+            floor(line.x * width).toInt(),
+            floor(line.y * height).toInt(),
+            ceil((line.x + line.width) * width).toInt(),
+            ceil((line.y + line.height) * height).toInt(),
+        )
     }
 
     /**

@@ -10,6 +10,7 @@ import app.nonanona.feature.receiptimport.OcrResult
 import app.nonanona.feature.receiptimport.OcrTiles
 import app.nonanona.feature.receiptimport.PhotoQuality
 import app.nonanona.feature.receiptimport.ProposalBuilder
+import app.nonanona.feature.receiptimport.covers
 import app.nonanona.feature.receiptimport.rereadLeaks
 import org.json.JSONArray
 import org.junit.Assert.assertEquals
@@ -62,40 +63,11 @@ class MaskContractTest {
         x: Double,
         y: Double,
     ): Boolean {
-        val px = x * width
-        val py = y * height
-        return shapes.any { s ->
-            when (s) {
-                is MaskShape.Rect -> {
-                    px >= s.left && px < s.right && py >= s.top && py < s.bottom
-                }
-
-                is MaskShape.Quad -> {
-                    var sign = 0
-                    var inside = true
-                    for (i in 0 until 4) {
-                        val j = (i + 1) % 4
-                        val c = (s.xs[j] - s.xs[i]) * (py - s.ys[i]) - (s.ys[j] - s.ys[i]) * (px - s.xs[i])
-                        val k =
-                            if (c > 0) {
-                                1
-                            } else if (c < 0) {
-                                -1
-                            } else {
-                                0
-                            }
-                        if (k != 0) {
-                            if (sign != 0 && k != sign) inside = false
-                            sign = k
-                        }
-                    }
-                    inside
-                }
-            }
-        }
+        // 칠하는 순서(되돌림 포함)로 판정한다.
+        return shapes.covers(x * width, y * height)
     }
 
-    private fun shapesOf(p: OcrProposal) = Masking.shapes(p.ocr.lines, p.suggestedMaskLineIds.toSet(), width, height)
+    private fun shapesOf(p: OcrProposal) = p.suggestedMaskLineIds.toSet().let { Masking.shapes(p.ocr.lines, it, it, width, height) }
 
     private fun center(line: OcrLine) = (line.x + line.width / 2) to (line.y + line.height / 2)
 

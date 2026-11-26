@@ -417,16 +417,23 @@ private struct OriginalPhoto: View {
         if let image { Image(uiImage: image).resizable().scaledToFit() }
       }
       .overlay {
-        GeometryReader { proxy in
-          ForEach(polygons.indices, id: \.self) { index in
-            let points = polygons[index].map { CGPoint(x: $0.x * proxy.size.width, y: $0.y * proxy.size.height) }
+        // 굽는 사본과 같은 순서로 칠한다: 검정 → 보존 상자 되돌림(지움) → 민감 상자·사용자가 켠 줄·더한 띠 검정.
+        // 캔버스 한 장 안에서 지우므로 사진은 그대로이고, 겹친 곳도 한 번만 칠한 것처럼 보인다.
+        Canvas { context, size in
+          func path(_ polygon: [CGPoint]) -> Path {
             Path { path in
-              path.addLines(points)
+              path.addLines(polygon.map { CGPoint(x: $0.x * size.width, y: $0.y * size.height) })
               path.closeSubpath()
             }
-            .fill(Color.black.opacity(0.55))
           }
+          guard let plan else { return }
+          for polygon in plan.black { context.fill(path(polygon), with: .color(.black)) }
+          var restore = context
+          restore.blendMode = .clear
+          for polygon in plan.restore { restore.fill(path(polygon), with: .color(.black)) }
+          for polygon in plan.cover { context.fill(path(polygon), with: .color(.black)) }
         }
+        .opacity(0.55)
         .clipped()
       }
       .task(id: url) { image = await Self.load(url) }
@@ -437,9 +444,9 @@ private struct OriginalPhoto: View {
     return CGFloat(proposal.ocr.pixelWidth) / CGFloat(proposal.ocr.pixelHeight)
   }
 
-  private var polygons: [[CGPoint]] {
-    guard let masked, let proposal else { return [] }
-    return proposal.maskPolygons(lineIDs: masked.maskLineIDs, regions: masked.regions)
+  private var plan: MaskPlan? {
+    guard let masked, let proposal else { return nil }
+    return proposal.maskPlan(lineIDs: masked.maskLineIDs, regions: masked.regions)
   }
 
   private static func load(_ url: URL) async -> UIImage? {

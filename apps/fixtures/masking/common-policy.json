@@ -737,6 +737,518 @@
         {"text": "コーヒー ABC-12345 ¥198", "box": [40, 600, 380, 620]}
       ],
       "expect": {"masked": {}, "visible": {"line": [43, 603, 377, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-won-total",
+      "reviews": ["contract:policy", "adr:0013"],
+      "lines": [
+        {"text": "합계 6,900원", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-total-won-sign-read-as-w",
+      "reviews": ["contract:policy", "adr:0013"],
+      "lines": [
+        {"text": "총 결제 금액", "box": [40, 600, 200, 620]},
+        {"text": "W265,100", "box": [600, 600, 760, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"label": [45, 603, 195, 617], "amount": [605, 603, 755, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-date-year-month",
+      "reviews": ["contract:policy", "adr:0013"],
+      "lines": [
+        {"text": "결제일시 2026년 11월 4일 19:22", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-approval-label-value-row",
+      "reviews": ["contract:policy", "adr:0013"],
+      "lines": [
+        {"text": "승인번호", "box": [40, 600, 140, 620]},
+        {"text": "30418827", "box": [600, 600, 700, 620]}
+      ],
+      "expect": {"masked": {"value": [605, 603, 695, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-booking-label-value-row",
+      "reviews": ["contract:policy", "adr:0013"],
+      "lines": [
+        {"text": "예약번호", "box": [40, 600, 140, 620]},
+        {"text": "4708215963", "box": [600, 600, 720, 620]}
+      ],
+      "expect": {"masked": {"value": [605, 603, 715, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-card-label-value-row",
+      "reviews": ["contract:policy", "adr:0013"],
+      "lines": [
+        {"text": "카드번호", "box": [40, 600, 140, 620]},
+        {"text": "9411-23**-****-0582", "box": [520, 600, 760, 620]}
+      ],
+      "expect": {"masked": {"value": [525, 603, 755, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-booking-status-not-label",
+      "reviews": ["contract:policy", "adr:0013"],
+      "lines": [
+        {"text": "예약 확정 · 가상 여행앱", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-payment-method-not-label",
+      "reviews": ["contract:policy", "adr:0013"],
+      "lines": [
+        {"text": "결제수단 가상카드 일시불", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-short-approval-inline",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "승인 4938", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-short-booking-colon",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "예약: AB12", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-short-label-value-split",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "승인", "box": [40, 600, 100, 620]},
+        {"text": "4938", "box": [120, 600, 180, 620]}
+      ],
+      "expect": {"masked": {"label": [45, 603, 95, 617], "value": [125, 603, 175, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-number-word-read-separately",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "승인", "box": [40, 600, 100, 620]},
+        {"text": "번호 4938", "box": [110, 600, 230, 620]}
+      ],
+      "expect": {"masked": {"value": [115, 603, 225, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-booking-count-not-label",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "예약 2명", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 365, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-short-approval-reread-whole",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "승인 4938", "box": [40, 600, 370, 620]}
+      ],
+      "reread": [
+        {"text": "승인 4938", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": true, "reasons": ["reread"]}
+    },
+    {
+      "id": "korean-short-approval-reread-value",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "승인 4938", "box": [40, 600, 370, 620]}
+      ],
+      "reread": [
+        {"text": "4938", "box": [200, 820, 260, 840]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": true, "reasons": ["reread"]}
+    },
+    {
+      "id": "multicolumn-short-value-keeps-review",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "承認番号", "box": [40, 600, 120, 620]},
+        {"text": "512", "box": [300, 600, 330, 620]},
+        {"text": "会員番号", "box": [480, 600, 560, 620]},
+        {"text": "87654321", "box": [640, 600, 740, 620]}
+      ],
+      "expect": {"masked": {"member": [645, 603, 735, 617]}, "visible": {}, "needsReview": true, "reasons": ["unpairedLabel"]}
+    },
+    {
+      "id": "korean-multicolumn-short-value-keeps-review",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "승인번호", "box": [40, 600, 120, 620]},
+        {"text": "512", "box": [300, 600, 330, 620]},
+        {"text": "회원번호", "box": [480, 600, 560, 620]},
+        {"text": "87654321", "box": [640, 600, 740, 620]}
+      ],
+      "expect": {"masked": {"member": [645, 603, 735, 617]}, "visible": {}, "needsReview": true, "reasons": ["unpairedLabel"]}
+    },
+    {
+      "id": "multicolumn-both-values-paired",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "承認番号", "box": [40, 600, 120, 620]},
+        {"text": "4938", "box": [250, 600, 280, 620]},
+        {"text": "会員番号", "box": [480, 600, 560, 620]},
+        {"text": "87654321", "box": [640, 600, 740, 620]}
+      ],
+      "expect": {"masked": {"approval": [255, 603, 275, 617], "member": [645, 603, 735, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-weak-label-next-row-value",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "승인", "box": [40, 600, 120, 620]},
+        {"text": "4938", "box": [55, 632, 105, 652]}
+      ],
+      "expect": {"masked": {"value": [58, 635, 102, 649]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-weak-label-next-row-value-reread",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "승인", "box": [40, 600, 120, 620]},
+        {"text": "4938", "box": [55, 632, 105, 652]}
+      ],
+      "reread": [
+        {"text": "4938", "box": [55, 632, 105, 652]}
+      ],
+      "expect": {"masked": {"value": [58, 635, 102, 649]}, "visible": {}, "needsReview": true, "reasons": ["reread"]}
+    },
+    {
+      "id": "korean-weak-label-without-value-needs-review",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "승인", "box": [40, 600, 120, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {}, "needsReview": true, "reasons": ["unpairedLabel"]}
+    },
+    {
+      "id": "inline-value-price-then-fragment",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "承認番号 493", "box": [40, 600, 140, 620]},
+        {"text": "¥320", "box": [155, 600, 187, 620]},
+        {"text": "38", "box": [201, 600, 231, 620]}
+      ],
+      "expect": {"masked": {"tail": [203, 603, 229, 617]}, "visible": {"price": [158, 603, 184, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "multicolumn-review-coordinates",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "承認番号", "box": [40, 600, 120, 620]},
+        {"text": "4938", "box": [280, 600, 320, 620]},
+        {"text": "会員番号", "box": [590, 600, 670, 620]},
+        {"text": "87654321", "box": [750, 600, 850, 620]}
+      ],
+      "expect": {"masked": {"approval": [283, 603, 317, 617], "member": [753, 603, 847, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "multicolumn-overlapping-boxes",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "承認番号", "box": [40, 600, 120, 620]},
+        {"text": "4938", "box": [280, 600, 320, 620]},
+        {"text": "会員番号", "box": [620, 600, 740, 620]},
+        {"text": "87654321", "box": [730, 600, 830, 620]}
+      ],
+      "expect": {"masked": {"approval": [283, 603, 317, 617], "member": [743, 603, 827, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "multicolumn-overlapping-boxes-far-short-value",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "承認番号", "box": [40, 600, 120, 620]},
+        {"text": "512", "box": [400, 600, 430, 620]},
+        {"text": "会員番号", "box": [620, 600, 740, 620]},
+        {"text": "87654321", "box": [730, 600, 830, 620]}
+      ],
+      "expect": {"masked": {"member": [743, 603, 827, 617]}, "visible": {}, "needsReview": true, "reasons": ["unpairedLabel"]}
+    },
+    {
+      "id": "korean-status-word-and-separate-number-kept",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "lines": [
+        {"text": "예약 확정", "box": [40, 600, 140, 620]},
+        {"text": "12", "box": [160, 600, 190, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"status": [45, 603, 135, 617], "number": [163, 603, 187, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-merchant-number-kept",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "lines": [
+        {"text": "가맹점 번호 1384", "box": [40, 600, 250, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 245, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-merchant-number-no-space-kept",
+      "reviews": ["review:codex-pr14-2", "adr:0013"],
+      "lines": [
+        {"text": "가맹점번호 1384", "box": [40, 600, 250, 620]}
+      ],
+      "expect": {"masked": {}, "visible": {"line": [45, 603, 245, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-strong-approval-inline",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "승인번호 4938", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "korean-strong-booking-colon",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "lines": [
+        {"text": "예약번호: AB12", "box": [40, 600, 370, 620]}
+      ],
+      "expect": {"masked": {"line": [45, 603, 365, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "approval-with-distant-four-digit-value",
+      "reviews": ["review:codex-pr14", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "承認番号", "box": [40, 600, 120, 620]},
+        {"text": "4938", "box": [280, 600, 320, 620]}
+      ],
+      "expect": {"masked": {"approval": [283, 603, 317, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "multicolumn-single-digits-before-other-label",
+      "reviews": ["review:codex-pr14-3", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "承認番号 012", "box": [40, 600, 160, 620]},
+        {"text": "3", "box": [366, 600, 376, 620]},
+        {"text": "4", "box": [385, 600, 395, 620]},
+        {"text": "5", "box": [405, 600, 415, 620]},
+        {"text": "会員番号 87654321", "box": [440, 600, 560, 620]},
+        {"text": "¥3,280", "box": [600, 600, 680, 620]}
+      ],
+      "expect": {"masked": {"third": [368, 603, 374, 617], "fourth": [387, 603, 393, 617], "fifth": [407, 603, 413, 617]}, "visible": {"price": [602, 603, 678, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "weak-label-next-row-amount-kept",
+      "reviews": ["review:codex-pr14-3", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "결제 카드", "box": [40, 600, 140, 620]},
+        {"text": "VISA", "box": [165, 600, 220, 620]},
+        {"text": "결제 금액", "box": [40, 632, 140, 652]},
+        {"text": "1200", "box": [150, 632, 198, 652]}
+      ],
+      "expect": {"masked": {}, "visible": {"amount": [152, 635, 196, 649]}, "needsReview": true, "reasons": ["unpairedLabel"]}
+    },
+    {
+      "id": "weak-label-next-row-quantity-kept",
+      "reviews": ["review:codex-pr14-3", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "승인", "box": [40, 600, 140, 620]},
+        {"text": "완료", "box": [165, 600, 220, 620]},
+        {"text": "수량", "box": [40, 632, 140, 652]},
+        {"text": "120", "box": [150, 632, 198, 652]}
+      ],
+      "expect": {"masked": {}, "visible": {"quantity": [152, 635, 196, 649]}, "needsReview": true, "reasons": ["unpairedLabel"]}
+    },
+    {
+      "id": "random-weak-inline-two-digits-then-fragment",
+      "reviews": ["review:random-diff", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "승인 46", "box": [40, 600, 108, 620]},
+        {"text": "7", "box": [115, 600, 126, 620]}
+      ],
+      "expect": {"masked": {"line": [42, 603, 106, 617], "tail": [117, 603, 124, 617]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "random-digit-after-price-needs-review",
+      "reviews": ["review:random-diff", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "회원 6268", "box": [40, 632, 130, 652]},
+        {"text": "¥320", "box": [160, 634, 204, 654]},
+        {"text": "0", "box": [219, 632, 230, 652]}
+      ],
+      "expect": {"masked": {"line": [42, 635, 128, 649]}, "visible": {"price": [162, 637, 202, 651]}, "needsReview": true, "reasons": ["unpairedLabel"]}
+    },
+    {
+      "id": "random-next-row-value-beside-value-box",
+      "reviews": ["review:random-diff", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "승인", "box": [388, 600, 428, 624]},
+        {"text": "AB8972", "box": [64, 630, 130, 646]},
+        {"text": "119", "box": [399, 629, 432, 645]}
+      ],
+      "expect": {"masked": {"value": [401, 632, 430, 642]}, "visible": {}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "random-field-value-after-inline-weak-label",
+      "reviews": ["review:random-diff", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "회원 3849", "box": [40, 597, 130, 621]},
+        {"text": "결제 금액", "box": [166, 597, 252, 621]},
+        {"text": "1200", "box": [296, 598, 340, 622]}
+      ],
+      "expect": {"masked": {"line": [42, 600, 128, 618]}, "visible": {"amount": [298, 601, 338, 619]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "random-field-value-left-of-label",
+      "reviews": ["review:random-diff", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "수량", "box": [40, 657, 80, 681]},
+        {"text": "120", "box": [91, 662, 124, 686]},
+        {"text": "결제 카드 3300", "box": [136, 662, 272, 686]}
+      ],
+      "expect": {"masked": {"line": [138, 665, 270, 683]}, "visible": {"quantity": [93, 665, 122, 683]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "random-digit-overlapping-field-name",
+      "reviews": ["review:random-diff", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "Member", "box": [269, 600, 335, 620]},
+        {"text": "8447", "box": [350, 600, 394, 620]},
+        {"text": "1", "box": [400, 600, 411, 620]},
+        {"text": "Qty", "box": [408, 600, 441, 620]},
+        {"text": "3", "box": [450, 600, 461, 620]}
+      ],
+      "expect": {"masked": {"value": [352, 603, 392, 617], "tail": [402, 603, 407, 617]}, "visible": {"quantity": [452, 603, 459, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "random-other-label-inline-number-is-not-pair",
+      "reviews": ["review:random-diff", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "카드번호", "box": [40, 602, 120, 618]},
+        {"text": "승인번호 334522", "box": [225, 601, 377, 617]},
+        {"text": "6585", "box": [50, 661, 94, 681]}
+      ],
+      "expect": {"masked": {"approval": [227, 604, 375, 614]}, "visible": {}, "needsReview": true, "reasons": ["unpairedLabel"]}
+    },
+    {
+      "id": "quantity-beside-card-margin",
+      "reviews": ["review:codex-pr14-4", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "Qty", "box": [40, 635, 73, 655]},
+        {"text": "3", "box": [78, 632, 89, 652]},
+        {"text": "결제 카드 0019", "box": [92, 633, 228, 653]}
+      ],
+      "expect": {"masked": {"card": [186, 636, 226, 650]}, "visible": {"quantity": [80, 635, 87, 649]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "quantity-touching-card-box",
+      "reviews": ["review:codex-pr14-4", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "Qty", "box": [40, 635, 73, 655]},
+        {"text": "3", "box": [78, 632, 89, 652]},
+        {"text": "결제 카드 0019", "box": [88, 633, 224, 653]}
+      ],
+      "expect": {"masked": {"card": [182, 636, 222, 650]}, "visible": {"quantity": [80, 635, 87, 649]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "quantity-overlapped-by-weak-label",
+      "reviews": ["review:codex-pr14-4", "review:codex-pr14-5", "review:codex-pr14-6", "adr:0013"],
+      "note": "수량 잉크 [226,661,233,679] 중 예약 591 민감 OCR 상자 [225,663,304,687] 안의 112픽셀은 불변식 1(민감 상자는 항상 다 덮음)에 따라 덮이는 상자 겹침 불가피다. 상자 밖 위쪽 두 행 14픽셀은 보존한다.",
+      "size": [1000, 1000],
+      "lines": [
+        {"text": "数量", "box": [173, 662, 213, 686]},
+        {"text": "2", "box": [224, 658, 235, 682]},
+        {"text": "예약 591", "box": [225, 663, 304, 687]}
+      ],
+      "expect": {"masked": {"booking": [273, 666, 302, 684]}, "visible": {"quantityOutsideBooking": [226, 661, 233, 663]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "separate-number-overlapping-merchant-number",
+      "reviews": ["review:codex-pr14-5", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text":  "가맹점 번호 1384", "box":  [40, 600, 220, 620]},
+        {"text":  "12345678", "box":  [190, 600, 310, 620]}
+      ],
+      "expect": {"masked": {"front": [192, 603, 218, 617], "rest": [218, 603, 308, 617]}, "visible": {"merchant": [42, 603, 188, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "mixed-number-part-overlapping-merchant-number",
+      "reviews": ["review:codex-pr14-5", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text":  "가맹점 번호 1384", "box":  [40, 600, 220, 620]},
+        {"text":  "承認番号 12345678 ¥320", "box":  [85, 600, 405, 620],  "numberBox":  [190, 600, 310, 620]}
+      ],
+      "expect": {"masked": {"front": [192, 603, 218, 617], "rest": [218, 603, 308, 617]}, "visible": {"merchant": [42, 603, 83, 617]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "random-price-overlapping-number-box-outside-kept",
+      "reviews": ["review:codex-pr14-5", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text":  "회원", "box":  [40, 600, 80, 620]},
+        {"text":  "6086", "box":  [188, 597, 232, 617]},
+        {"text":  "1,200円", "box":  [225, 603, 300, 623]},
+        {"text":  "₩24,100", "box":  [333, 599, 410, 619]},
+        {"text":  "수량", "box":  [40, 629, 80, 649]},
+        {"text":  "120", "box":  [98, 629, 131, 649]}
+      ],
+      "expect": {"masked": {"number": [190, 600, 230, 614]}, "visible": {"priceOutside": [232, 606, 298, 620], "won": [335, 602, 408, 616], "quantity": [100, 632, 129, 646]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "random-total-overlapping-inline-value-outside-kept",
+      "reviews": ["review:codex-pr14-5", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text":  "승인 4976", "box":  [40, 597, 130, 617]},
+        {"text":  "合計 1,408円", "box":  [125, 601, 246, 621]}
+      ],
+      "expect": {"masked": {"number": [88, 600, 128, 614]}, "visible": {"totalOutside": [130, 604, 244, 618]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "tilted-card-box-beside-quantity",
+      "reviews": ["review:codex-pr14-5", "adr:0013"],
+      "size": [1000, 1000],
+      "lines": [
+        {"text":  "Qty", "box":  [40, 635, 73, 655]},
+        {"text":  "3", "box":  [78, 632, 89, 652]},
+        {"text":  "결제 카드 0019", "box":  [92, 633, 228, 656],  "corners":  [[92, 633],  [228, 636],  [228, 656],  [92, 653]]}
+      ],
+      "expect": {"masked": {"card": [186, 638, 226, 652]}, "visible": {"quantity": [80, 635, 87, 649]}, "needsReview": false, "reasons": []}
+    },
+    {
+      "id": "user-selected-line-overlapping-store-number",
+      "reviews": ["review:codex-pr14-6", "adr:0013"],
+      "note": "select는 검토 화면에서 사용자가 추천 밖에서 켠 줄이다(사용자 띠 없음). 사용자가 켠 줄은 숫자가 없어도 가려야 할 상자라, 겹친 가맹점 번호 상자를 되돌린 뒤에 칠한다. 줄 밖 범위는 iOS가 행 전체 띠, Android가 보존 상자 앞에서 멈추는 띠라 두 앱이 달라 기대에 넣지 않는다.",
+      "size": [1000, 1000],
+      "select": ["가상 이름"],
+      "lines": [
+        {"text": "가맹점 번호 1384", "box": [40, 600, 220, 620]},
+        {"text": "가상 이름", "box": [190, 600, 275, 620]}
+      ],
+      "expect": {"masked": {"nameOverStoreBox": [192, 603, 218, 617], "name": [190, 600, 275, 620]}, "visible": {}, "needsReview": false, "reasons": []}
     }
   ]
 }

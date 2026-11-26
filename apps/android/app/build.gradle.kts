@@ -73,6 +73,9 @@ tasks.withType<Test>().configureEach {
     inputs
         .file(layout.projectDirectory.file("../../fixtures/masking/common-policy.json"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs
+        .dir(layout.projectDirectory.dir("../../fixtures/korean"))
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 dependencies {
@@ -88,6 +91,7 @@ dependencies {
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.navigation3.ui)
     implementation(libs.mlkit.text.japanese)
+    implementation(libs.mlkit.text.korean)
     debugImplementation(libs.compose.ui.tooling)
 
     testImplementation(libs.junit)

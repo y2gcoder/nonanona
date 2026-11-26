@@ -3,9 +3,20 @@ import Foundation
 /// 가림 전용 문자 판정. 품목 추출의 OCR 전문과 문자열은 바꾸지 않는다.
 struct SensitiveText {
   private static let labels = expression(
-    #"(?<![A-Z])(?:TEL|phone|card|reservation|booking|PIN|approval|authori[sz]ation|member(?:ship)?|AUTH|APPR)(?![A-Z])|電話|カ[ー一\-]ド|会員|承認|予約\s*(?:番号|ID|コード|No)|お客様\s*番号|會員\s*(?:號碼|编号)|카드\s*번호|승인\s*번호|회원\s*번호|예약\s*번호|전화(?:\s*번호)?"#
+    #"(?<![A-Z])(?:TEL|phone|card|reservation|booking|PIN|approval|authori[sz]ation|member(?:ship)?|AUTH|APPR)(?![A-Z])|電話|カ[ー一\-]ド|会員|承認|予約\s*(?:番号|ID|コード|No)|お客様\s*番号|會員\s*(?:號碼|编号)|카드\s*번호|승인\s*번호|회원\s*번호|예약\s*번호|전화(?:\s*번호)?|연락처"#
   )
-  private static let qualifiers = expression(#"^\s*(?:番号|號碼|CODE|NO\.?|ID)?[\s:：.#\-]*"#)
+  /// "번호" 없이 읽힌 한국어 라벨 낱말(OCR이 "번호"를 빠뜨렸거나 따로 읽은 경우, ADR-0013, Android와 같다).
+  /// - 바로 뒤에 번호 값(숫자 2자리 이상이 든 영문·숫자)이 붙으면 라벨이다(`승인 4938`, `승인 46`, `예약: AB12`).
+  /// - 줄이 그 낱말로 끝나면(`승인`, `결제 카드`) 값이 따로 읽힌 독립 라벨이다. `SensitiveLines`가 강한 라벨처럼 같은 행·다음 행에서
+  ///   값을 찾고, 못 찾으면 확인을 안내한다.
+  /// - 문구 속 낱말(`예약 확정`, `가상카드 일시불`, `예약 2명`)은 라벨이 아니다.
+  /// 사업자(등록)·등록·가맹점 번호는 가게 정보라 띄어쓰기와 상관없이 뺀다.
+  private static let weakLabels = expression(#"카드|승인|회원|예약|번호"#)
+  private static let storeNumber = expression(#"(?:사업자\s*(?:등록\s*)?|등록\s*|가맹점\s*)번호"#)
+  private static let weakEnding = expression(#"^\s*[:：.#\-]?\s*$"#)
+  private static let weakValue = expression(
+    #"^\s*[:：.#\-]?\s*(?:번호\s*[:：.#\-]?\s*)?([A-Z0-9*●•#×][A-Z0-9*●•#×\-‐–−|_]*)"#)
+  private static let qualifiers = expression(#"^\s*(?:番号|號碼|번호|CODE|NO\.?|ID)?[\s:：.#\-]*"#)
   private static let masked =
     #"(?:\d{4}[\s\p{Pd}|/_−]+)?\d{0,3}(?:[*●•X×#][\s\p{Pd}|/_−]*){2,}\d(?:[\s\p{Pd}|/_−]*\d){1,3}(?!\d)"#
   private static let maskedCard = expression(masked)
@@ -17,9 +28,9 @@ struct SensitiveText {
   private static let labelledValue = expression(
     "^(?:" + masked + "|" + phone + #"|[A-Z0-9*●•#×]+(?:[-‐–−|_][A-Z0-9*●•#×]+|\s+\d{2,})*)"#)
   // Vision은 날짜의 월·일 두 자리 사이에도 가끔 공백을 넣는다.
-  private static let dates = expression(#"(?<!\d)\d{4}\s*[-/.年]\s*\d(?:\s*\d)?\s*[-/.月]\s*\d(?:\s*\d)?(?!\d)"#)
+  private static let dates = expression(#"(?<!\d)\d{4}\s*[-/.年년]\s*\d(?:\s*\d)?\s*[-/.月월]\s*\d(?:\s*\d)?(?!\d)"#)
   private static let amounts = expression(
-    #"[¥$€£₩]\s*\d[\d,.]*|\d[\d,.]*\s*(?:円|JPY\b|USD\b|KRW\b|EUR\b)|(?:合計|お会計|支払額|決済金額|小計|税|割引|釣銭|お預り|total)\s*\d[\d,.]*"#
+    #"[¥$€£₩]\s*\d[\d,.]*|\d[\d,.]*\s*(?:円|원|JPY\b|USD\b|KRW\b|EUR\b)|(?:合計|お会計|支払額|決済金額|小計|税|割引|釣銭|お預り|total)\s*\d[\d,.]*"#
   )
   private static let business = expression(#"住所|登録番号|レジ(?:\s|ID|NO|番号)|\b(?:register|terminal)\s*(?:ID|NO|#)"#)
   private static let itemCode = expression(#"\bJAN\s*(?:コード\s*)?[:：]?\s*(?:\d{13}|\d{8})(?!\d)"#)
@@ -29,6 +40,8 @@ struct SensitiveText {
   private static let identifierToken = expression(#"[\p{L}\p{N}]+(?:[\p{Pd}|_/()][\p{L}\p{N}]+)*"#)
 
   let text: String
+  /// 값이 따로 읽힌 독립 약한 라벨(줄이 약한 라벨 낱말로 끝난다). 강한 라벨 줄은 아니다.
+  let isWeakStandaloneLabel: Bool
   let labelRanges: [NSRange]
   let valueRanges: [NSRange]
   private let strongNumberRanges: [NSRange]
@@ -42,9 +55,31 @@ struct SensitiveText {
     text = normalized
     let units = normalized as NSString
     let range = NSRange(location: 0, length: units.length)
-    let labelRanges = Self.labels.matches(in: normalized, range: range).map(\.range)
+    let strongLabels = Self.labels.matches(in: normalized, range: range).map(\.range)
     let amounts = Self.amounts.matches(in: normalized, range: range)
     let boundaries = (Self.dates.matches(in: normalized, range: range) + amounts).map(\.range)
+    let stores = Self.storeNumber.matches(in: normalized, range: range).map(\.range)
+    let weakWords = Self.weakLabels.matches(in: normalized, range: range).map(\.range).filter { weak in
+      !(strongLabels + stores).contains { NSIntersectionRange($0, weak).length > 0 }
+    }
+    let weakLabels = weakWords.filter { weak in
+      let start = NSMaxRange(weak)
+      let tail = units.substring(from: start)
+      guard let hit = Self.weakValue.firstMatch(in: tail, range: NSRange(location: 0, length: tail.utf16.count))
+      else { return false }
+      let token = hit.range(at: 1)
+      let value = (tail as NSString).substring(with: token)
+      let shifted = NSRange(location: start + token.location, length: token.length)
+      return value.filter(\.isNumber).count >= 2
+        && !boundaries.contains { NSIntersectionRange($0, shifted).length > 0 }
+    }
+    let labelRanges = (strongLabels + weakLabels).sorted { $0.location < $1.location }
+    isWeakStandaloneLabel =
+      labelRanges.isEmpty
+      && weakWords.last.map { last in
+        let tail = units.substring(from: NSMaxRange(last))
+        return Self.weakEnding.firstMatch(in: tail, range: NSRange(location: 0, length: tail.utf16.count)) != nil
+      } == true
     let item = Self.itemCode.firstMatch(in: normalized, range: range) != nil
     let businessField = item || Self.business.firstMatch(in: normalized, range: range) != nil
     let commercial = item || !amounts.isEmpty || Self.firstPassField.firstMatch(in: normalized, range: range) != nil
@@ -82,6 +117,27 @@ struct SensitiveText {
   }
 
   var hasLabel: Bool { !labelRanges.isEmpty }
+  private static let fieldNames = expression(
+    #"수량|数量|個数|(?<![A-Z])QTY(?![A-Z])|금액|金額|단가|単価|가격|価格|小計|소계|합계|合計|お会計|결제\s*수단|상태|状態"#)
+
+  /// 값을 가진 다른 필드의 이름(수량·금액·소계·합계·결제수단·상태 등, 숫자 없음). 같은 행·다음 행 값의 소유자다(Android와 같다).
+  var isFieldName: Bool {
+    !hasLabel && !text.contains { $0.isNumber }
+      && Self.fieldNames.firstMatch(in: text, range: NSRange(location: 0, length: text.utf16.count)) != nil
+  }
+
+  private static let storeInfo = expression(#"(?:사업자\s*(?:등록\s*)?|등록\s*|가맹점\s*)번호|레지"#)
+
+  /// 한국어 가게 정보(가맹점·사업자·등록 번호, 레지). 가림 여백이 닿지 않게 지킨다(ADR-0005·0013).
+  var isStoreInfo: Bool {
+    !hasLabel && Self.storeInfo.firstMatch(in: text, range: NSRange(location: 0, length: text.utf16.count)) != nil
+  }
+
+  /// 숫자 없이 글자(한글·한자·가나·영문)만 든 필드명 상자. 다음 행 값이 그 행의 다른 필드 것인지 볼 때 쓴다.
+  var hasFieldName: Bool { text.contains { $0.isLetter } && !text.contains { $0.isNumber } }
+
+  /// "번호 4938"처럼 약한 라벨 뒤에 따로 읽힌 "번호…" 조각.
+  var startsWithNumberWord: Bool { text.drop { $0.isWhitespace }.hasPrefix("번호") }
   var hasStrongNumber: Bool { !strongNumberRanges.isEmpty || (!containsBookingForm && isFragment(minDigits: 6)) }
   var hasBookingCode: Bool { !bookingRanges.isEmpty }
   var hasNumber: Bool { hasStrongNumber || hasBookingCode }

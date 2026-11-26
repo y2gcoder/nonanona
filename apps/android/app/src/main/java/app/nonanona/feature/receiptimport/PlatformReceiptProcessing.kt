@@ -11,7 +11,9 @@ import android.media.ExifInterface
 import com.google.android.gms.tasks.Tasks
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.japanese.JapaneseTextRecognizerOptions
+import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.ExecutionException
@@ -96,24 +98,20 @@ internal object ReceiptImages {
         }
 }
 
-/** ML Kit 번들 일본어 모델. 기기 안에서만 동작한다(native-batch-import 실험에서 옮김). */
+/**
+ * ML Kit 번들 일본어·한국어 모델(ADR-0013). 기기 안에서만 동작하고 모델을 내려받지 않는다.
+ * 사진마다 두 모델로 모두 읽고 [OcrLanguageChoice.choose]로 한쪽 결과를 고른다. 일본어 모델은 한글을 가나·한자로,
+ * 한국어 모델은 한자·가나를 한글로 잘못 읽어 한 모델의 결과만으로는 다른 언어 사진을 가려낼 수 없었다(ADR-0013의 측정).
+ * 모델은 처음 쓸 때 만들고, 한 모델의 준비·읽기가 실패해도 다른 모델의 결과를 쓴다.
+ */
 class MlKitReceiptRecognizer : ReceiptRecognizer {
-    private val client = TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build())
+    private val japanese by lazy { TextRecognition.getClient(JapaneseTextRecognizerOptions.Builder().build()) }
+    private val korean by lazy { TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build()) }
 
     override fun recognize(file: File): OcrResult {
         val bitmap = ReceiptImages.decode(file)
-        // 긴 영수증은 겹치는 타일로 나눠 읽고 합친다(한 번에 읽으면 엔진이 한 구간을 통째로 건너뛸 수 있다).
-        val tiles = OcrTiles.plan(bitmap.width, bitmap.height)
-        val merged =
-            OcrTiles.merge(
-                bitmap.width,
-                bitmap.height,
-                tiles.map { tile ->
-                    val part = if (tiles.size == 1) bitmap else Bitmap.createBitmap(bitmap, 0, tile.top, bitmap.width, tile.height)
-                    tile to read(part)
-                },
-            )
-        val lines = merged.lines
+        val lines = OcrLanguageChoice.choose({ read(bitmap, OcrScript.Japanese) }, { read(bitmap, OcrScript.Korean) }).lines
+        OcrLanguageChoice.checkInterrupted()
         val perLine =
             PhotoQuality.measureLines(lines, bitmap.width, bitmap.height) { x, y, rw, rh ->
                 val argb = IntArray(rw * rh)
@@ -126,8 +124,30 @@ class MlKitReceiptRecognizer : ReceiptRecognizer {
         return OcrResult(bitmap.width, bitmap.height, lines, PhotoQuality.median(perLine.values), perLine)
     }
 
+    /**
+     * 한 모델로 사진 전체를 읽는다(품질 측정 전). 긴 영수증은 겹치는 타일로 나눠 읽고 합친다
+     * (한 번에 읽으면 엔진이 한 구간을 통째로 건너뛸 수 있다). 측정 하네스도 이 함수로 모델별 결과와 시간을 잰다.
+     */
+    internal fun read(
+        bitmap: Bitmap,
+        script: OcrScript,
+    ): OcrResult {
+        val client =
+            when (script) {
+                OcrScript.Japanese -> japanese
+                OcrScript.Korean -> korean
+            }
+        return OcrTiles.read(bitmap.width, bitmap.height) { tile ->
+            val whole = tile.top == 0 && tile.height == bitmap.height
+            read(if (whole) bitmap else Bitmap.createBitmap(bitmap, 0, tile.top, bitmap.width, tile.height), client)
+        }
+    }
+
     /** 비트맵 하나(사진 전체 또는 타일)를 읽어 그 비트맵 안 0~1 좌표로. */
-    private fun read(bitmap: Bitmap): OcrResult {
+    private fun read(
+        bitmap: Bitmap,
+        client: TextRecognizer,
+    ): OcrResult {
         val result =
             try {
                 Tasks.await(client.process(InputImage.fromBitmap(bitmap, 0)))
@@ -158,7 +178,17 @@ class MlKitReceiptRecognizer : ReceiptRecognizer {
                         } else {
                             null
                         }
-                    OcrLine(i, line.text, b.left / w, b.top / h, b.width() / w, b.height() / h, corners, numberBox)
+                    OcrLine(
+                        i,
+                        line.text,
+                        b.left / w,
+                        b.top / h,
+                        b.width() / w,
+                        b.height() / h,
+                        corners,
+                        numberBox,
+                        line.confidence.toDouble(),
+                    )
                 }
         return OcrResult(bitmap.width, bitmap.height, lines)
     }
@@ -181,19 +211,35 @@ object CanvasReceiptFlattener : ReceiptFlattener {
                 style = Paint.Style.FILL
                 isAntiAlias = false
             }
-        shapes(source.width, source.height).forEach { shape ->
-            when (shape) {
-                is MaskShape.Rect -> {
-                    canvas.drawRect(shape.left.toFloat(), shape.top.toFloat(), shape.right.toFloat(), shape.bottom.toFloat(), paint)
-                }
 
-                is MaskShape.Quad -> {
-                    val path = Path()
-                    path.moveTo(shape.xs[0].toFloat(), shape.ys[0].toFloat())
-                    for (i in 1 until 4) path.lineTo(shape.xs[i].toFloat(), shape.ys[i].toFloat())
-                    path.close()
-                    canvas.drawPath(path, paint)
+        fun path(shape: MaskShape): Path =
+            Path().apply {
+                when (shape) {
+                    is MaskShape.Rect -> {
+                        addRect(shape.left.toFloat(), shape.top.toFloat(), shape.right.toFloat(), shape.bottom.toFloat(), Path.Direction.CW)
+                    }
+
+                    is MaskShape.Quad -> {
+                        moveTo(shape.xs[0].toFloat(), shape.ys[0].toFloat())
+                        for (i in 1 until 4) lineTo(shape.xs[i].toFloat(), shape.ys[i].toFloat())
+                        close()
+                    }
+
+                    is MaskShape.Restore -> {
+                        addPath(path(shape.area))
+                    }
                 }
+            }
+        // 칠하는 순서대로: 검정 도형은 칠하고, 되돌림 영역은 원본 픽셀을 다시 그린다.
+        shapes(source.width, source.height).forEach { shape ->
+            if (shape is MaskShape.Restore) {
+                canvas.save()
+                canvas.clipPath(path(shape.area))
+                // 원본(불투명)만 다시 그린다. 흰색을 먼저 칠하면 클립 경계에서 원본과 섞인다.
+                canvas.drawBitmap(source, 0f, 0f, null)
+                canvas.restore()
+            } else {
+                canvas.drawPath(path(shape), paint)
             }
         }
         return ByteArrayOutputStream().also { check(output.compress(Bitmap.CompressFormat.PNG, 100, it)) }.toByteArray()

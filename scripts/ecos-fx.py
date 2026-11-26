@@ -25,6 +25,7 @@ import os
 import re
 import subprocess
 import sys
+import tomllib
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -32,7 +33,6 @@ from zoneinfo import ZoneInfo
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / "supabase" / "fixtures" / "fx-jpy-synthetic.json"
-DB_CONTAINER = "supabase_db_nonanona-local"
 KST = ZoneInfo("Asia/Seoul")
 
 # ECOS 개발 명세: https://ecos.bok.or.kr/api/#/DevGuide/DevSpeciflcation (확인일 2026-11-24)
@@ -112,7 +112,9 @@ def ingest_live(response, start, end):
 
 
 def psql(sql):
-    r = subprocess.run(["docker", "exec", "-i", DB_CONTAINER, "psql", "-U", "postgres", "-tAq", "-v", "ON_ERROR_STOP=1"],
+    with (ROOT / "supabase" / "config.toml").open("rb") as config:
+        project_id = tomllib.load(config)["project_id"]
+    r = subprocess.run(["docker", "exec", "-i", f"supabase_db_{project_id}", "psql", "-U", "postgres", "-tAq", "-v", "ON_ERROR_STOP=1"],
                        input=sql, capture_output=True, text=True)
     return r.returncode, r.stdout.strip(), r.stderr.strip()
 

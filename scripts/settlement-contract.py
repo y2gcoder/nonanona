@@ -76,7 +76,7 @@ def new_trip(host_uid, member_uid):
     return r[0]["id"]
 
 
-DB_CONTAINER = "supabase_db_nonanona-local"
+DB_CONTAINER = f"supabase_db_{lb.PROJECT_ID}"
 
 
 def psql(sql):

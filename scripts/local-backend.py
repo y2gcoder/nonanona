@@ -24,6 +24,7 @@ import secrets
 import subprocess
 import sys
 import time
+import tomllib
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -34,12 +35,14 @@ ANDROID_CONFIG = ROOT / "apps" / "android" / "local-backend.properties"
 IOS_CONFIG = ROOT / "apps" / "ios" / "Config" / "Local.xcconfig"
 FIXTURE = ROOT / "supabase" / "fixtures" / "local-trip-invites.sql"
 SETTLEMENT_FIXTURE = ROOT / "supabase" / "fixtures" / "local-settlement-trip.sql"
-PROJECT_ID = "nonanona-local"
+with (ROOT / "supabase" / "config.toml").open("rb") as config:
+    CONFIG = tomllib.load(config)
+PROJECT_ID = CONFIG["project_id"]
 # 가상 계정. example.com은 예약된 도메인이라 실제 주소가 아니다.
 HOST = ("host.local@example.com", "다라")
 MEMBER = ("member.local@example.com", "가나")
 # 호스트에서 본 API 주소와 각 기기에서 본 주소(Android 에뮬레이터는 10.0.2.2가 호스트다).
-API_PORT = 54321
+API_PORT = CONFIG["api"]["port"]
 DEVICE_URLS = {"ios": f"http://127.0.0.1:{API_PORT}", "android": f"http://10.0.2.2:{API_PORT}"}
 
 

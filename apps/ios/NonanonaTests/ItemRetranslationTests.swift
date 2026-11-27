@@ -163,8 +163,12 @@ struct ItemRetranslationTests {
     let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 402, height: 874))
     window.rootViewController = UIHostingController(rootView: Host(model: model, target: target))
     window.makeKeyAndVisible()
+    return (window, try await presentedSheet(in: window))
+  }
+
+  private func presentedSheet(in window: UIWindow) async throws -> UIViewController {
     try await until("시트가 떠야") { window.rootViewController?.presentedViewController != nil }
-    return (window, try #require(window.rootViewController?.presentedViewController))
+    return try #require(window.rootViewController?.presentedViewController)
   }
 
   private func detach(_ window: UIWindow) {
@@ -885,14 +889,17 @@ struct ItemRetranslationTests {
     gate.fail(["/retranslations/"])
     retranslation.close(target)
     try await until("삭제 실패를 알려야") { retranslation.sessions[target]?.failure == .clear(ending: true) }
-    let (window, sheet) = try await attach(retranslation, target)
+    let (window, resultsSheet) = try await attach(retranslation, target)
     defer { detach(window) }
-    try await until("삭제 실패 단추는 ‘다시 시도’여야") { Self.labels(sheet).contains("다시 시도") }
-    #expect(Self.labels(sheet).contains("품목을 기기에 저장하지 못했어요."))
-    #expect(!Self.labels(sheet).contains("다시 저장"), "‘다시 저장’은 결과 저장과 적용 실패에만 쓴다")
+    try await until("삭제 실패 단추는 ‘다시 시도’여야") { Self.labels(resultsSheet).contains("다시 시도") }
+    #expect(Self.labels(resultsSheet).contains("품목을 기기에 저장하지 못했어요."))
+    #expect(!Self.labels(resultsSheet).contains("다시 저장"), "‘다시 저장’은 결과 저장과 적용 실패에만 쓴다")
     gate.fail([])
-    try await until("‘다시 시도’를 눌러야") { Self.press("다시 시도", in: sheet) }
-    try await until("다시 지우고 끝나야") { retranslation.sessions[target] == nil }
+    try await until("‘다시 시도’를 눌러야") { Self.press("다시 시도", in: resultsSheet) }
+    // 모델 세션이 끝난 뒤 SwiftUI의 시트 닫힘도 완료되어야 다음 시트를 열 수 있다.
+    try await until("다시 지우고 결과 시트가 닫혀야") {
+      retranslation.sessions[target] == nil && window.rootViewController?.presentedViewController == nil
+    }
     #expect(!FileManager.default.fileExists(atPath: file.path))
 
     // 받지 못한 응답: 실패 안내 단계에서 보내기 전 표시를 지우지 못했다.
@@ -906,12 +913,14 @@ struct ItemRetranslationTests {
       retranslation.sessions[target]?.phase == .unavailable
         && retranslation.sessions[target]?.failure == .clear(ending: false)
     }
+    let failureSheet = try await presentedSheet(in: window)
     try await until("삭제 실패의 ‘다시 시도’만 보여야") {
-      Self.labels(sheet).filter { $0 == "다시 시도" }.count == 1 && !Self.labels(sheet).contains("다시 저장")
+      let labels = Self.labels(failureSheet)
+      return labels.filter { $0 == "다시 시도" }.count == 1 && !labels.contains("다시 저장")
     }
     #expect(FileManager.default.fileExists(atPath: file.path))
     gate.fail([])
-    try await until("‘다시 시도’를 눌러야") { Self.press("다시 시도", in: sheet) }
+    try await until("‘다시 시도’를 눌러야") { Self.press("다시 시도", in: failureSheet) }
     try await until("다시 지워야") {
       retranslation.sessions[target]?.failure == nil && retranslation.sessions[target]?.saving == false
     }

@@ -508,6 +508,13 @@ private fun Fields(
         Field(R.string.review_amount, content.review.amount, problem(content, FieldProblem.Amount), "review_amount", KeyboardType.Decimal) {
             actions.edit(ReviewEdit.Amount(it))
         }
+        if (content.proposal?.needsTotalReview == true) {
+            Text(
+                stringResource(R.string.review_total_check),
+                style = TextRoles.caption,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         Text(stringResource(R.string.review_currency), style = TextRoles.supporting)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(Spacing.s)) {
             ReviewForm.currencies.forEach { (code, _) ->

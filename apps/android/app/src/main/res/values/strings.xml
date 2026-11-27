@@ -104,6 +104,7 @@
     <string name="review_merchant">가게</string>
     <string name="review_date">날짜(예: 2026-11-03 또는 20261103)</string>
     <string name="review_amount">금액</string>
+    <string name="review_total_check">기울어진 사진에서 찾은 합계예요. 원본의 합계와 비교해 주세요.</string>
     <string name="review_currency">통화</string>
     <string name="review_merchant_none">없음</string>
     <string name="review_currency_note">통화는 영수증에 적힌 통화예요. 원화 금액은 여행방에서 방장이 확인해요.</string>

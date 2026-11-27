@@ -296,7 +296,7 @@ public actor ReceiptProcessor {
             if hooks.dropSuggestionsAtPosition == item.position {
               proposal = OCRProposal(
                 ocr: proposal.ocr, fields: proposal.fields, suggestedMaskLineIDs: [],
-                needsMaskReview: proposal.needsMaskReview)
+                needsMaskReview: proposal.needsMaskReview, needsTotalReview: proposal.needsTotalReview)
             }
             try cancellation.check()
             if proposal.needsMaskReview == false {

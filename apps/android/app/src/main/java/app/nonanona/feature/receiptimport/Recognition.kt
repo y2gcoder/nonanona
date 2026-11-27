@@ -44,6 +44,8 @@ data class OcrProposal(
     val suggestedMaskLineIds: List<Int>,
     /** 자동 가림이 불확실한지(가림 확인 필요). 예전 제안 파일에는 없어 [MaskDoubt.Outdated]로 읽는다. */
     val maskCheck: MaskCheck = MaskCheck(),
+    /** 행 보정 뒤에만 연결된 합계는 원본에서 확인하도록 안내한다. */
+    val needsTotalReview: Boolean = false,
 ) {
     fun toJson(): String =
         JSONObject()
@@ -68,6 +70,7 @@ data class OcrProposal(
             ).put("fields", fields.toJson())
             .put("suggestedMaskLineIds", JSONArray(suggestedMaskLineIds))
             .put("maskCheck", maskCheck.toJson())
+            .put("needsTotalReview", needsTotalReview)
             .toString()
 
     companion object {
@@ -99,6 +102,7 @@ data class OcrProposal(
                 (0 until masks.length()).map { masks.getInt(it) },
                 // 예전 형식(가림 확인 판정 전)의 제안은 확인 필요로 연다. 가림 좌표는 굽을 때 지금 디코딩 크기로 투영한다.
                 o.optJSONObject("maskCheck")?.let(MaskCheck::fromJson) ?: MaskCheck(setOf(MaskDoubt.Outdated)),
+                o.optBoolean("needsTotalReview"),
             )
         }
     }
@@ -124,8 +128,9 @@ object ProposalBuilder {
 
     fun make(ocr: OcrResult): OcrProposal {
         if (ocr.lines.isEmpty()) throw ProcessingException(ProcessingFailure.Unreadable)
-        val total = total(ocr.lines) ?: throw ProcessingException(ProcessingFailure.MissingTotal)
-        val date = date(ocr.lines) ?: throw ProcessingException(ProcessingFailure.MissingDate)
+        val rows = ProposalRows(ocr)
+        val total = total(rows) ?: throw ProcessingException(ProcessingFailure.MissingTotal)
+        val date = date(rows) ?: throw ProcessingException(ProcessingFailure.MissingDate)
         // 민감 라벨 줄과 같은 기울기 행·다음 행의 번호 조각, 라벨 없는 번호 형식(MaskCheck.kt).
         val selection = MaskSelector.select(ocr)
         val skew = selection.skew?.let(MaskSelector::degrees)
@@ -148,6 +153,7 @@ object ProposalBuilder {
             ),
             selection.lineIds,
             MaskCheck(doubts, skew, ocr.quality, spread, sensitive),
+            needsTotalReview = total.needsReview,
         )
     }
 
@@ -158,17 +164,17 @@ object ProposalBuilder {
      * 지출 날짜: 결제일 라벨 줄의 날짜, 없으면 그 줄과 같은 행 오른쪽 상자의 날짜(가까운 순), 결제일 라벨이 없거나 날짜를 못 찾으면
      * 위에서부터 첫 날짜.
      */
-    fun date(lines: List<OcrLine>): String? {
-        for (line in lines.filter { paymentDateLabel.containsMatchIn(it.text) }) {
+    private fun date(rows: ProposalRows): String? {
+        val labels = rows.lines.filter { paymentDateLabel.containsMatchIn(it.text) }
+        for (line in labels) {
             isoDate(line.text)?.let { return it }
-            val mid = line.y + line.height / 2
-            lines
-                .filter { it.id != line.id && it.x > line.x && abs(it.y + it.height / 2 - mid) < line.height / 2 }
+            rows
+                .observedRightOf(line)
                 .sortedBy { it.x }
                 .firstNotNullOfOrNull { isoDate(it.text) }
                 ?.let { return it }
         }
-        return lines.firstNotNullOfOrNull { isoDate(it.text) }
+        return rows.correctedValue(labels) { isoDate(it.text) } ?: rows.lines.firstNotNullOfOrNull { isoDate(it.text) }
     }
 
     fun isoDate(text: String): String? {
@@ -180,23 +186,65 @@ object ProposalBuilder {
     }
 
     /** 합계 금액과 그 금액을 읽은 글자(통화 판정용). */
-    data class Total(
+    private data class Total(
         val amount: Long,
         val text: String,
+        val needsReview: Boolean = false,
     )
 
-    fun total(lines: List<OcrLine>): Total? {
-        val keyword = Regex(TOTAL, RegexOption.IGNORE_CASE)
-        for (line in lines.filter { keyword.containsMatchIn(it.text) && !subtotal.containsMatchIn(it.text) }) {
-            number(Regex("(?:$TOTAL)\\D*?([0-9][0-9,，.]*)", RegexOption.IGNORE_CASE), line.text)?.let { return Total(it, line.text) }
-            // OCR이 "合計"와 금액을 같은 행의 두 상자로 나눈 경우.
-            val mid = line.y + line.height / 2
-            lines
-                .filter { it.id != line.id && it.x > line.x && abs(it.y + it.height / 2 - mid) < line.height / 2 }
-                .firstNotNullOfOrNull { other -> number(Regex("\\D*?([0-9][0-9,，.]*)"), other.text)?.let { Total(it, other.text) } }
+    private val totalKeyword = Regex(TOTAL, RegexOption.IGNORE_CASE)
+    private val labeledNumber = Regex("(?:$TOTAL)\\D*?([0-9][0-9,，.]*)", RegexOption.IGNORE_CASE)
+    private val firstNumber = Regex("([0-9][0-9,，.]*)")
+
+    // 보정으로 추가하는 후보는 금액 한 상자다. 날짜나 다른 라벨에서 숫자만 떼지 않는다.
+    private val amountBox = Regex("""^(?:[¥￥₩W\\]|JPY|KRW)?\s*[0-9][0-9,，.]*\s*(?:円|원|JPY|KRW)?$""", RegexOption.IGNORE_CASE)
+
+    private fun total(rows: ProposalRows): Total? {
+        val labels = rows.lines.filter { totalKeyword.containsMatchIn(it.text) && !subtotal.containsMatchIn(it.text) }
+        for (line in labels) {
+            number(labeledNumber, line.text)?.let { return Total(it, line.text) }
+            rows
+                .observedRightOf(line)
+                .firstNotNullOfOrNull { number(firstNumber, it.text)?.let { amount -> Total(amount, it.text) } }
                 ?.let { return it }
         }
-        return null
+        return rows.correctedValue(labels) { other ->
+            if (!amountBox.matches(other.text.trim()) || isoDate(other.text) != null) return@correctedValue null
+            number(firstNumber, other.text)?.let { Total(it, other.text, needsReview = true) }
+        }
+    }
+
+    private class ProposalRows(
+        ocr: OcrResult,
+    ) {
+        val lines = ocr.lines
+        private val geometry by lazy { ItemRowGeometry.boxes(ocr) }
+
+        fun observedRightOf(label: OcrLine): List<OcrLine> {
+            val mid = label.y + label.height / 2
+            return lines.filter { it.id != label.id && it.x > label.x && abs(it.y + it.height / 2 - mid) < label.height / 2 }
+        }
+
+        // 관측 좌표에서 값을 얻지 못했을 때만 부른다. 합의가 있는 보정으로도 후보가 여럿이면 값을 고르지 않는다.
+        fun <T : Any> correctedValue(
+            labels: List<OcrLine>,
+            value: (OcrLine) -> T?,
+        ): T? {
+            if (labels.isEmpty()) return null
+            val (boxes, correction) = geometry
+            if (correction == null) return null
+            return labels.firstNotNullOfOrNull { line ->
+                val label = boxes.first { it.line.id == line.id }
+                boxes
+                    .mapNotNull { other ->
+                        if (other.line.x > line.x && other.distance(label) < 0.5 && !other.disagreesWithDirectionOf(label)) {
+                            value(other.line)
+                        } else {
+                            null
+                        }
+                    }.singleOrNull()
+            }
+        }
     }
 
     /** 원·円은 숫자 뒤 금액 접미사, ₩·¥는 숫자 앞, 통화 코드는 앞이 영숫자가 아니거나(뒤에 금액 가능) 독립된 금액 토큰 바로 뒤의 토큰, W는 숫자 바로 앞(₩ 오독)만 센다. 회원번호의 '원', 상품 코드 A1KRW2·A1KRW는 아니다. */

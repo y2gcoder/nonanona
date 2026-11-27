@@ -1,5 +1,6 @@
 package app.nonanona
 
+import app.nonanona.feature.receiptimport.AllowedReceiptFields
 import app.nonanona.feature.receiptimport.DraftSource
 import app.nonanona.feature.receiptimport.IncomingPhoto
 import app.nonanona.feature.receiptimport.ItemAllocation
@@ -46,21 +47,30 @@ class ReceiptItemsTest {
 
     private fun JSONArray.strings() = (0 until length()).map { getString(it) }
 
-    private fun ocr(lines: JSONArray) =
-        OcrResult(
-            1000,
-            1000,
-            lines.objects().map {
-                OcrLine(
-                    it.getInt("id"),
-                    it.getString("text"),
-                    it.getDouble("x"),
-                    it.getDouble("y"),
-                    it.getDouble("width"),
-                    it.getDouble("height"),
-                )
-            },
-        )
+    private fun ocr(
+        lines: JSONArray,
+        width: Int = 1000,
+        height: Int = 1000,
+    ) = OcrResult(
+        width,
+        height,
+        lines.objects().map {
+            OcrLine(
+                it.getInt("id"),
+                it.getString("text"),
+                it.getDouble("x"),
+                it.getDouble("y"),
+                it.getDouble("width"),
+                it.getDouble("height"),
+                it.optJSONArray("corners")?.let { points ->
+                    (0 until points.length()).flatMap { index ->
+                        val point = points.getJSONArray(index)
+                        listOf(point.getDouble(0), point.getDouble(1))
+                    }
+                },
+            )
+        },
+    )
 
     @Test
     fun sharedExtractionExamples() {
@@ -84,6 +94,33 @@ class ReceiptItemsTest {
                 result.summary.map { it.amountMinor },
             )
             assertEquals(name, if (e.isNull("ocrTotal")) null else e.getLong("ocrTotal"), result.ocrTotalMinor)
+        }
+    }
+
+    @Test
+    fun sharedRowGeometry() {
+        for (scenario in JSONArray(File(dir, "row-geometry.json").readText()).objects()) {
+            val name = scenario.getString("name")
+            val ocr = ocr(scenario.getJSONArray("lines"), 800, 1200)
+            val total = scenario.getLong("receiptTotal")
+            val result = ItemExtractor.extract(ocr, total)
+            val items = scenario.getJSONArray("items").objects()
+            assertEquals(name, items.map { it.getString("id") }, result.candidates.map { it.id })
+            for ((got, want) in result.candidates.zip(items)) {
+                val ids = want.getJSONArray("sourceLineIDs")
+                assertEquals(name, (0 until ids.length()).map(ids::getInt), got.sourceLineIds)
+                assertEquals(name, want.getString("name"), got.originalName)
+                assertEquals(name, if (want.isNull("amount")) null else want.getLong("amount"), got.amountMinor)
+                val flags = want.getJSONArray("flags").strings()
+                assertEquals(name, flags, got.flags.map { it.wire })
+                if ("amountLinkUncertain" in flags) {
+                    val fields = AllowedReceiptFields("2026-11-06", total, "JPY", null)
+                    val plan = requireNotNull(ItemPlan.seed(fields, ocr)).setName(got.id, "녹차")
+                    val saved = ItemPlan.fromJson(plan.toJson())
+                    assertEquals(name, true, saved.line(got.id)?.needsCheck)
+                    assertEquals(name, false, saved.markChecked(got.id).line(got.id)?.needsCheck)
+                }
+            }
         }
     }
 

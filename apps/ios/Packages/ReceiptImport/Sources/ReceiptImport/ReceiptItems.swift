@@ -13,6 +13,8 @@ public enum ItemFlag: String, Codable, Sendable, CaseIterable {
   case quantity
   /// 금액이 영수증 합계보다 크다.
   case exceedsTotal
+  /// 둘 이상의 행에서 가져올 수 있거나 위치가 어긋난 금액이다.
+  case amountLinkUncertain
 }
 
 /// 품목이 아닌 영수증 요약 줄. 나누기에 자동으로 넣지 않고 보여 주기만 한다.
@@ -53,7 +55,7 @@ public struct ItemExtraction: Codable, Equatable, Sendable {
 
 /// OCR 위치(행)와 글자로 품목 후보를 보수적으로 뽑는다. 확실하지 않으면 품목으로 만들지 않거나 표시(`ItemFlag`)를 붙인다.
 public enum ItemExtractor {
-  public static let version = "receipt-items-v1"
+  public static let version = "receipt-items-v2"
 
   static let sensitive = ProposalBuilder.sensitivePattern
   static let discount = #"値引|割引|クーポン|discount"#
@@ -65,33 +67,67 @@ public enum ItemExtractor {
   static let price = #"^(.*?)[\s:：]*(-|▲|△)?\s*(¥)?\s*([0-9][0-9,.]*)\s*(円)?\s*(?:※|\*|軽|外|内)?\s*[)）]?$"#
   static let quantity = #"[0-9]+\s*(?:個|点|本|杯|枚|皿|人前|コ)|[x×X]\s*[0-9]+|@\s*[0-9]+"#
   static let number = #"[0-9][0-9,.]*"#
+  static let priceBox = #"^[¥]?\s*[0-9][0-9,.]*\s*円?$"#
 
   struct Row {
     let lineIDs: [Int]
     let text: String
     /// 둘 이상의 OCR 상자이고 마지막 상자가 숫자(와 ¥·円)뿐이다(가격 열이 따로 읽힘).
     let separatePriceBox: Bool
+    let uncertainLink: Bool
   }
 
-  /// 세로 가운데가 첫 상자 높이의 절반 안에 드는 줄을 한 행으로 묶는다(합계 찾기와 같은 기준).
-  static func rows(_ lines: [OCRLine]) -> [Row] {
-    let sorted = lines.sorted { ($0.y + $0.height / 2, $0.id) < ($1.y + $1.height / 2, $1.id) }
-    var groups: [[OCRLine]] = []
-    for line in sorted {
-      let center = line.y + line.height / 2
-      if let anchor = groups.last?.first, abs(center - (anchor.y + anchor.height / 2)) < anchor.height / 2 {
-        groups[groups.count - 1].append(line)
+  static func rows(_ ocr: OCRResult) -> [Row] {
+    let (boxes, corrected) = ItemRowGeometry.boxes(ocr)
+    let sorted = boxes.sorted { ($0.centerY, $0.line.id) < ($1.centerY, $1.line.id) }
+    var groups: [[ItemRowGeometry.Box]] = []
+    for box in sorted {
+      if let anchor = groups.last?.first,
+        box.centerY - anchor.centerY < (corrected ? max(box.height, anchor.height) : anchor.height) / 2
+      {
+        groups[groups.count - 1].append(box)
       } else {
-        groups.append([line])
+        groups.append([box])
       }
     }
     return groups.map { group in
-      let ordered = group.sorted { ($0.x, $0.id) < ($1.x, $1.id) }
-      let last = normalize(ordered.last?.text ?? "")
+      let ordered = group.sorted { ($0.line.x, $0.line.id) < ($1.line.x, $1.line.id) }
+      let lines = ordered.map(\.line)
+      let last = normalize(lines.last?.text ?? "")
+      let separate = ordered.count > 1 && matches(priceBox, last)
+      let uncertain =
+        ordered.count > 1 && isAmountBox(last)
+        && uncertainLink(amount: ordered[ordered.count - 1], row: ordered, boxes: sorted)
       return Row(
-        lineIDs: group.map(\.id).sorted(),
-        text: ordered.map { $0.text.trimmingCharacters(in: .whitespaces) }.joined(separator: " "),
-        separatePriceBox: ordered.count > 1 && matches(#"^[¥]?\s*[0-9][0-9,.]*\s*円?$"#, last))
+        lineIDs: lines.map(\.id).sorted(),
+        text: lines.map { $0.text.trimmingCharacters(in: .whitespaces) }.joined(separator: " "),
+        separatePriceBox: separate,
+        uncertainLink: uncertain)
+    }
+  }
+
+  private static func isAmountBox(_ text: String) -> Bool {
+    captures(price, text)?[1].isEmpty == true
+  }
+
+  private static func uncertainLink(
+    amount: ItemRowGeometry.Box, row: [ItemRowGeometry.Box], boxes: [ItemRowGeometry.Box]
+  ) -> Bool {
+    func nameBox(_ box: ItemRowGeometry.Box) -> Bool {
+      let text = normalize(box.line.text)
+      return box.line.x + box.line.width <= amount.line.x && matches(#"\p{L}"#, text) && !isAmountBox(text)
+    }
+    guard let name = row.first(where: nameBox) else { return false }
+    let distance = amount.distance(to: name)
+    if distance > 0.35 || amount.disagreesWithDirection(of: name) { return true }
+    if row.dropLast().contains(where: { isAmountBox(normalize($0.line.text)) }) { return true }
+    return boxes.contains { box in
+      let alternative = amount.distance(to: box)
+      guard alternative < 0.65, alternative <= distance + 0.22, box.line.id != name.line.id else { return false }
+      // 같은 묶음에 들어온 두 이름도 가로 범위가 겹치면 서로 다른 행의 후보로 본다.
+      let separateRow = !row.contains(where: { $0.line.id == box.line.id })
+      let overlapsName = box.line.x < name.line.x + name.line.width && name.line.x < box.line.x + box.line.width
+      return (separateRow || overlapsName) && nameBox(box)
     }
   }
 
@@ -99,7 +135,7 @@ public enum ItemExtractor {
     var candidates: [ItemCandidate] = []
     var summary: [ItemSummaryLine] = []
     var afterSummary = false
-    for row in rows(ocr.lines) {
+    for row in rows(ocr) {
       let text = normalize(row.text)
       let id = "ocr-\(row.lineIDs.first ?? 0)"
       if matches(sensitive, text) || ProposalBuilder.isoDate(text) != nil { continue }
@@ -159,6 +195,7 @@ public enum ItemExtractor {
     if amount == nil { flags.append(.amountUnreadable) }
     if matches(quantity, name) { flags.append(.quantity) }
     if let amount, amount > receiptTotal { flags.append(.exceedsTotal) }
+    if row.uncertainLink { flags.append(.amountLinkUncertain) }
     return ItemCandidate(
       id: id, sourceLineIDs: row.lineIDs, originalText: row.text, originalName: name, amountMinor: amount, flags: flags)
   }
@@ -301,7 +338,7 @@ public struct ItemPlan: Codable, Equatable, Sendable {
     update(id) {
       $0.name = text
       $0.nameSource = .user
-      $0.checked = true
+      if !$0.flags.contains(.amountLinkUncertain) { $0.checked = true }
     }
   }
 

@@ -500,6 +500,7 @@ private struct ItemLineRow: View {
     case .amountUnreadable: "금액을 읽지 못했어요."
     case .quantity: "수량이 있어요. 금액이 줄 합계인지 확인해 주세요."
     case .exceedsTotal: "영수증 합계보다 커요."
+    case .amountLinkUncertain: "원본에서 이 품목의 금액을 확인해 주세요."
     }
   }
 }

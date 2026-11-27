@@ -203,6 +203,46 @@ struct ReceiptItemsTests {
     }
   }
 
+  @Test func sharedRowGeometry() throws {
+    struct Scenario: Decodable {
+      struct Expected: Decodable {
+        let id: String
+        let sourceLineIDs: [Int]
+        let name: String
+        let amount: Int?
+        let flags: [String]
+      }
+      let name: String
+      let receiptTotal: Int
+      let lines: [OCRLine]
+      let items: [Expected]
+    }
+    let scenarios = try JSONDecoder().decode(
+      [Scenario].self, from: Data(contentsOf: itemFixtures.appending(path: "row-geometry.json")))
+    for scenario in scenarios {
+      let ocr = OCRResult(pixelWidth: 800, pixelHeight: 1200, lines: scenario.lines)
+      let result = ItemExtractor.extract(ocr, receiptTotal: scenario.receiptTotal)
+      let note = Comment(rawValue: scenario.name)
+      #expect(result.candidates.map(\.id) == scenario.items.map(\.id), note)
+      for (got, want) in zip(result.candidates, scenario.items) {
+        #expect(got.sourceLineIDs == want.sourceLineIDs, note)
+        #expect(got.originalName == want.name, note)
+        #expect(got.amountMinor == want.amount, note)
+        #expect(got.flags.map(\.rawValue) == want.flags, note)
+        if want.flags.contains("amountLinkUncertain") {
+          let fields = AllowedReceiptFields(
+            date: "2026-11-06", amountMinor: scenario.receiptTotal, currency: "JPY", merchant: nil)
+          var plan = try #require(ItemPlan.seed(fields: fields, ocr: ocr))
+          plan.setName(got.id, "녹차")
+          let saved = try JSONDecoder().decode(ItemPlan.self, from: JSONEncoder().encode(plan))
+          #expect(saved.line(got.id)?.needsCheck == true, note)
+          plan.markChecked(got.id)
+          #expect(plan.line(got.id)?.needsCheck == false, note)
+        }
+      }
+    }
+  }
+
   @Test func sharedAllocationExamples() {
     for a in examples.allocation {
       let got = describe(ItemAllocator.allocate(plan: plan(a), krw: a.krw, payer: a.payer, members: a.members))

@@ -430,6 +430,7 @@ private fun flagText(flag: ItemFlag): String =
             ItemFlag.AmountUnreadable -> R.string.items_flag_amount
             ItemFlag.Quantity -> R.string.items_flag_quantity
             ItemFlag.ExceedsTotal -> R.string.items_flag_exceeds
+            ItemFlag.AmountLinkUncertain -> R.string.items_flag_amount_link
         },
     )
 

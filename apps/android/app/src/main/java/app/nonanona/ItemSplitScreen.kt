@@ -431,6 +431,7 @@ private fun flagText(flag: ItemFlag): String =
             ItemFlag.Quantity -> R.string.items_flag_quantity
             ItemFlag.ExceedsTotal -> R.string.items_flag_exceeds
             ItemFlag.AmountLinkUncertain -> R.string.items_flag_amount_link
+            ItemFlag.AmountMisread -> R.string.items_flag_amount_misread
         },
     )
 

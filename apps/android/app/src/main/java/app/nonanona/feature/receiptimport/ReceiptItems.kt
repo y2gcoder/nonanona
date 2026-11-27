@@ -26,10 +26,13 @@ enum class ItemFlag(
 
     /** 둘 이상의 행에서 가져올 수 있거나 위치가 어긋난 금액이다. */
     AmountLinkUncertain("amountLinkUncertain"),
+
+    /** 품목 합이 영수증 합계와 맞지 않고, 이 금액의 숫자를 잘못 읽었을 수 있다(통화 기호가 숫자로 읽힘, 한 자리 오독). */
+    AmountMisread("amountMisread"),
     ;
 
     /** 금액 자체를 의심하는 표시. 이름을 고쳐도 풀리지 않고 금액을 고치거나 "확인함"을 눌러야 한다. */
-    val needsAmountCheck: Boolean get() = this == ExceedsTotal || this == AmountLinkUncertain
+    val needsAmountCheck: Boolean get() = this == ExceedsTotal || this == AmountLinkUncertain || this == AmountMisread
 
     companion object {
         fun of(wire: String) = entries.first { it.wire == wire }
@@ -211,6 +214,8 @@ object ItemExtractor {
         receiptTotal: Long,
     ): ItemExtraction {
         val candidates = mutableListOf<ItemCandidate>()
+        // 후보마다 금액에 통화 기호(¥·円)가 하나도 붙지 않았는지.
+        val bare = mutableListOf<Boolean>()
         val summary = mutableListOf<ItemSummaryLine>()
         var afterSummary = false
         for (row in rows(ocr)) {
@@ -244,6 +249,7 @@ object ItemExtractor {
                     continue
                 }
                 candidates += candidate(id, row, trimName(g[1]), amount, receiptTotal)
+                bare += g[3].isEmpty() && g[5].isEmpty()
             } else if (text.endsWith("円") || text.contains("¥")) {
                 // 가격 표시는 있는데 숫자로 읽지 못한 행.
                 val name =
@@ -253,9 +259,79 @@ object ItemExtractor {
                         trimName(text.split(" ").dropLast(1).joinToString(" "))
                     }
                 candidates += candidate(id, row, name, null, receiptTotal)
+                bare += false
             }
         }
-        return ItemExtraction(candidates, summary, summary.firstOrNull { it.kind == SummaryKind.Total }?.amountMinor)
+        val misread = misreadSuspects(candidates, bare, summary, receiptTotal)
+        return ItemExtraction(
+            candidates.map { if (it.id in misread) it.copy(flags = it.flags + ItemFlag.AmountMisread) else it },
+            summary,
+            summary.firstOrNull { it.kind == SummaryKind.Total }?.amountMinor,
+        )
+    }
+
+    /**
+     * 숫자를 잘못 읽었을 수 있는 품목(`amountMisread`). 금액은 고치지 않고 표시만 단다.
+     * 품목 합이 맞아야 할 값(영수증 합계·소계, 각각 할인을 더하거나 세금을 뺀 값) 중 어느 것과도 다를 때만 본다.
+     * 합이 맞거나, 금액을 읽지 못한 줄이 있어 합을 믿을 수 없거나, 합계가 없으면 표시하지 않는다.
+     * ① 영수증이 ¥ 표기를 쓰는데 통화 기호 없이 4로 시작하는 네 자리 이상 금액(¥를 4로 읽은 꼴).
+     * ② 한 품목의 금액만 고쳐(한 자리 바꾸기, 통화 기호가 없는 금액은 앞이나 뒤 한 자리 빼기) 합이 정확히 맞는 품목이
+     *    두 개 이하이면 그 품목들. 더 많으면 어느 줄인지 가리키지 못하므로 붙이지 않는다.
+     */
+    private fun misreadSuspects(
+        candidates: List<ItemCandidate>,
+        bare: List<Boolean>,
+        summary: List<ItemSummaryLine>,
+        receiptTotal: Long,
+    ): Set<String> {
+        if (receiptTotal <= 0 || candidates.isEmpty()) return emptySet()
+        val amounts = candidates.map { it.amountMinor ?: return emptySet() }
+        val sum = amounts.sum()
+
+        fun summed(kind: SummaryKind) = summary.filter { it.kind == kind }.mapNotNull { it.amountMinor }.sum()
+        val discount = summed(SummaryKind.Discount)
+        val tax = summed(SummaryKind.Tax)
+        val bases = listOf(receiptTotal) + summary.filter { it.kind == SummaryKind.Subtotal }.mapNotNull { it.amountMinor }
+        val targets = bases.flatMap { listOf(it, it + discount, it - tax, it + discount - tax) }.toSet()
+        if (sum in targets) return emptySet()
+        val suspects = mutableSetOf<String>()
+        val yenStyle = (candidates.map { it.originalText } + summary.map { it.originalText }).any { normalize(it).contains("¥") }
+        if (yenStyle) {
+            candidates.forEachIndexed { index, candidate ->
+                val digits = amounts[index].toString()
+                if (bare[index] && digits.length >= 4 && digits[0] == '4' && digits[1] != '0') suspects += candidate.id
+            }
+        }
+        val fits = mutableSetOf<String>()
+        for (target in targets) {
+            val excess = sum - target
+            candidates.forEachIndexed { index, candidate ->
+                if (amounts[index] - excess in misreadings(amounts[index], bare[index])) fits += candidate.id
+            }
+        }
+        if (fits.size <= 2) suspects += fits
+        return suspects
+    }
+
+    /** 이 금액이 한 번의 오독으로 생겼다면 원래 값이었을 수 있는 금액들. */
+    private fun misreadings(
+        amount: Long,
+        bare: Boolean,
+    ): Set<Long> {
+        val digits = amount.toString()
+        val values = mutableSetOf<Long>()
+        if (bare && digits.length >= 2) {
+            // 통화 기호(¥ 앞, 円 뒤)가 숫자로 읽혔을 수 있다.
+            if (digits[1] != '0') values += digits.drop(1).toLong()
+            values += digits.dropLast(1).toLong()
+        }
+        for (index in digits.indices) {
+            for (digit in '0'..'9') {
+                if (digit == digits[index] || (index == 0 && digit == '0')) continue
+                values += (digits.substring(0, index) + digit + digits.substring(index + 1)).toLong()
+            }
+        }
+        return values
     }
 
     private fun candidate(

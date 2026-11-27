@@ -52,8 +52,8 @@
       {"id": 6, "text": "500円", "x": 0.8125, "y": 0.5423333, "width": 0.075, "height": 0.015, "corners": [[0.8125, 0.5423333], [0.8875, 0.5423333], [0.8875, 0.5573333], [0.8125, 0.5573333]]}
     ],
     "items": [
-      {"id": "ocr-1", "sourceLineIDs": [1, 2], "name": "緑茶", "amount": 140, "flags": []},
-      {"id": "ocr-3", "sourceLineIDs": [3, 4], "name": "おにぎり", "amount": 160, "flags": []}
+      {"id": "ocr-1", "sourceLineIDs": [1, 2], "name": "緑茶", "amount": 140, "flags": ["amountMisread"]},
+      {"id": "ocr-3", "sourceLineIDs": [3, 4], "name": "おにぎり", "amount": 160, "flags": ["amountMisread"]}
     ]
   },
   {
@@ -527,7 +527,7 @@
     ],
     "items": [
       {"id": "ocr-1", "sourceLineIDs": [1, 2], "name": "枝豆", "amount": 418, "flags": []},
-      {"id": "ocr-3", "sourceLineIDs": [3, 4], "name": "鶏の唐揚げ", "amount": 4748, "flags": ["exceedsTotal"]}
+      {"id": "ocr-3", "sourceLineIDs": [3, 4], "name": "鶏の唐揚げ", "amount": 4748, "flags": ["exceedsTotal", "amountMisread"]}
     ]
   },
   {

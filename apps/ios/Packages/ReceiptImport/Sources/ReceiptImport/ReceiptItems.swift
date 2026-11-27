@@ -15,9 +15,11 @@ public enum ItemFlag: String, Codable, Sendable, CaseIterable {
   case exceedsTotal
   /// 둘 이상의 행에서 가져올 수 있거나 위치가 어긋난 금액이다.
   case amountLinkUncertain
+  /// 품목 합이 영수증 합계와 맞지 않고, 이 금액의 숫자를 잘못 읽었을 수 있다(통화 기호가 숫자로 읽힘, 한 자리 오독).
+  case amountMisread
 
   /// 금액 자체를 의심하는 표시. 이름을 고쳐도 풀리지 않고 금액을 고치거나 "확인함"을 눌러야 한다.
-  var needsAmountCheck: Bool { self == .exceedsTotal || self == .amountLinkUncertain }
+  var needsAmountCheck: Bool { self == .exceedsTotal || self == .amountLinkUncertain || self == .amountMisread }
 }
 
 /// 품목이 아닌 영수증 요약 줄. 나누기에 자동으로 넣지 않고 보여 주기만 한다.
@@ -163,6 +165,8 @@ public enum ItemExtractor {
 
   public static func extract(_ ocr: OCRResult, receiptTotal: Int) -> ItemExtraction {
     var candidates: [ItemCandidate] = []
+    // 후보마다 금액에 통화 기호(¥·円)가 하나도 붙지 않았는지.
+    var bare: [Bool] = []
     var summary: [ItemSummaryLine] = []
     var afterSummary = false
     for row in rows(ocr) {
@@ -205,6 +209,7 @@ public enum ItemExtractor {
         }
         candidates.append(
           candidate(id: id, row: row, name: name, amount: amount, receiptTotal: receiptTotal))
+        bare.append(groups[3].isEmpty && groups[5].isEmpty)
       } else if text.hasSuffix("円") || text.contains("¥") {
         // 가격 표시는 있는데 숫자로 읽지 못한 행.
         let name = trimName(text.components(separatedBy: "¥").first ?? text)
@@ -213,10 +218,80 @@ public enum ItemExtractor {
           candidate(
             id: id, row: row, name: text.contains("¥") ? name : trimName(head), amount: nil,
             receiptTotal: receiptTotal))
+        bare.append(false)
       }
+    }
+    let misread = misreadSuspects(candidates, bare: bare, summary: summary, receiptTotal: receiptTotal)
+    candidates = candidates.map { c in
+      guard misread.contains(c.id) else { return c }
+      return ItemCandidate(
+        id: c.id, sourceLineIDs: c.sourceLineIDs, originalText: c.originalText, originalName: c.originalName,
+        amountMinor: c.amountMinor, flags: c.flags + [.amountMisread])
     }
     let ocrTotal = summary.first { $0.kind == .total }?.amountMinor
     return ItemExtraction(candidates: candidates, summary: summary, ocrTotalMinor: ocrTotal)
+  }
+
+  /// 숫자를 잘못 읽었을 수 있는 품목(`amountMisread`). 금액은 고치지 않고 표시만 단다.
+  /// 품목 합이 맞아야 할 값(영수증 합계·소계, 각각 할인을 더하거나 세금을 뺀 값) 중 어느 것과도 다를 때만 본다.
+  /// 합이 맞거나, 금액을 읽지 못한 줄이 있어 합을 믿을 수 없거나, 합계가 없으면 표시하지 않는다.
+  /// ① 영수증이 ¥ 표기를 쓰는데 통화 기호 없이 4로 시작하는 네 자리 이상 금액(¥를 4로 읽은 꼴).
+  /// ② 한 품목의 금액만 고쳐(한 자리 바꾸기, 통화 기호가 없는 금액은 앞이나 뒤 한 자리 빼기) 합이 정확히 맞는 품목이
+  ///    두 개 이하이면 그 품목들. 더 많으면 어느 줄인지 가리키지 못하므로 붙이지 않는다.
+  static func misreadSuspects(
+    _ candidates: [ItemCandidate], bare: [Bool], summary: [ItemSummaryLine], receiptTotal: Int
+  ) -> Set<String> {
+    guard receiptTotal > 0, !candidates.isEmpty else { return [] }
+    let amounts = candidates.compactMap(\.amountMinor)
+    guard amounts.count == candidates.count else { return [] }
+    let sum = amounts.reduce(0, +)
+    func summed(_ kind: SummaryKind) -> Int {
+      summary.filter { $0.kind == kind }.compactMap(\.amountMinor).reduce(0, +)
+    }
+    let discount = summed(.discount)
+    let tax = summed(.tax)
+    let bases = [receiptTotal] + summary.filter { $0.kind == .subtotal }.compactMap(\.amountMinor)
+    let targets = Set(bases.flatMap { [$0, $0 + discount, $0 - tax, $0 + discount - tax] })
+    guard !targets.contains(sum) else { return [] }
+    var suspects = Set<String>()
+    let yenStyle = (candidates.map(\.originalText) + summary.map(\.originalText)).contains {
+      normalize($0).contains("¥")
+    }
+    if yenStyle {
+      for (index, candidate) in candidates.enumerated() where bare[index] {
+        let digits = Array(String(amounts[index]))
+        if digits.count >= 4, digits[0] == "4", digits[1] != "0" { suspects.insert(candidate.id) }
+      }
+    }
+    var fits = Set<String>()
+    for target in targets {
+      let excess = sum - target
+      for (index, candidate) in candidates.enumerated()
+      where misreadings(of: amounts[index], bare: bare[index]).contains(amounts[index] - excess) {
+        fits.insert(candidate.id)
+      }
+    }
+    if fits.count <= 2 { suspects.formUnion(fits) }
+    return suspects
+  }
+
+  /// 이 금액이 한 번의 오독으로 생겼다면 원래 값이었을 수 있는 금액들.
+  static func misreadings(of amount: Int, bare: Bool) -> Set<Int> {
+    let digits = Array(String(amount))
+    var values = Set<Int>()
+    if bare, digits.count >= 2 {
+      // 통화 기호(¥ 앞, 円 뒤)가 숫자로 읽혔을 수 있다.
+      if digits[1] != "0" { values.insert(Int(String(digits.dropFirst()))!) }
+      values.insert(Int(String(digits.dropLast()))!)
+    }
+    for index in digits.indices {
+      for digit in "0123456789" where digit != digits[index] && !(index == 0 && digit == "0") {
+        var changed = digits
+        changed[index] = digit
+        values.insert(Int(String(changed))!)
+      }
+    }
+    return values
   }
 
   private static func candidate(id: String, row: Row, name: String, amount: Int?, receiptTotal: Int) -> ItemCandidate {

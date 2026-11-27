@@ -501,6 +501,7 @@ private struct ItemLineRow: View {
     case .quantity: "수량이 있어요. 금액이 줄 합계인지 확인해 주세요."
     case .exceedsTotal: "영수증 합계보다 커요."
     case .amountLinkUncertain: "다른 줄의 금액과 묶였을 수 있어요. 종이 영수증이나 사진에서 이 품목의 금액을 확인해 주세요."
+    case .amountMisread: "품목 합이 영수증 합계와 달라요. 이 금액의 숫자를 잘못 읽었을 수 있어요."
     }
   }
 }

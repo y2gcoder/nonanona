@@ -23,6 +23,12 @@
 - Claude Code용 스킬은 `.claude/skills/<name>/`, Codex용 스킬은 `.agents/skills/<name>/`에 둔다. 맥의 사용자 경로는 각각 `~/.claude/skills/`, `~/.agents/skills/`다. 호출 조건, 작업 절차, 완료 기준을 두 에이전트에서 같이 쓸 수 있으면 원본 경로 한 곳을 정하고 다른 쪽에서 원본을 가리키는 상대 심볼릭 링크를 둘 수 있다. 기존 원본이 있으면 그 위치를 우선한다.
 - 한 에이전트에서만 필요한 절차는 해당 경로에 둔다. 두 에이전트의 도구·훅·권한이나 결과를 만드는 절차가 달라지면 각 경로에 독립적인 `SKILL.md`를 두고 공통 스크립트나 자료는 공유한다. 같은 결과를 여는 방식만 다르면 공통 스킬 안에 도구별 안내를 둔다.
 
+## Android 화면 조사
+
+- Android 앱에서 키보드에 가린 입력칸, 눌리지 않는 버튼처럼 화면과 조작 상태를 함께 봐야 하는 문제는 테스트 에뮬레이터와 가상 자료로 재현하고 로컬 Mobile MCP로 스크린샷과 UI 요소를 확인한다. MCP를 쓸 수 없는 환경이거나 기기 자세·활성 화면·시스템 키보드 상태를 확인할 때는 ADB를 쓴다.
+- 같은 에뮬레이터에서 ADB UI Automator로 전환하기 전에 MCP에 사용한 `MOBILECLI_HOME`으로 `mobilecli daemon stop`을 실행한다. macOS에서는 소켓 경로가 길어지지 않도록 `MOBILECLI_HOME`에 짧은 임시 경로를 쓴다. [비교 실험과 재현 순서](https://github.com/y2gcoder/nonanona/issues/24#issuecomment-7227247606)
+- 반복 회귀와 기기·서버 산출물의 통과 판정은 변경에 맞는 기존 Android E2E로 검증한다. 영수증 검토 흐름은 `mise run android:e2e-review`를 쓴다.
+
 ## 기록
 
 - 되돌리기 어렵고, 맥락 없이 보면 의아하고, 실제 트레이드오프가 있었던 결정은 `docs/adr/NNNN-slug.md`에 짧게 남긴다.

@@ -4,7 +4,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.math.BigInteger
 import java.text.Normalizer
-import kotlin.math.abs
 
 // 영수증 품목 후보와 품목별 나누기 계획(기기 안). OCR 줄 글자·품목 이름을 담으므로 여기 타입은 기기 밖으로 나가지 않는다.
 // 규칙은 iOS `ReceiptItems.swift`와 같고, 공통 예제(apps/fixtures/items/examples.json)로 두 앱이 같은 답을 내는지 본다.
@@ -24,6 +23,9 @@ enum class ItemFlag(
 
     /** 금액이 영수증 합계보다 크다. */
     ExceedsTotal("exceedsTotal"),
+
+    /** 둘 이상의 행에서 가져올 수 있거나 위치가 어긋난 금액이다. */
+    AmountLinkUncertain("amountLinkUncertain"),
     ;
 
     companion object {
@@ -94,7 +96,7 @@ data class ItemExtraction(
 
 /** OCR 위치(행)와 글자로 품목 후보를 보수적으로 뽑는다. 확실하지 않으면 품목으로 만들지 않거나 표시를 붙인다. */
 object ItemExtractor {
-    const val VERSION = "receipt-items-v1"
+    const val VERSION = "receipt-items-v2"
 
     private val sensitive =
         Regex(
@@ -114,32 +116,71 @@ object ItemExtractor {
     private val priceBox = Regex("^[¥]?\\s*[0-9][0-9,.]*\\s*円?\$")
     private val letter = Regex("\\p{L}")
 
+    private val priceSuffixBox = Regex("^(?:[※*軽外内]\\s*\\)?|\\))$")
+
     private class Row(
         val lineIds: List<Int>,
         val text: String,
         val separatePriceBox: Boolean,
+        val uncertainLink: Boolean,
     )
 
-    /** 세로 가운데가 첫 상자 높이의 절반 안에 드는 줄을 한 행으로 묶는다(합계 찾기와 같은 기준). */
-    private fun rows(lines: List<OcrLine>): List<Row> {
-        val sorted = lines.sortedWith(compareBy<OcrLine>({ it.y + it.height / 2 }, { it.id }))
-        val groups = mutableListOf<MutableList<OcrLine>>()
-        for (line in sorted) {
-            val center = line.y + line.height / 2
+    private fun rows(ocr: OcrResult): List<Row> {
+        val (boxes, corrected) = ItemRowGeometry.boxes(ocr)
+        val sorted = boxes.sortedWith(compareBy({ it.centerY }, { it.line.id }))
+        val groups = mutableListOf<MutableList<ItemRowGeometry.Box>>()
+        for (box in sorted) {
             val anchor = groups.lastOrNull()?.first()
-            if (anchor != null && abs(center - (anchor.y + anchor.height / 2)) < anchor.height / 2) {
-                groups.last().add(line)
+            if (anchor != null && box.centerY - anchor.centerY < (if (corrected) maxOf(box.height, anchor.height) else anchor.height) / 2) {
+                groups.last().add(box)
             } else {
-                groups.add(mutableListOf(line))
+                groups.add(mutableListOf(box))
             }
         }
         return groups.map { group ->
-            val ordered = group.sortedWith(compareBy<OcrLine>({ it.x }, { it.id }))
+            val ordered = group.sortedWith(compareBy({ it.line.x }, { it.line.id }))
+            val lines = ordered.map { it.line }
+            val amountIndex = ordered.indexOfLast { !priceSuffixBox.matches(normalize(it.line.text)) }
+            val amountText = ordered.getOrNull(amountIndex)?.let { normalize(it.line.text) }.orEmpty()
+            val separate = amountIndex > 0 && priceBox.matches(amountText)
             Row(
-                group.map { it.id }.sorted(),
-                ordered.joinToString(" ") { it.text.trim() },
-                ordered.size > 1 && priceBox.matches(normalize(ordered.last().text)),
+                lines.map { it.id }.sorted(),
+                lines.joinToString(" ") { it.text.trim() },
+                separate,
+                amountIndex > 0 && isAmountBox(amountText) &&
+                    uncertainLink(ordered[amountIndex], ordered.subList(0, amountIndex), sorted, corrected),
             )
+        }
+    }
+
+    private fun isAmountBox(text: String): Boolean =
+        price
+            .matchEntire(text)
+            ?.groupValues
+            ?.get(1)
+            ?.isEmpty() == true
+
+    private fun uncertainLink(
+        amount: ItemRowGeometry.Box,
+        row: List<ItemRowGeometry.Box>,
+        boxes: List<ItemRowGeometry.Box>,
+        corrected: Boolean,
+    ): Boolean {
+        fun nameBox(box: ItemRowGeometry.Box): Boolean {
+            val text = normalize(box.line.text)
+            return box.centerX < amount.centerX && letter.containsMatchIn(text) &&
+                !priceSuffixBox.matches(text) && !isAmountBox(text)
+        }
+        val name = row.firstOrNull(::nameBox) ?: return false
+        val distance = amount.distance(name)
+        if ((corrected && amount.needsCorrectionToJoin(name)) || distance > 0.35 || amount.disagreesWithDirectionOf(name)) return true
+        if (row.any { isAmountBox(normalize(it.line.text)) }) return true
+        return boxes.any { box ->
+            val alternative = amount.distance(box)
+            if (alternative >= 0.65 || alternative > distance + 0.22 || box.line.id == name.line.id) return@any false
+            // 같은 묶음에 들어온 두 이름도 가로 범위가 겹치면 서로 다른 행의 후보로 본다.
+            val overlapsName = box.line.x < name.line.x + name.line.width && name.line.x < box.line.x + box.line.width
+            (box !in row || overlapsName) && nameBox(box)
         }
     }
 
@@ -150,7 +191,7 @@ object ItemExtractor {
         val candidates = mutableListOf<ItemCandidate>()
         val summary = mutableListOf<ItemSummaryLine>()
         var afterSummary = false
-        for (row in rows(ocr.lines)) {
+        for (row in rows(ocr)) {
             val text = normalize(row.text)
             val id = "ocr-${row.lineIds.firstOrNull() ?: 0}"
             if (sensitive.containsMatchIn(text) || ProposalBuilder.isoDate(text) != null) continue
@@ -207,6 +248,7 @@ object ItemExtractor {
         if (amount == null) flags += ItemFlag.AmountUnreadable
         if (quantity.containsMatchIn(name)) flags += ItemFlag.Quantity
         if (amount != null && amount > receiptTotal) flags += ItemFlag.ExceedsTotal
+        if (row.uncertainLink) flags += ItemFlag.AmountLinkUncertain
         return ItemCandidate(id, row.lineIds, row.text, name, amount, flags)
     }
 
@@ -338,7 +380,9 @@ data class ItemPlan(
     fun setName(
         id: String,
         text: String,
-    ) = update(id) { it.copy(name = text, nameSource = ItemPlanLine.NameSource.User, checked = true) }
+    ) = update(id) {
+        it.copy(name = text, nameSource = ItemPlanLine.NameSource.User, checked = it.checked || ItemFlag.AmountLinkUncertain !in it.flags)
+    }
 
     /** 제안을 사용자가 골라도 이름만 바꾸고 금액·수량 확인 상태는 보존한다. */
     fun acceptRetranslation(

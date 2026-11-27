@@ -1,6 +1,6 @@
 {
  "_note": "품목 나누기 공통 예제(가상 값). iOS ReceiptImport 테스트와 Android JVM 테스트가 같이 읽는다. 기대값은 손으로 계산했다(examples 아래 note).",
- "extractor": "receipt-items-v1",
+ "extractor": "receipt-items-v2",
  "extraction": [
   {
    "name": "single_line_rows",

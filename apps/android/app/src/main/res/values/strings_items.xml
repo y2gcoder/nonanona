@@ -42,6 +42,7 @@
     <string name="items_flag_amount">금액을 읽지 못했어요.</string>
     <string name="items_flag_quantity">수량이 있어요. 금액이 줄 합계인지 확인해 주세요.</string>
     <string name="items_flag_exceeds">영수증 합계보다 커요.</string>
+    <string name="items_flag_amount_link">다른 줄의 금액과 묶였을 수 있어요. 종이 영수증이나 사진에서 이 품목의 금액을 확인해 주세요.</string>
     <string name="items_remove">이 줄 지우기</string>
     <string name="items_exclude">품목 아님(나누기에서 빼기)</string>
     <string name="items_summary_title">영수증 요약(나누지 않음)</string>

@@ -99,7 +99,9 @@ class ReceiptItemsTest {
 
     @Test
     fun sharedRowGeometry() {
-        for (scenario in JSONArray(File(dir, "row-geometry.json").readText()).objects()) {
+        // 숫자 오독 표시(amount-misread.json)도 같은 모양의 공통 표로 본다.
+        val scenarios = listOf("row-geometry.json", "amount-misread.json").flatMap { JSONArray(File(dir, it).readText()).objects() }
+        for (scenario in scenarios) {
             val name = scenario.getString("name")
             val ocr = ocr(scenario.getJSONArray("lines"), scenario.getInt("pixelWidth"), scenario.getInt("pixelHeight"))
             val total = scenario.getLong("receiptTotal")
@@ -114,8 +116,8 @@ class ReceiptItemsTest {
                 assertEquals(name, if (want.isNull("amount")) null else want.getLong("amount"), got.amountMinor)
                 val flags = want.getJSONArray("flags").strings()
                 assertEquals(name, flags, got.flags.map { it.wire })
-                // 금액을 의심하는 표시(연결 불확실·합계 초과)는 이름을 고쳐도 풀리지 않고 나누기를 막는다.
-                if ("amountLinkUncertain" in flags || "exceedsTotal" in flags) {
+                // 금액을 의심하는 표시(연결 불확실·합계 초과·숫자 오독)는 이름을 고쳐도 풀리지 않고 나누기를 막는다.
+                if (flags.any { it in setOf("amountLinkUncertain", "exceedsTotal", "amountMisread") }) {
                     val fields = AllowedReceiptFields("2026-11-06", total, "JPY", null)
                     val plan = requireNotNull(ItemPlan.seed(fields, ocr)).setName(got.id, "녹차")
                     val saved = ItemPlan.fromJson(plan.toJson())

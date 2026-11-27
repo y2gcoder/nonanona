@@ -220,8 +220,10 @@ struct ReceiptItemsTests {
       let lines: [OCRLine]
       let items: [Expected]
     }
-    let scenarios = try JSONDecoder().decode(
-      [Scenario].self, from: Data(contentsOf: itemFixtures.appending(path: "row-geometry.json")))
+    // 숫자 오독 표시(amount-misread.json)도 같은 모양의 공통 표로 본다.
+    let scenarios = try ["row-geometry.json", "amount-misread.json"].flatMap {
+      try JSONDecoder().decode([Scenario].self, from: Data(contentsOf: itemFixtures.appending(path: $0)))
+    }
     for scenario in scenarios {
       let ocr = OCRResult(pixelWidth: scenario.pixelWidth, pixelHeight: scenario.pixelHeight, lines: scenario.lines)
       let result = ItemExtractor.extract(ocr, receiptTotal: scenario.receiptTotal)
@@ -233,8 +235,8 @@ struct ReceiptItemsTests {
         #expect(got.originalName == want.name, note)
         #expect(got.amountMinor == want.amount, note)
         #expect(got.flags.map(\.rawValue) == want.flags, note)
-        // 금액을 의심하는 표시(연결 불확실·합계 초과)는 이름을 고쳐도 풀리지 않고 나누기를 막는다.
-        if want.flags.contains("amountLinkUncertain") || want.flags.contains("exceedsTotal") {
+        // 금액을 의심하는 표시(연결 불확실·합계 초과·숫자 오독)는 이름을 고쳐도 풀리지 않고 나누기를 막는다.
+        if !Set(want.flags).isDisjoint(with: ["amountLinkUncertain", "exceedsTotal", "amountMisread"]) {
           let fields = AllowedReceiptFields(
             date: "2026-11-06", amountMinor: scenario.receiptTotal, currency: "JPY", merchant: nil)
           var plan = try #require(ItemPlan.seed(fields: fields, ocr: ocr))

@@ -233,13 +233,18 @@ struct ReceiptItemsTests {
         #expect(got.originalName == want.name, note)
         #expect(got.amountMinor == want.amount, note)
         #expect(got.flags.map(\.rawValue) == want.flags, note)
-        if want.flags.contains("amountLinkUncertain") {
+        // 금액을 의심하는 표시(연결 불확실·합계 초과)는 이름을 고쳐도 풀리지 않고 나누기를 막는다.
+        if want.flags.contains("amountLinkUncertain") || want.flags.contains("exceedsTotal") {
           let fields = AllowedReceiptFields(
             date: "2026-11-06", amountMinor: scenario.receiptTotal, currency: "JPY", merchant: nil)
           var plan = try #require(ItemPlan.seed(fields: fields, ocr: ocr))
           plan.setName(got.id, "녹차")
           var saved = try JSONDecoder().decode(ItemPlan.self, from: JSONEncoder().encode(plan))
           #expect(saved.line(got.id)?.needsCheck == true, note)
+          for line in saved.lines { saved.setAssignee(line.id, member: "a", on: true) }
+          let blocked = ItemAllocator.allocate(plan: saved, krw: 10000, payer: "a", members: ["a"])
+          let unchecked = saved.lines.first(where: \.needsCheck)?.id
+          #expect(unchecked.map { blocked == .failure(.needsCheck(lineID: $0)) } == true, note)
           saved.markChecked(got.id)
           #expect(saved.line(got.id)?.needsCheck == false, note)
         }

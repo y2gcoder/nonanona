@@ -28,6 +28,9 @@ enum class ItemFlag(
     AmountLinkUncertain("amountLinkUncertain"),
     ;
 
+    /** 금액 자체를 의심하는 표시. 이름을 고쳐도 풀리지 않고 금액을 고치거나 "확인함"을 눌러야 한다. */
+    val needsAmountCheck: Boolean get() = this == ExceedsTotal || this == AmountLinkUncertain
+
     companion object {
         fun of(wire: String) = entries.first { it.wire == wire }
     }
@@ -126,7 +129,8 @@ object ItemExtractor {
     )
 
     private fun rows(ocr: OcrResult): List<Row> {
-        val (boxes, corrected) = ItemRowGeometry.boxes(ocr)
+        val (boxes, correction) = ItemRowGeometry.boxes(ocr)
+        val corrected = correction != null
         val sorted = boxes.sortedWith(compareBy({ it.centerY }, { it.line.id }))
         val groups = mutableListOf<MutableList<ItemRowGeometry.Box>>()
         for (box in sorted) {
@@ -148,7 +152,7 @@ object ItemExtractor {
                 lines.joinToString(" ") { it.text.trim() },
                 separate,
                 amountIndex > 0 && isAmountBox(amountText) &&
-                    uncertainLink(ordered[amountIndex], ordered.subList(0, amountIndex), sorted, corrected),
+                    uncertainLink(ordered[amountIndex], ordered.subList(0, amountIndex), sorted, correction),
             )
         }
     }
@@ -164,7 +168,7 @@ object ItemExtractor {
         amount: ItemRowGeometry.Box,
         row: List<ItemRowGeometry.Box>,
         boxes: List<ItemRowGeometry.Box>,
-        corrected: Boolean,
+        correction: ItemRowGeometry.Correction?,
     ): Boolean {
         fun nameBox(box: ItemRowGeometry.Box): Boolean {
             val text = normalize(box.line.text)
@@ -173,7 +177,25 @@ object ItemExtractor {
         }
         val name = row.firstOrNull(::nameBox) ?: return false
         val distance = amount.distance(name)
-        if ((corrected && amount.needsCorrectionToJoin(name)) || distance > 0.35 || amount.disagreesWithDirectionOf(name)) return true
+        // 보정해야만 묶인 금액은 확인한다. 다만 긴 상자 대부분이 같은 방향이고 이름 상자 자체의 기울기도 그 금액을 가리키면
+        // 보정 없이도 같은 행이라는 근거가 있으므로 표시하지 않는다. 바닥이나 배경만 기운 사진은 여기서 막힌다.
+        // 합의는 이 이름 상자의 표를 빼고 센다. 이름 상자의 기울어짐이 모서리 오차 정도로 작은데 보정 전 좌표에서 이 이름과
+        // 같은 행에 다른 금액이 있으면, 수평 영수증의 모서리 오차가 보정을 켠 것일 수 있으므로 표시한다.
+        val joinedOnlyByCorrection =
+            correction != null &&
+                amount.needsCorrectionToJoin(name) &&
+                !(
+                    correction.strongExcluding(name) &&
+                        amount.joinsAlongSlopeOf(name, correction.slope) &&
+                        (
+                            name.showsTilt ||
+                                boxes.none { other ->
+                                    other.line.id != amount.line.id && other.centerX > name.centerX &&
+                                        isAmountBox(normalize(other.line.text)) && name.sharesObservedRowWith(other)
+                                }
+                        )
+                )
+        if (joinedOnlyByCorrection || distance > 0.35 || amount.disagreesWithDirectionOf(name)) return true
         if (row.any { isAmountBox(normalize(it.line.text)) }) return true
         return boxes.any { box ->
             val alternative = amount.distance(box)
@@ -381,7 +403,12 @@ data class ItemPlan(
         id: String,
         text: String,
     ) = update(id) {
-        it.copy(name = text, nameSource = ItemPlanLine.NameSource.User, checked = it.checked || ItemFlag.AmountLinkUncertain !in it.flags)
+        it.copy(
+            name = text,
+            nameSource = ItemPlanLine.NameSource.User,
+            checked =
+                it.checked || it.flags.none { flag -> flag.needsAmountCheck },
+        )
     }
 
     /** 제안을 사용자가 골라도 이름만 바꾸고 금액·수량 확인 상태는 보존한다. */

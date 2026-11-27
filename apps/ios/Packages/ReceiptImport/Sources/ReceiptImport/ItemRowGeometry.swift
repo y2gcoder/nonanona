@@ -6,12 +6,19 @@ enum ItemRowGeometry {
     let line: OCRLine
     let centerX: Double
     let observedY: Double
+    let observedHeight: Double
     var centerY: Double
     var height: Double
     let observedSlope: Double?
 
     func distance(to other: Box) -> Double {
       abs(centerY - other.centerY) / max(height, other.height, 1)
+    }
+
+    /// 보정 전에는 두 상자가 기존의 행 묶음 허용 범위 밖에 있었는지 본다.
+    func needsCorrectionToJoin(_ other: Box) -> Bool {
+      let earlierHeight = observedY <= other.observedY ? observedHeight : other.observedHeight
+      return abs(observedY - other.observedY) >= max(1, earlierHeight) / 2
     }
 
     func disagreesWithDirection(of name: Box) -> Bool {
@@ -32,8 +39,9 @@ enum ItemRowGeometry {
     let original = ocr.lines.map { line in
       let centerX = (line.x + line.width / 2 - 0.5) * width
       let y = (line.y + line.height / 2) * height
+      let observedHeight = line.height * height
       return Box(
-        line: line, centerX: centerX, observedY: y, centerY: y, height: line.height * height,
+        line: line, centerX: centerX, observedY: y, observedHeight: observedHeight, centerY: y, height: observedHeight,
         observedSlope: slope(line, width: width, height: height))
     }
     let directions = original.compactMap { box -> Direction? in
@@ -41,11 +49,16 @@ enum ItemRowGeometry {
       return Direction(y: box.observedY - slope * box.centerX, slope: slope)
     }.sorted { $0.y < $1.y }
 
-    guard directions.count >= 2 else { return (original, false) }
-    let dominant = median(directions.map(\.slope))
-    let midpoint = directions.count / 2
-    let top = directions.prefix(midpoint)
-    let bottom = directions.suffix(midpoint)
+    // 수평에 가까운 긴 상자도 분모에 넣는다. 바닥이나 배경만 기울어진 사진에는 전체 보정을 쓰지 않는다.
+    let positive = directions.filter { $0.slope >= 0.01 }
+    let negative = directions.filter { $0.slope <= -0.01 }
+    let agreeing = positive.count >= negative.count ? positive : negative
+    guard agreeing.count >= 2, agreeing.count > directions.count / 2 else { return (original, false) }
+    let dominant = median(agreeing.map(\.slope))
+    guard abs(dominant) >= 0.015 else { return (original, false) }
+    let midpoint = agreeing.count / 2
+    let top = agreeing.prefix(midpoint)
+    let bottom = agreeing.suffix(midpoint)
     let topY = median(top.map(\.y))
     let span = median(bottom.map(\.y)) - topY
     let topSlope = median(top.map(\.slope))
@@ -73,10 +86,10 @@ enum ItemRowGeometry {
     guard let corners = line.corners, corners.count == 4 else { return nil }
     let dx = (corners[1].x - corners[0].x + corners[2].x - corners[3].x) * width / 2
     let dy = (corners[1].y - corners[0].y + corners[2].y - corners[3].y) * height / 2
-    // 짧은 줄이나 Vision이 축 정렬해서 반환한 상자는 방향 추정에 쓰지 않는다.
+    // 짧은 상자와 가로 글줄로 보기 어려운 상자는 방향 추정에 쓰지 않는다.
     guard dx >= max(12, 4 * boxHeight(line, height)) else { return nil }
     let slope = dy / dx
-    return (0.02...0.6).contains(abs(slope)) ? slope : nil
+    return abs(slope) <= 0.6 ? slope : nil
   }
 
   private static func boxHeight(_ line: OCRLine, _ height: Double) -> Double {

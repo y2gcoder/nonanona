@@ -69,10 +69,12 @@ public enum ItemExtractor {
   static let number = #"[0-9][0-9,.]*"#
   static let priceBox = #"^[¥]?\s*[0-9][0-9,.]*\s*円?$"#
 
+  static let priceSuffixBox = #"^(?:[※*軽外内]\s*\)?|\))$"#
+
   struct Row {
     let lineIDs: [Int]
     let text: String
-    /// 둘 이상의 OCR 상자이고 마지막 상자가 숫자(와 ¥·円)뿐이다(가격 열이 따로 읽힘).
+    /// 가격 열이 따로 읽혔다. 오른쪽 끝의 별도 세금 표시는 건너뛴다.
     let separatePriceBox: Bool
     let uncertainLink: Bool
   }
@@ -93,11 +95,16 @@ public enum ItemExtractor {
     return groups.map { group in
       let ordered = group.sorted { ($0.line.x, $0.line.id) < ($1.line.x, $1.line.id) }
       let lines = ordered.map(\.line)
-      let last = normalize(lines.last?.text ?? "")
-      let separate = ordered.count > 1 && matches(priceBox, last)
+      let amountIndex = ordered.lastIndex { !matches(priceSuffixBox, normalize($0.line.text)) }
+      let amountText = amountIndex.map { normalize(ordered[$0].line.text) } ?? ""
+      let separate = (amountIndex ?? 0) > 0 && matches(priceBox, amountText)
       let uncertain =
-        ordered.count > 1 && isAmountBox(last)
-        && uncertainLink(amount: ordered[ordered.count - 1], row: ordered, boxes: sorted)
+        if let amountIndex, amountIndex > 0, isAmountBox(amountText) {
+          uncertainLink(
+            amount: ordered[amountIndex], row: ordered[..<amountIndex], boxes: sorted, corrected: corrected)
+        } else {
+          false
+        }
       return Row(
         lineIDs: lines.map(\.id).sorted(),
         text: lines.map { $0.text.trimmingCharacters(in: .whitespaces) }.joined(separator: " "),
@@ -111,16 +118,19 @@ public enum ItemExtractor {
   }
 
   private static func uncertainLink(
-    amount: ItemRowGeometry.Box, row: [ItemRowGeometry.Box], boxes: [ItemRowGeometry.Box]
+    amount: ItemRowGeometry.Box, row: ArraySlice<ItemRowGeometry.Box>, boxes: [ItemRowGeometry.Box], corrected: Bool
   ) -> Bool {
     func nameBox(_ box: ItemRowGeometry.Box) -> Bool {
       let text = normalize(box.line.text)
-      return box.line.x + box.line.width <= amount.line.x && matches(#"\p{L}"#, text) && !isAmountBox(text)
+      return box.centerX < amount.centerX && matches(#"\p{L}"#, text)
+        && !matches(priceSuffixBox, text) && !isAmountBox(text)
     }
     guard let name = row.first(where: nameBox) else { return false }
     let distance = amount.distance(to: name)
-    if distance > 0.35 || amount.disagreesWithDirection(of: name) { return true }
-    if row.dropLast().contains(where: { isAmountBox(normalize($0.line.text)) }) { return true }
+    if (corrected && amount.needsCorrectionToJoin(name)) || distance > 0.35 || amount.disagreesWithDirection(of: name) {
+      return true
+    }
+    if row.contains(where: { isAmountBox(normalize($0.line.text)) }) { return true }
     return boxes.contains { box in
       let alternative = amount.distance(to: box)
       guard alternative < 0.65, alternative <= distance + 0.22, box.line.id != name.line.id else { return false }

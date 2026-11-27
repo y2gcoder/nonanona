@@ -101,9 +101,10 @@ class ReceiptItemsTest {
     fun sharedRowGeometry() {
         for (scenario in JSONArray(File(dir, "row-geometry.json").readText()).objects()) {
             val name = scenario.getString("name")
-            val ocr = ocr(scenario.getJSONArray("lines"), 800, 1200)
+            val ocr = ocr(scenario.getJSONArray("lines"), scenario.getInt("pixelWidth"), scenario.getInt("pixelHeight"))
             val total = scenario.getLong("receiptTotal")
             val result = ItemExtractor.extract(ocr, total)
+            if (scenario.has("ocrTotal")) assertEquals(name, scenario.getLong("ocrTotal"), result.ocrTotalMinor)
             val items = scenario.getJSONArray("items").objects()
             assertEquals(name, items.map { it.getString("id") }, result.candidates.map { it.id })
             for ((got, want) in result.candidates.zip(items)) {

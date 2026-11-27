@@ -8,11 +8,18 @@ internal object ItemRowGeometry {
         val line: OcrLine,
         val centerX: Double,
         val observedY: Double,
+        val observedHeight: Double,
         val centerY: Double,
         val height: Double,
         val observedSlope: Double?,
     ) {
         fun distance(other: Box): Double = abs(centerY - other.centerY) / maxOf(height, other.height, 1.0)
+
+        /** 보정 전에는 두 상자가 기존의 행 묶음 허용 범위 밖에 있었는지 본다. */
+        fun needsCorrectionToJoin(other: Box): Boolean {
+            val earlierHeight = if (observedY <= other.observedY) observedHeight else other.observedHeight
+            return abs(observedY - other.observedY) >= maxOf(1.0, earlierHeight) / 2
+        }
 
         fun disagreesWithDirectionOf(name: Box): Boolean {
             val slope = name.observedSlope ?: return false
@@ -33,7 +40,8 @@ internal object ItemRowGeometry {
             ocr.lines.map { line ->
                 val centerX = (line.x + line.width / 2 - 0.5) * width
                 val y = (line.y + line.height / 2) * height
-                Box(line, centerX, y, y, line.height * height, slope(line, width, height))
+                val observedHeight = line.height * height
+                Box(line, centerX, y, observedHeight, y, observedHeight, slope(line, width, height))
             }
         val directions =
             original
@@ -41,10 +49,15 @@ internal object ItemRowGeometry {
                     val slope = box.observedSlope ?: return@mapNotNull null
                     Direction(box.observedY - slope * box.centerX, slope)
                 }.sortedBy { it.y }
-        if (directions.size < 2) return original to false
-        val dominant = median(directions.map { it.slope })
-        val top = directions.take(directions.size / 2)
-        val bottom = directions.takeLast(directions.size / 2)
+        // 수평에 가까운 긴 상자도 분모에 넣는다. 바닥이나 배경만 기울어진 사진에는 전체 보정을 쓰지 않는다.
+        val positive = directions.filter { it.slope >= 0.01 }
+        val negative = directions.filter { it.slope <= -0.01 }
+        val agreeing = if (positive.size >= negative.size) positive else negative
+        if (agreeing.size < 2 || agreeing.size <= directions.size / 2) return original to false
+        val dominant = median(agreeing.map { it.slope })
+        if (abs(dominant) < 0.015) return original to false
+        val top = agreeing.take(agreeing.size / 2)
+        val bottom = agreeing.takeLast(agreeing.size / 2)
         val topY = median(top.map { it.y })
         val span = median(bottom.map { it.y }) - topY
         val topSlope = median(top.map { it.slope })
@@ -74,9 +87,9 @@ internal object ItemRowGeometry {
         val corners = line.corners?.takeIf { it.size == 8 } ?: return null
         val dx = (corners[2] - corners[0] + corners[4] - corners[6]) * width / 2
         val dy = (corners[3] - corners[1] + corners[5] - corners[7]) * height / 2
-        // 짧은 줄이나 축 정렬 상자는 방향 추정에 쓰지 않는다.
+        // 짧은 상자와 가로 글줄로 보기 어려운 상자는 방향 추정에 쓰지 않는다.
         if (dx < maxOf(12.0, 4 * boxHeight(line, height))) return null
-        return (dy / dx).takeIf { abs(it) in 0.02..0.6 }
+        return (dy / dx).takeIf { abs(it) <= 0.6 }
     }
 
     private fun boxHeight(

@@ -116,6 +116,8 @@ object ItemExtractor {
     private val priceBox = Regex("^[¥]?\\s*[0-9][0-9,.]*\\s*円?\$")
     private val letter = Regex("\\p{L}")
 
+    private val priceSuffixBox = Regex("^(?:[※*軽外内]\\s*\\)?|\\))$")
+
     private class Row(
         val lineIds: List<Int>,
         val text: String,
@@ -138,12 +140,15 @@ object ItemExtractor {
         return groups.map { group ->
             val ordered = group.sortedWith(compareBy({ it.line.x }, { it.line.id }))
             val lines = ordered.map { it.line }
-            val separate = ordered.size > 1 && priceBox.matches(normalize(lines.last().text))
+            val amountIndex = ordered.indexOfLast { !priceSuffixBox.matches(normalize(it.line.text)) }
+            val amountText = ordered.getOrNull(amountIndex)?.let { normalize(it.line.text) }.orEmpty()
+            val separate = amountIndex > 0 && priceBox.matches(amountText)
             Row(
                 lines.map { it.id }.sorted(),
                 lines.joinToString(" ") { it.text.trim() },
                 separate,
-                ordered.size > 1 && isAmountBox(normalize(lines.last().text)) && uncertainLink(ordered.last(), ordered, sorted),
+                amountIndex > 0 && isAmountBox(amountText) &&
+                    uncertainLink(ordered[amountIndex], ordered.subList(0, amountIndex), sorted, corrected),
             )
         }
     }
@@ -159,15 +164,17 @@ object ItemExtractor {
         amount: ItemRowGeometry.Box,
         row: List<ItemRowGeometry.Box>,
         boxes: List<ItemRowGeometry.Box>,
+        corrected: Boolean,
     ): Boolean {
         fun nameBox(box: ItemRowGeometry.Box): Boolean {
             val text = normalize(box.line.text)
-            return box.line.x + box.line.width <= amount.line.x && letter.containsMatchIn(text) && !isAmountBox(text)
+            return box.centerX < amount.centerX && letter.containsMatchIn(text) &&
+                !priceSuffixBox.matches(text) && !isAmountBox(text)
         }
         val name = row.firstOrNull(::nameBox) ?: return false
         val distance = amount.distance(name)
-        if (distance > 0.35 || amount.disagreesWithDirectionOf(name)) return true
-        if (row.dropLast(1).any { isAmountBox(normalize(it.line.text)) }) return true
+        if ((corrected && amount.needsCorrectionToJoin(name)) || distance > 0.35 || amount.disagreesWithDirectionOf(name)) return true
+        if (row.any { isAmountBox(normalize(it.line.text)) }) return true
         return boxes.any { box ->
             val alternative = amount.distance(box)
             if (alternative >= 0.65 || alternative > distance + 0.22 || box.line.id == name.line.id) return@any false

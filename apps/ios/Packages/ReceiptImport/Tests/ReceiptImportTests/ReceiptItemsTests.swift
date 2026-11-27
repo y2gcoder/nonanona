@@ -213,16 +213,20 @@ struct ReceiptItemsTests {
         let flags: [String]
       }
       let name: String
+      let pixelWidth: Int
+      let pixelHeight: Int
       let receiptTotal: Int
+      let ocrTotal: Int?
       let lines: [OCRLine]
       let items: [Expected]
     }
     let scenarios = try JSONDecoder().decode(
       [Scenario].self, from: Data(contentsOf: itemFixtures.appending(path: "row-geometry.json")))
     for scenario in scenarios {
-      let ocr = OCRResult(pixelWidth: 800, pixelHeight: 1200, lines: scenario.lines)
+      let ocr = OCRResult(pixelWidth: scenario.pixelWidth, pixelHeight: scenario.pixelHeight, lines: scenario.lines)
       let result = ItemExtractor.extract(ocr, receiptTotal: scenario.receiptTotal)
       let note = Comment(rawValue: scenario.name)
+      if let total = scenario.ocrTotal { #expect(result.ocrTotalMinor == total, note) }
       #expect(result.candidates.map(\.id) == scenario.items.map(\.id), note)
       for (got, want) in zip(result.candidates, scenario.items) {
         #expect(got.sourceLineIDs == want.sourceLineIDs, note)
@@ -234,10 +238,10 @@ struct ReceiptItemsTests {
             date: "2026-11-06", amountMinor: scenario.receiptTotal, currency: "JPY", merchant: nil)
           var plan = try #require(ItemPlan.seed(fields: fields, ocr: ocr))
           plan.setName(got.id, "녹차")
-          let saved = try JSONDecoder().decode(ItemPlan.self, from: JSONEncoder().encode(plan))
+          var saved = try JSONDecoder().decode(ItemPlan.self, from: JSONEncoder().encode(plan))
           #expect(saved.line(got.id)?.needsCheck == true, note)
-          plan.markChecked(got.id)
-          #expect(plan.line(got.id)?.needsCheck == false, note)
+          saved.markChecked(got.id)
+          #expect(saved.line(got.id)?.needsCheck == false, note)
         }
       }
     }

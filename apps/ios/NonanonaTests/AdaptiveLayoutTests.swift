@@ -278,8 +278,10 @@ struct AdaptiveStateTests {
     model.startReview(draftID: draft.id)
     let first = try #require(model.reviewing)
     try await until("제안이") { model.proposals[first] != nil }
+    let reviewFile = root.appending(path: "receipt-import/drafts/\(draft.id)/reviews/\(first.itemID).json")
     model.edit(first, .amount("1500"))
-    try await Task.sleep(for: .milliseconds(200))
+    // 첫 입력이 디스크에 남은 뒤 다음 입력에만 쓰기 실패를 주입한다.
+    try await until("첫 입력 저장이") { FileManager.default.fileExists(atPath: reviewFile.path) }
 
     faults.set(["reviews/"])
     model.edit(first, .amount("1600"))

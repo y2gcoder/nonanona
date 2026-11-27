@@ -21,6 +21,17 @@ internal object ItemRowGeometry {
             return abs(observedY - other.observedY) >= maxOf(1.0, earlierHeight) / 2
         }
 
+        /** 보정과 같은 방향으로 기운 이름 상자라면, 그 상자 자체의 기울기만 따라가도 금액이 같은 행에 들어오는지 본다. */
+        fun joinsAlongSlopeOf(
+            name: Box,
+            direction: Double,
+        ): Boolean {
+            val slope = name.observedSlope ?: return false
+            if (abs(slope) < 0.01 || slope * direction <= 0) return false
+            val predictedY = name.observedY + slope * (centerX - name.centerX)
+            return abs(observedY - predictedY) < maxOf(height, name.height, 1.0) / 2
+        }
+
         fun disagreesWithDirectionOf(name: Box): Boolean {
             val slope = name.observedSlope ?: return false
             val predictedY = name.observedY + slope * (centerX - name.centerX)
@@ -28,12 +39,21 @@ internal object ItemRowGeometry {
         }
     }
 
+    /** 사진 전체에 쓴 보정. `strong`이면 기울기를 잰 긴 상자의 3분의 2 이상이 같은 방향이다. */
+    data class Correction(
+        val slope: Double,
+        val agreeing: Int,
+        val measured: Int,
+    ) {
+        val strong: Boolean get() = agreeing * 3 >= measured * 2
+    }
+
     private data class Direction(
         val y: Double,
         val slope: Double,
     )
 
-    fun boxes(ocr: OcrResult): Pair<List<Box>, Boolean> {
+    fun boxes(ocr: OcrResult): Pair<List<Box>, Correction?> {
         val width = maxOf(1, ocr.pixelWidth).toDouble()
         val height = maxOf(1, ocr.pixelHeight).toDouble()
         val original =
@@ -53,9 +73,9 @@ internal object ItemRowGeometry {
         val positive = directions.filter { it.slope >= 0.01 }
         val negative = directions.filter { it.slope <= -0.01 }
         val agreeing = if (positive.size >= negative.size) positive else negative
-        if (agreeing.size < 2 || agreeing.size <= directions.size / 2) return original to false
+        if (agreeing.size < 2 || agreeing.size <= directions.size / 2) return original to null
         val dominant = median(agreeing.map { it.slope })
-        if (abs(dominant) < 0.015) return original to false
+        if (abs(dominant) < 0.015) return original to null
         val top = agreeing.take(agreeing.size / 2)
         val bottom = agreeing.takeLast(agreeing.size / 2)
         val topY = median(top.map { it.y })
@@ -76,7 +96,7 @@ internal object ItemRowGeometry {
                 }
                 box.copy(centerY = y - slope * offset, height = boxHeight(box.line, height))
             }
-        return boxes to true
+        return boxes to Correction(dominant, agreeing.size, directions.size)
     }
 
     private fun slope(

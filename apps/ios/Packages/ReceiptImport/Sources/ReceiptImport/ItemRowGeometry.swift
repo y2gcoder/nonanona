@@ -21,6 +21,13 @@ enum ItemRowGeometry {
       return abs(observedY - other.observedY) >= max(1, earlierHeight) / 2
     }
 
+    /// 보정과 같은 방향으로 기운 이름 상자라면, 그 상자 자체의 기울기만 따라가도 금액이 같은 행에 들어오는지 본다.
+    func joinsAlongSlope(of name: Box, direction: Double) -> Bool {
+      guard let slope = name.observedSlope, abs(slope) >= 0.01, slope * direction > 0 else { return false }
+      let predictedY = name.observedY + slope * (centerX - name.centerX)
+      return abs(observedY - predictedY) < max(height, name.height, 1) / 2
+    }
+
     func disagreesWithDirection(of name: Box) -> Bool {
       guard let slope = name.observedSlope else { return false }
       let predictedY = name.observedY + slope * (centerX - name.centerX)
@@ -28,12 +35,21 @@ enum ItemRowGeometry {
     }
   }
 
+  /// 사진 전체에 쓴 보정. `strong`이면 기울기를 잰 긴 상자의 3분의 2 이상이 같은 방향이다.
+  struct Correction {
+    let slope: Double
+    let agreeing: Int
+    let measured: Int
+
+    var strong: Bool { agreeing * 3 >= measured * 2 }
+  }
+
   private struct Direction {
     let y: Double
     let slope: Double
   }
 
-  static func boxes(_ ocr: OCRResult) -> (boxes: [Box], corrected: Bool) {
+  static func boxes(_ ocr: OCRResult) -> (boxes: [Box], correction: Correction?) {
     let width = Double(max(1, ocr.pixelWidth))
     let height = Double(max(1, ocr.pixelHeight))
     let original = ocr.lines.map { line in
@@ -53,9 +69,9 @@ enum ItemRowGeometry {
     let positive = directions.filter { $0.slope >= 0.01 }
     let negative = directions.filter { $0.slope <= -0.01 }
     let agreeing = positive.count >= negative.count ? positive : negative
-    guard agreeing.count >= 2, agreeing.count > directions.count / 2 else { return (original, false) }
+    guard agreeing.count >= 2, agreeing.count > directions.count / 2 else { return (original, nil) }
     let dominant = median(agreeing.map(\.slope))
-    guard abs(dominant) >= 0.015 else { return (original, false) }
+    guard abs(dominant) >= 0.015 else { return (original, nil) }
     let midpoint = agreeing.count / 2
     let top = agreeing.prefix(midpoint)
     let bottom = agreeing.suffix(midpoint)
@@ -79,7 +95,7 @@ enum ItemRowGeometry {
       corrected.height = boxHeight(box.line, height)
       return corrected
     }
-    return (boxes, true)
+    return (boxes, Correction(slope: dominant, agreeing: agreeing.count, measured: directions.count))
   }
 
   private static func slope(_ line: OCRLine, width: Double, height: Double) -> Double? {

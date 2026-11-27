@@ -15,6 +15,9 @@ public enum ItemFlag: String, Codable, Sendable, CaseIterable {
   case exceedsTotal
   /// 둘 이상의 행에서 가져올 수 있거나 위치가 어긋난 금액이다.
   case amountLinkUncertain
+
+  /// 금액 자체를 의심하는 표시. 이름을 고쳐도 풀리지 않고 금액을 고치거나 "확인함"을 눌러야 한다.
+  var needsAmountCheck: Bool { self == .exceedsTotal || self == .amountLinkUncertain }
 }
 
 /// 품목이 아닌 영수증 요약 줄. 나누기에 자동으로 넣지 않고 보여 주기만 한다.
@@ -80,7 +83,8 @@ public enum ItemExtractor {
   }
 
   static func rows(_ ocr: OCRResult) -> [Row] {
-    let (boxes, corrected) = ItemRowGeometry.boxes(ocr)
+    let (boxes, correction) = ItemRowGeometry.boxes(ocr)
+    let corrected = correction != nil
     let sorted = boxes.sorted { ($0.centerY, $0.line.id) < ($1.centerY, $1.line.id) }
     var groups: [[ItemRowGeometry.Box]] = []
     for box in sorted {
@@ -101,7 +105,7 @@ public enum ItemExtractor {
       let uncertain =
         if let amountIndex, amountIndex > 0, isAmountBox(amountText) {
           uncertainLink(
-            amount: ordered[amountIndex], row: ordered[..<amountIndex], boxes: sorted, corrected: corrected)
+            amount: ordered[amountIndex], row: ordered[..<amountIndex], boxes: sorted, correction: correction)
         } else {
           false
         }
@@ -118,7 +122,8 @@ public enum ItemExtractor {
   }
 
   private static func uncertainLink(
-    amount: ItemRowGeometry.Box, row: ArraySlice<ItemRowGeometry.Box>, boxes: [ItemRowGeometry.Box], corrected: Bool
+    amount: ItemRowGeometry.Box, row: ArraySlice<ItemRowGeometry.Box>, boxes: [ItemRowGeometry.Box],
+    correction: ItemRowGeometry.Correction?
   ) -> Bool {
     func nameBox(_ box: ItemRowGeometry.Box) -> Bool {
       let text = normalize(box.line.text)
@@ -127,7 +132,16 @@ public enum ItemExtractor {
     }
     guard let name = row.first(where: nameBox) else { return false }
     let distance = amount.distance(to: name)
-    if (corrected && amount.needsCorrectionToJoin(name)) || distance > 0.35 || amount.disagreesWithDirection(of: name) {
+    // 보정해야만 묶인 금액은 확인한다. 다만 긴 상자 대부분이 같은 방향이고 이름 상자 자체의 기울기도 그 금액을 가리키면
+    // 보정 없이도 같은 행이라는 근거가 있으므로 표시하지 않는다. 바닥이나 배경만 기운 사진은 여기서 막힌다.
+    let joinedOnlyByCorrection =
+      if let correction {
+        amount.needsCorrectionToJoin(name)
+          && !(correction.strong && amount.joinsAlongSlope(of: name, direction: correction.slope))
+      } else {
+        false
+      }
+    if joinedOnlyByCorrection || distance > 0.35 || amount.disagreesWithDirection(of: name) {
       return true
     }
     if row.contains(where: { isAmountBox(normalize($0.line.text)) }) { return true }
@@ -348,7 +362,7 @@ public struct ItemPlan: Codable, Equatable, Sendable {
     update(id) {
       $0.name = text
       $0.nameSource = .user
-      if !$0.flags.contains(.amountLinkUncertain) { $0.checked = true }
+      if !$0.flags.contains(where: \.needsAmountCheck) { $0.checked = true }
     }
   }
 

@@ -114,11 +114,17 @@ class ReceiptItemsTest {
                 assertEquals(name, if (want.isNull("amount")) null else want.getLong("amount"), got.amountMinor)
                 val flags = want.getJSONArray("flags").strings()
                 assertEquals(name, flags, got.flags.map { it.wire })
-                if ("amountLinkUncertain" in flags) {
+                // 금액을 의심하는 표시(연결 불확실·합계 초과)는 이름을 고쳐도 풀리지 않고 나누기를 막는다.
+                if ("amountLinkUncertain" in flags || "exceedsTotal" in flags) {
                     val fields = AllowedReceiptFields("2026-11-06", total, "JPY", null)
                     val plan = requireNotNull(ItemPlan.seed(fields, ocr)).setName(got.id, "녹차")
                     val saved = ItemPlan.fromJson(plan.toJson())
                     assertEquals(name, true, saved.line(got.id)?.needsCheck)
+                    val assigned = saved.lines.fold(saved) { p, line -> p.setAssignee(line.id, "a", true) }
+                    val blocked = ItemAllocator.allocate(assigned, 10000, "a", listOf("a"))
+                    val unchecked = assigned.lines.firstOrNull { it.needsCheck }?.id
+                    assertNotNull(name, unchecked)
+                    assertEquals(name, unchecked, (blocked.problem as? ItemAllocationProblem.NeedsCheck)?.lineId)
                     assertEquals(name, false, saved.markChecked(got.id).line(got.id)?.needsCheck)
                 }
             }

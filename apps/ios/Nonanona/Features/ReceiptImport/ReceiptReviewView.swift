@@ -246,6 +246,10 @@ struct ReceiptReviewView: View {
           label: "금액", text: content.review.amount, problem: problem(.amount), id: "review-amount",
           keyboard: .decimalPad
         ) { actions.edit(.amount($0)) }
+        if content.proposal?.needsTotalReview == true {
+          Text("기울어진 사진에서 찾은 합계예요. 원본의 합계와 비교해 주세요.")
+            .textRole(.caption).foregroundStyle(.secondary)
+        }
         Picker(
           "통화",
           selection: Binding(get: { content.review.currency }, set: { actions.edit(.currency($0)) })

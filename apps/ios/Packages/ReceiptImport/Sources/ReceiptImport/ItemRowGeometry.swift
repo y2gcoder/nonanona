@@ -1,6 +1,6 @@
 import Foundation
 
-/// 품목 추출에서만 사진을 가로로 펴서 본다. Android의 ItemRowGeometry와 같은 규칙이다.
+/// 품목과 제안 필드를 찾을 때 사진을 가로로 펴서 본다. Android의 ItemRowGeometry와 같은 규칙이다.
 enum ItemRowGeometry {
   struct Box {
     let line: OCRLine

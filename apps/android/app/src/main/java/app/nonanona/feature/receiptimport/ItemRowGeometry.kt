@@ -2,7 +2,7 @@ package app.nonanona.feature.receiptimport
 
 import kotlin.math.abs
 
-/** 품목 추출에서만 사진을 가로로 펴서 본다. iOS의 ItemRowGeometry와 같은 규칙이다. */
+/** 품목과 제안 필드를 찾을 때 사진을 가로로 펴서 본다. iOS의 ItemRowGeometry와 같은 규칙이다. */
 internal object ItemRowGeometry {
     data class Box(
         val line: OcrLine,

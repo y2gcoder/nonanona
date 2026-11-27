@@ -30,6 +30,7 @@ struct KoreanOCRRulesTests {
   private struct FieldLine: Decodable {
     let text: String
     let box: [Double]
+    let corners: [Double]?
   }
 
   private struct FieldExpect: Decodable {
@@ -37,6 +38,7 @@ struct KoreanOCRRulesTests {
     let currency: String?
     let date: String?
     let failure: String?
+    let needsTotalReview: Bool?
   }
 
   private struct FieldCase: Decodable {
@@ -74,21 +76,27 @@ struct KoreanOCRRulesTests {
     var wrong: [String] = []
     for entry in table.cases {
       let lines = entry.lines.enumerated().map { id, line in
-        OCRLine(
+        let corners = line.corners.map { points in
+          stride(from: 0, to: points.count, by: 2).map { CGPoint(x: points[$0] / width, y: points[$0 + 1] / height) }
+        }
+        return OCRLine(
           id: id, text: line.text, x: line.box[0] / width, y: line.box[1] / height,
-          width: (line.box[2] - line.box[0]) / width, height: (line.box[3] - line.box[1]) / height)
+          width: (line.box[2] - line.box[0]) / width, height: (line.box[3] - line.box[1]) / height,
+          corners: corners)
       }
       let ocr = OCRResult(pixelWidth: Int(width), pixelHeight: Int(height), lines: lines)
       let actual: String
       do {
-        let fields = try ProposalBuilder.make(ocr).fields
-        actual = "\(fields.amountMinor) \(fields.currency) \(fields.date)"
-      } catch {
+        let proposal = try ProposalBuilder.make(ocr)
+        let stored = try JSONDecoder().decode(OCRProposal.self, from: JSONEncoder().encode(proposal))
+        let fields = stored.fields
+        actual = "\(fields.amountMinor) \(fields.currency) \(fields.date) \(stored.needsTotalReview == true)"
+      } catch let error as ProcessingFailure {
         actual = error.rawValue
       }
       let expected =
         entry.expect.failure
-        ?? "\(entry.expect.amount ?? -1) \(entry.expect.currency ?? "") \(entry.expect.date ?? "")"
+        ?? "\(entry.expect.amount ?? -1) \(entry.expect.currency ?? "") \(entry.expect.date ?? "") \(entry.expect.needsTotalReview == true)"
       if actual != expected { wrong.append("\(entry.id): expected \(expected), got \(actual)") }
     }
     #expect(wrong.isEmpty, "\(wrong)")

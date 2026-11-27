@@ -53,6 +53,8 @@ public struct OCRProposal: Codable, Equatable, Sendable {
   public let suggestedMaskLineIDs: [Int]
   /// 옛 초안에는 재확인 결과가 없으므로 검토 화면에서 확인을 안내한다.
   public internal(set) var needsMaskReview: Bool? = nil
+  /// 행 보정 뒤에만 연결된 합계는 원본에서 확인하도록 안내한다.
+  public internal(set) var needsTotalReview: Bool? = nil
 
   /// 가림 표시와 PNG 굽기가 공유하는 왼쪽 위 기준 0~1 좌표.
   public func maskPolygons(lineIDs: Set<Int>, regions: [MaskRegion]) -> [[CGPoint]] {
@@ -285,8 +287,9 @@ enum ProposalBuilder {
 
   static func make(_ ocr: OCRResult) throws(ProcessingFailure) -> OCRProposal {
     guard !ocr.lines.isEmpty else { throw .unreadable }
-    guard let total = total(ocr.lines) else { throw .missingTotal }
-    guard let date = date(ocr.lines) else { throw .missingDate }
+    let rows = ProposalRows(ocr: ocr)
+    guard let total = total(rows) else { throw .missingTotal }
+    guard let date = date(rows) else { throw .missingDate }
     let merchant = ocr.lines.first?.text.trimmingCharacters(in: .whitespaces)
     let masks = SensitiveLines(ocr)
     let currency = currency(totalText: total.text, allTexts: ocr.lines.map(\.text))
@@ -294,7 +297,8 @@ enum ProposalBuilder {
       ocr: ocr,
       fields: AllowedReceiptFields(date: date, amountMinor: total.amount, currency: currency, merchant: merchant),
       suggestedMaskLineIDs: masks.ids.sorted(),
-      needsMaskReview: masks.unmatchedLabel || masks.isTilted)
+      needsMaskReview: masks.unmatchedLabel || masks.isTilted,
+      needsTotalReview: total.needsReview ? true : nil)
   }
 
   /// 결제일 라벨(결제일·결제일시·결제 일자, 라벨 끝을 확인해 `결제 일정`은 아니다). 숙소 화면의 체크인처럼 앞에 나오는 다른 날짜보다 우선한다.
@@ -302,16 +306,14 @@ enum ProposalBuilder {
 
   /// 지출 날짜: 결제일 라벨 줄의 날짜, 없으면 그 줄과 같은 행 오른쪽 상자의 날짜(가까운 순), 결제일 라벨이 없거나 날짜를 못 찾으면
   /// 위에서부터 첫 날짜.
-  static func date(_ lines: [OCRLine]) -> String? {
-    for line in lines where matches(paymentDateLabel, line.text) {
+  private static func date(_ rows: ProposalRows) -> String? {
+    let labels = rows.lines.filter { matches(paymentDateLabel, $0.text) }
+    for line in labels {
       if let date = isoDate(line.text) { return date }
-      let row = lines.filter {
-        $0.id != line.id && abs(($0.y + $0.height / 2) - (line.y + line.height / 2)) < line.height / 2
-          && $0.x > line.x
-      }.sorted { $0.x < $1.x }
+      let row = rows.observedRight(of: line).sorted { $0.x < $1.x }
       if let date = row.lazy.compactMap({ isoDate($0.text) }).first { return date }
     }
-    return lines.lazy.compactMap { isoDate($0.text) }.first
+    return rows.correctedValue(labels) { isoDate($0.text) } ?? rows.lines.lazy.compactMap { isoDate($0.text) }.first
   }
 
   static func isoDate(_ raw: String) -> String? {
@@ -326,28 +328,63 @@ enum ProposalBuilder {
   }
 
   /// 합계 금액과 그 금액을 읽은 글자(통화 판정용).
-  struct Total: Equatable {
+  private struct Total {
     let amount: Int
     let text: String
+    var needsReview = false
   }
 
-  static func total(_ lines: [OCRLine]) -> Total? {
-    let candidates = lines.filter { matches(totalKeyword, $0.text) && !matches(subtotalKeyword, $0.text) }
-    for line in candidates {
+  // 보정으로 추가하는 후보는 금액 한 상자다. 날짜나 다른 라벨에서 숫자만 떼지 않는다.
+  private static let amountBox = #"^(?:[¥￥₩W\\]|JPY|KRW)?\s*[0-9][0-9,，.]*\s*(?:円|원|JPY|KRW)?$"#
+
+  private static func total(_ rows: ProposalRows) -> Total? {
+    let labels = rows.lines.filter { matches(totalKeyword, $0.text) && !matches(subtotalKeyword, $0.text) }
+    for line in labels {
       if let value = number(after: totalKeyword, in: line.text) { return Total(amount: value, text: line.text) }
-      // OCR이 "合計"와 금액을 같은 행의 두 상자로 나눈 경우.
-      let row = lines.filter {
-        $0.id != line.id && abs(($0.y + $0.height / 2) - (line.y + line.height / 2)) < line.height / 2
-          && $0.x > line.x
-      }
-      if let found = row.lazy.compactMap({ other in
+      if let found = rows.observedRight(of: line).lazy.compactMap({ other in
         number(after: "", in: other.text).map { Total(amount: $0, text: other.text) }
-      })
-      .first {
+      }).first {
         return found
       }
     }
-    return nil
+    return rows.correctedValue(labels) { other in
+      guard matches(amountBox, other.text.trimmingCharacters(in: .whitespacesAndNewlines)),
+        isoDate(other.text) == nil, let amount = number(after: "", in: other.text)
+      else { return nil }
+      return Total(amount: amount, text: other.text, needsReview: true)
+    }
+  }
+
+  private final class ProposalRows {
+    let ocr: OCRResult
+    var lines: [OCRLine] { ocr.lines }
+    private lazy var geometry = ItemRowGeometry.boxes(ocr)
+
+    init(ocr: OCRResult) { self.ocr = ocr }
+
+    func observedRight(of label: OCRLine) -> [OCRLine] {
+      let mid = label.y + label.height / 2
+      return lines.filter {
+        $0.id != label.id && $0.x > label.x && abs($0.y + $0.height / 2 - mid) < label.height / 2
+      }
+    }
+
+    // 관측 좌표에서 값을 얻지 못했을 때만 부른다. 합의가 있는 보정으로도 후보가 여럿이면 값을 고르지 않는다.
+    func correctedValue<T>(_ labels: [OCRLine], value: (OCRLine) -> T?) -> T? {
+      guard !labels.isEmpty else { return nil }
+      let (boxes, correction) = geometry
+      guard correction != nil else { return nil }
+      for line in labels {
+        guard let label = boxes.first(where: { $0.line.id == line.id }) else { continue }
+        let values = boxes.compactMap { other -> T? in
+          guard other.line.x > line.x, other.distance(to: label) < 0.5, !other.disagreesWithDirection(of: label)
+          else { return nil }
+          return value(other.line)
+        }
+        if values.count == 1 { return values.first }
+      }
+      return nil
+    }
   }
 
   /// 원·円은 숫자 뒤 금액 접미사, ₩·¥는 숫자 앞, 통화 코드는 앞이 영숫자가 아니거나(뒤에 금액 가능) 독립된 금액 토큰 바로 뒤의 토큰, W는 숫자

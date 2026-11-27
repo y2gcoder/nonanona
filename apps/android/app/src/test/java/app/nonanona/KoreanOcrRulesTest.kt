@@ -2,6 +2,7 @@ package app.nonanona
 
 import app.nonanona.feature.receiptimport.OcrLanguageChoice
 import app.nonanona.feature.receiptimport.OcrLine
+import app.nonanona.feature.receiptimport.OcrProposal
 import app.nonanona.feature.receiptimport.OcrResult
 import app.nonanona.feature.receiptimport.ProcessingException
 import app.nonanona.feature.receiptimport.ProcessingFailure
@@ -46,14 +47,21 @@ class KoreanOcrRulesTest {
                         val b = line.getJSONArray("box")
                         val l = b.getDouble(0) / width
                         val t = b.getDouble(1) / height
-                        OcrLine(id, line.getString("text"), l, t, b.getDouble(2) / width - l, b.getDouble(3) / height - t)
+                        val corners =
+                            line.optJSONArray("corners")?.let { points ->
+                                (0 until points.length()).map { index ->
+                                    points.getDouble(index) / if (index % 2 == 0) width else height
+                                }
+                            }
+                        OcrLine(id, line.getString("text"), l, t, b.getDouble(2) / width - l, b.getDouble(3) / height - t, corners)
                     }
                 val ocr = OcrResult(width.toInt(), height.toInt(), lines)
                 val expect = case.getJSONObject("expect")
                 val actual =
                     try {
-                        val fields = ProposalBuilder.make(ocr).fields
-                        "${fields.amountMinor} ${fields.currency} ${fields.date}"
+                        val proposal = OcrProposal.fromJson(ProposalBuilder.make(ocr).toJson())
+                        val fields = proposal.fields
+                        "${fields.amountMinor} ${fields.currency} ${fields.date} ${proposal.needsTotalReview}"
                     } catch (e: ProcessingException) {
                         e.failure.wire()
                     }
@@ -61,7 +69,9 @@ class KoreanOcrRulesTest {
                     if (expect.has("failure")) {
                         expect.getString("failure")
                     } else {
-                        "${expect.getLong("amount")} ${expect.getString("currency")} ${expect.getString("date")}"
+                        "${expect.getLong(
+                            "amount",
+                        )} ${expect.getString("currency")} ${expect.getString("date")} ${expect.optBoolean("needsTotalReview")}"
                     }
                 "${case.getString("id")}: expected $expected, got $actual".takeIf { actual != expected }
             }

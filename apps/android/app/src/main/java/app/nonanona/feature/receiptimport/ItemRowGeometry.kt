@@ -12,6 +12,8 @@ internal object ItemRowGeometry {
         val centerY: Double,
         val height: Double,
         val observedSlope: Double?,
+        /** 모서리로 잰 상자의 가로 길이(기울기를 잰 길이). 모서리가 없으면 0. */
+        val span: Double,
     ) {
         fun distance(other: Box): Double = abs(centerY - other.centerY) / maxOf(height, other.height, 1.0)
 
@@ -32,6 +34,12 @@ internal object ItemRowGeometry {
             return abs(observedY - predictedY) < maxOf(height, name.height, 1.0) / 2
         }
 
+        /** 모서리가 보여 주는 기울어짐이 상자 높이의 절반 이상이다. 이보다 작으면 모서리 오차와 구분하기 어렵다. */
+        val showsTilt: Boolean get() = observedSlope?.let { abs(it) * span >= height / 2 } ?: false
+
+        /** 보정 전 좌표에서 기존 행 묶음 허용 범위(높이의 절반) 안에 있다. */
+        fun sharesObservedRowWith(other: Box): Boolean = !needsCorrectionToJoin(other)
+
         fun disagreesWithDirectionOf(name: Box): Boolean {
             val slope = name.observedSlope ?: return false
             val predictedY = name.observedY + slope * (centerX - name.centerX)
@@ -46,6 +54,13 @@ internal object ItemRowGeometry {
         val measured: Int,
     ) {
         val strong: Boolean get() = agreeing * 3 >= measured * 2
+
+        /** 같은 상자의 기울기를 합의와 연결 판단에 두 번 쓰지 않도록, `box`의 표를 빼고 3분의 2 이상인지 본다. */
+        fun strongExcluding(box: Box): Boolean {
+            val slope = box.observedSlope ?: return strong
+            val agreed = abs(slope) >= 0.01 && slope * this.slope > 0
+            return (agreeing - if (agreed) 1 else 0) * 3 >= (measured - 1) * 2
+        }
     }
 
     private data class Direction(
@@ -61,7 +76,7 @@ internal object ItemRowGeometry {
                 val centerX = (line.x + line.width / 2 - 0.5) * width
                 val y = (line.y + line.height / 2) * height
                 val observedHeight = line.height * height
-                Box(line, centerX, y, observedHeight, y, observedHeight, slope(line, width, height))
+                Box(line, centerX, y, observedHeight, y, observedHeight, slope(line, width, height), span(line, width))
             }
         val directions =
             original
@@ -99,13 +114,21 @@ internal object ItemRowGeometry {
         return boxes to Correction(dominant, agreeing.size, directions.size)
     }
 
+    private fun span(
+        line: OcrLine,
+        width: Double,
+    ): Double {
+        val corners = line.corners?.takeIf { it.size == 8 } ?: return 0.0
+        return (corners[2] - corners[0] + corners[4] - corners[6]) * width / 2
+    }
+
     private fun slope(
         line: OcrLine,
         width: Double,
         height: Double,
     ): Double? {
         val corners = line.corners?.takeIf { it.size == 8 } ?: return null
-        val dx = (corners[2] - corners[0] + corners[4] - corners[6]) * width / 2
+        val dx = span(line, width)
         val dy = (corners[3] - corners[1] + corners[5] - corners[7]) * height / 2
         // 짧은 상자와 가로 글줄로 보기 어려운 상자는 방향 추정에 쓰지 않는다.
         if (dx < maxOf(12.0, 4 * boxHeight(line, height))) return null

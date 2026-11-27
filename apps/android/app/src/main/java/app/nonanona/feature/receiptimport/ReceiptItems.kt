@@ -179,10 +179,22 @@ object ItemExtractor {
         val distance = amount.distance(name)
         // 보정해야만 묶인 금액은 확인한다. 다만 긴 상자 대부분이 같은 방향이고 이름 상자 자체의 기울기도 그 금액을 가리키면
         // 보정 없이도 같은 행이라는 근거가 있으므로 표시하지 않는다. 바닥이나 배경만 기운 사진은 여기서 막힌다.
+        // 합의는 이 이름 상자의 표를 빼고 센다. 이름 상자의 기울어짐이 모서리 오차 정도로 작은데 보정 전 좌표에서 이 이름과
+        // 같은 행에 다른 금액이 있으면, 수평 영수증의 모서리 오차가 보정을 켠 것일 수 있으므로 표시한다.
         val joinedOnlyByCorrection =
             correction != null &&
                 amount.needsCorrectionToJoin(name) &&
-                !(correction.strong && amount.joinsAlongSlopeOf(name, correction.slope))
+                !(
+                    correction.strongExcluding(name) &&
+                        amount.joinsAlongSlopeOf(name, correction.slope) &&
+                        (
+                            name.showsTilt ||
+                                boxes.none { other ->
+                                    other.line.id != amount.line.id && other.centerX > name.centerX &&
+                                        isAmountBox(normalize(other.line.text)) && name.sharesObservedRowWith(other)
+                                }
+                        )
+                )
         if (joinedOnlyByCorrection || distance > 0.35 || amount.disagreesWithDirectionOf(name)) return true
         if (row.any { isAmountBox(normalize(it.line.text)) }) return true
         return boxes.any { box ->

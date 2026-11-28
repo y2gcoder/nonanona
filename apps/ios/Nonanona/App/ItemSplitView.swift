@@ -153,7 +153,7 @@ struct ItemSplitView: View {
           ? "미리보기 대역은 정해 둔 사전이에요. 실제 기계 번역이 아니에요."
           : "번역은 이 기기 안에서만 해요. 번역한 이름은 제안이라 고칠 수 있어요."
       )
-      .textRole(.caption)
+      .textRole(.supporting)
     }
   }
 
@@ -176,7 +176,7 @@ struct ItemSplitView: View {
     Section {
       if content.saveFailed {
         HStack {
-          Text("품목을 기기에 저장하지 못했어요.").textRole(.supporting).foregroundStyle(.red)
+          Text("품목을 기기에 저장하지 못했어요.").textRole(.supporting).foregroundStyle(Palette.error)
           Spacer()
           Button("다시 저장", action: actions.retrySave).accessibilityIdentifier("items-retry-save")
         }
@@ -211,7 +211,7 @@ struct ItemSplitView: View {
       Text("품목").textRole(.sectionTitle).foregroundStyle(.primary).textCase(nil)
     } footer: {
       Text("여러 사람을 고르면 그 줄을 똑같이 나눠요. 세금·할인은 저절로 나누지 않아요. 필요하면 조정 줄을 더해 누가 낼지 정해 주세요.")
-        .textRole(.caption)
+        .textRole(.supporting)
     }
   }
 
@@ -241,11 +241,11 @@ struct ItemSplitView: View {
         Text(
           "차이 \(Won.original(plan.difference, plan.currency)) — 세금·할인·빠진 품목 때문일 수 있어요. 금액을 고치거나 조정 줄을 더해 주세요."
         )
-        .textRole(.supporting).foregroundStyle(.orange).accessibilityIdentifier("items-difference")
+        .textRole(.supporting).foregroundStyle(Palette.attention).accessibilityIdentifier("items-difference")
       }
       if let ocr = plan.ocrTotalMinor, ocr != plan.receiptTotalMinor {
         Text("영수증에서 읽은 합계(\(Won.original(ocr, plan.currency)))가 확인한 합계와 달라요.")
-          .textRole(.supporting).foregroundStyle(.orange)
+          .textRole(.supporting).foregroundStyle(Palette.attention)
       }
     } header: {
       Text("영수증 요약(나누지 않음)").textRole(.sectionTitle).foregroundStyle(.primary).textCase(nil)
@@ -280,14 +280,14 @@ struct ItemSplitView: View {
           .listRowBackground(Color.clear)
       case .failure(let problem)?:
         Text(Self.message(problem, plan: plan, people: content.people))
-          .textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("items-problem")
+          .textRole(.supporting).foregroundStyle(Palette.error).accessibilityIdentifier("items-problem")
       case nil:
         EmptyView()
       }
     } header: {
       Text("사람마다 부담").textRole(.sectionTitle).foregroundStyle(.primary).textCase(nil)
     } footer: {
-      Text("채우기는 서버에 보내지 않아요. 지출 검토에서 확인하고 \"포함하기\"를 눌러야 여행방에 저장돼요.").textRole(.caption)
+      Text("채우기는 서버에 보내지 않아요. 지출 검토에서 확인하고 \"포함하기\"를 눌러야 여행방에 저장돼요.").textRole(.supporting)
     }
   }
 
@@ -306,7 +306,7 @@ struct ItemSplitView: View {
           case .remainder(let floors, let remaining):
             shareRows(floors)
             Text("원 단위로 나눠떨어지지 않아 \(Won.text(remaining))이 남아요. 남은 원을 낼 사람을 골라 주세요. 저절로 정하지 않아요.")
-              .textRole(.supporting).foregroundStyle(.orange).accessibilityIdentifier("items-remainder")
+              .textRole(.supporting).foregroundStyle(Palette.attention).accessibilityIdentifier("items-remainder")
             ForEach(Array(floors.enumerated()), id: \.element.member) { index, share in
               Button {
                 actions.chooseRemainder(share.member)
@@ -335,21 +335,22 @@ struct ItemSplitView: View {
             .listRowBackground(Color.clear)
         case .failure(let problem)?:
           Text(Self.message(problem, plan: plan, people: content.people))
-            .textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("items-problem")
+            .textRole(.supporting).foregroundStyle(Palette.error).accessibilityIdentifier("items-problem")
         case nil:
           EmptyView()
         }
       }
       if proposal.consentChanged {
         Text("확인 창을 연 뒤 지출이나 원화 기준이 바뀌어 보내지 않았어요. 바뀐 값을 확인하고 다시 보내 주세요.")
-          .textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("items-proposal-consent-changed")
+          .textRole(.supporting).foregroundStyle(Palette.error).accessibilityIdentifier(
+            "items-proposal-consent-changed")
       }
       switch proposal.sendState {
       case .sent?:
         Text("제안을 보냈어요. 방장이 확인하고 포함해야 정산에 들어가요.")
           .textRole(.supporting).accessibilityIdentifier("items-proposal-sent")
       case .failed(let failure)?:
-        Text(failure.message).textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier(
+        Text(failure.message).textRole(.supporting).foregroundStyle(Palette.error).accessibilityIdentifier(
           "items-proposal-failed")
       case .sending?, nil:
         EmptyView()
@@ -362,7 +363,7 @@ struct ItemSplitView: View {
       Text("방장에게 제안").textRole(.sectionTitle).foregroundStyle(.primary).textCase(nil)
     } footer: {
       Text("보내는 값: 사람마다 금액(원), 원화 기준과 합계, 지출 버전. 품목 이름·품목 금액·영수증 글자·사진은 보내지 않아요.")
-        .textRole(.caption)
+        .textRole(.supporting)
     }
   }
 
@@ -381,7 +382,7 @@ struct ItemSplitView: View {
     case .remainder(let floors, let remaining):
       shareRows(floors)
       Text("원 단위로 나눠떨어지지 않아 \(Won.text(remaining))이 남아요. 채운 뒤 \"직접 나누기\"에서 누가 낼지 정해 주세요.")
-        .textRole(.supporting).foregroundStyle(.orange).accessibilityIdentifier("items-remainder")
+        .textRole(.supporting).foregroundStyle(Palette.attention).accessibilityIdentifier("items-remainder")
     }
   }
 
@@ -427,7 +428,7 @@ private struct ItemLineRow: View {
       Text(
         line.originalText.isEmpty ? (line.kind == .adjustment ? "직접 더한 조정 줄" : "직접 더한 품목") : "원문: \(line.originalText)"
       )
-      .textRole(.caption).foregroundStyle(.secondary)
+      .textRole(.supporting).foregroundStyle(.secondary)
       .accessibilityIdentifier("item-\(line.id)-original")
       TextField(
         line.kind == .adjustment ? "이름(예: 소비세, 할인)" : "한국어 이름",
@@ -435,7 +436,7 @@ private struct ItemLineRow: View {
       )
       .accessibilityIdentifier("item-\(line.id)-name")
       if let source = sourceLabel {
-        Text(source).textRole(.caption).foregroundStyle(.secondary).accessibilityIdentifier("item-\(line.id)-source")
+        Text(source).textRole(.supporting).foregroundStyle(.secondary).accessibilityIdentifier("item-\(line.id)-source")
       }
       LabeledContent(line.kind == .adjustment ? "금액(\(currency), 할인은 -)" : "금액(\(currency))") {
         TextField("0", text: Binding(get: { line.amountText }, set: { text in edit { $0.setAmount(line.id, text) } }))
@@ -445,7 +446,8 @@ private struct ItemLineRow: View {
       }
       if line.needsCheck {
         HStack {
-          Text(line.flags.map(Self.flagText).joined(separator: " ")).textRole(.supporting).foregroundStyle(.orange)
+          Text(line.flags.map(Self.flagText).joined(separator: " ")).textRole(.supporting).foregroundStyle(
+            Palette.attention)
           Spacer()
           Button("확인함") { edit { $0.markChecked(line.id) } }
             .buttonStyle(.bordered).accessibilityIdentifier("item-\(line.id)-check")

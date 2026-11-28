@@ -46,7 +46,7 @@ struct RootView: View {
       }
     }
     .navigationSplitViewStyle(.balanced)
-    .tint(.primary)
+    .nonanonaTheme()
     #if DEBUG
       .background(DebugHingeLog())
     #endif

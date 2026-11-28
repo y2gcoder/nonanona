@@ -12,14 +12,48 @@ warn() { printf '  \033[33mwarn\033[0m  %s\n' "$*"; }
 bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$*"; failures=$((failures + 1)); }
 
 echo "도구"
-missing=$(mise ls --no-global --current --missing 2>/dev/null)
-if [[ -z $missing ]]; then ok "mise.toml의 도구가 모두 설치됨"; else bad "설치 안 된 도구가 있습니다: 'mise install' ($(echo "$missing" | awk '{print $1}' | tr '\n' ' '))"; fi
+if ! missing=$(mise ls --project --missing --no-header); then
+  bad "프로젝트 도구 목록을 확인할 수 없습니다"
+elif [[ -n $missing ]]; then
+  bad "설치 안 된 도구가 있습니다: 'mise run setup' ($(awk '{print $1}' <<< "$missing" | paste -sd ' ' -))"
+else
+  ok "mise.toml의 도구가 모두 설치됨"
+fi
 for t in gitleaks lefthook; do
   want=$(mise which "$t" 2>/dev/null); got=$(command -v "$t" 2>/dev/null)
-  if [[ -z $got ]]; then bad "$t: 실행할 수 없습니다 (mise install 후 셸에서 mise activate 필요)"
+  if [[ -z $got ]]; then bad "$t: 실행할 수 없습니다 ('mise run setup' 후 셸에서 mise activate 필요)"
   elif [[ -n $want && $got != "$want" && $got != *"/mise/shims/$t" ]]; then bad "$t: mise가 고정한 버전이 아닌 $got 이 실행됩니다"
   else ok "$t $("$t" version 2>/dev/null | head -1)"; fi
 done
+
+if python=$(mise which --tool python python3 2>/dev/null); then
+  # Python 패치 버전이 같아도 python-build-standalone 빌드 날짜가 달라질 수 있다.
+  if builds=$("$python" -I - <<'PY'
+from datetime import datetime, timedelta
+import platform
+import re
+import tomllib
+
+with open("mise.lock", "rb") as lockfile:
+    [python] = tomllib.load(lockfile)["tools"]["python"]
+[tag] = {
+    re.search(r"/releases/download/(\d{8})/", entry["url"])[1]
+    for key, entry in python.items() if key.startswith("platforms.")
+}
+expected = datetime.strptime(tag, "%Y%m%d").date()
+installed = datetime.strptime(platform.python_build()[1], "%b %d %Y %H:%M:%S").date()
+# 상류 빌드가 자정을 넘기면 바이너리에는 태그 다음 날 날짜가 기록된다.
+matches = expected <= installed <= expected + timedelta(days=1)
+print(tag, installed.strftime("%Y%m%d"), int(matches))
+PY
+  ); then
+    read -r expected installed matches <<< "$builds"
+    if [[ $matches == 1 ]]; then ok "Python 빌드 $expected (컴파일 날짜 $installed)"
+    else warn "Python 컴파일 날짜 $installed (mise.lock 빌드: $expected). 'mise run setup'으로 다시 설치하세요"; fi
+  else
+    warn "Python 빌드 날짜를 확인할 수 없습니다. 'mise run setup'으로 다시 설치하세요"
+  fi
+fi
 
 echo "비밀값 보호"
 hooks_dir=$(git rev-parse --git-common-dir 2>/dev/null)/hooks

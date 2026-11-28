@@ -23,15 +23,18 @@ struct SendButton: View {
   }
 
   /// "가나가 다라에게 136,030원 보내기".
-  static func accessibilityText(sender: String, recipient: String, amountKRW: Int) -> String {
+  nonisolated static func accessibilityText(sender: String, recipient: String, amountKRW: Int) -> String {
     "\(sender)\(Korean.subjectParticle(after: sender)) \(recipient)에게 \(Won.text(amountKRW)) 보내기"
   }
 }
 
 enum Korean {
   /// 이름 뒤 주격 조사. 받침이 있으면 "이", 없으면 "가", 한글로 끝나지 않으면 "이(가)".
+  /// 분해형(NFD)으로 들어온 이름도 같게 판정하도록 완성형(NFC)으로 바꿔 마지막 글자를 본다.
   static func subjectParticle(after word: String) -> String {
-    guard let last = word.unicodeScalars.last, (0xAC00...0xD7A3).contains(last.value) else { return "이(가)" }
+    guard let last = word.precomposedStringWithCanonicalMapping.unicodeScalars.last,
+      (0xAC00...0xD7A3).contains(last.value)
+    else { return "이(가)" }
     return (last.value - 0xAC00) % 28 == 0 ? "가" : "이"
   }
 }

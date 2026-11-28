@@ -95,7 +95,37 @@ struct ThemeTests {
   @Test func sendButtonSaysWhoSendsHowMuchToWhom() {
     #expect(SendButton.accessibilityText(sender: "가나", recipient: "다라", amountKRW: 136_030) == "가나가 다라에게 136,030원 보내기")
     #expect(SendButton.accessibilityText(sender: "민준", recipient: "다라", amountKRW: 5_000) == "민준이 다라에게 5,000원 보내기")
-    #expect(Korean.subjectParticle(after: "Alex") == "이(가)")
+  }
+
+  @Test(arguments: [("가나", "가"), ("민준", "이"), ("Alex", "이(가)"), ("", "이(가)")])
+  func subjectParticleFollowsTheFinalConsonant(name: String, particle: String) {
+    let composed = name.precomposedStringWithCanonicalMapping
+    let decomposed = name.decomposedStringWithCanonicalMapping
+    #expect(Korean.subjectParticle(after: composed) == particle, "NFC \(name)")
+    #expect(Korean.subjectParticle(after: decomposed) == particle, "NFD \(name)")
+  }
+
+  @Test func decomposedNamesAreReallyDecomposedInTheTest() {
+    #expect("민준".decomposedStringWithCanonicalMapping.unicodeScalars.count == 6)
+  }
+
+  @Test func inputBorderShowsErrorBeforeFocus() {
+    #expect(InputBorder(isActive: false, hasError: false) == .none)
+    #expect(InputBorder(isActive: true, hasError: false) == .active)
+    #expect(InputBorder(isActive: true, hasError: true) == .error)
+    #expect(InputBorder(isActive: false, hasError: true) == .error)
+    #expect(Self.hex(InputBorder.active.color, .light) == Self.hex(Palette.ink, .light))
+    #expect(Self.hex(InputBorder.error.color, .dark) == Self.hex(Palette.error, .dark))
+    #expect(InputBorder.width == 1)
+  }
+
+  @Test func dateFieldShowsTheReceiptDateShape() throws {
+    let seoul = try #require(TimeZone(identifier: "Asia/Seoul"))
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = seoul
+    let date = try #require(calendar.date(from: DateComponents(year: 2026, month: 11, day: 3, hour: 0, minute: 30)))
+    #expect(DateInputField.text(for: date, timeZone: seoul) == "2026-11-03")
+    #expect(DateInputField.text(for: date, timeZone: .gmt) == "2026-11-02")
   }
 
   @Test func flowLayoutWrapsToTheNextLine() {

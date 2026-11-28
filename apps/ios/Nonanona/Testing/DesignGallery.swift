@@ -20,9 +20,9 @@
               section("Button") { ActionButtonSamples() }
               section("SectionBand") { SectionBandSamples() }
             case "2":
+              section("InputField") { InputFieldSamples() }
               section("PersonChip") { PersonChipSamples() }
               section("SendButton") { SendButtonSamples() }
-              section("InputField") { InputFieldSamples() }
             default:
               section("SummaryCard") { SummaryCardSamples() }
               section("MemberLine") { MemberLineSamples() }

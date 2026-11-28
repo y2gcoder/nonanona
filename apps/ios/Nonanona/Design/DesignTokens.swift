@@ -59,7 +59,7 @@ enum DesignTokens {
     }
   }
 
-  struct TextStyle {
+  struct TypeStyleToken {
     let fontSize: CGFloat
     let lineHeight: CGFloat
     let fontWeight: Int
@@ -67,19 +67,19 @@ enum DesignTokens {
   }
 
   enum Typography {
-    static let amount = TextStyle(fontSize: 17, lineHeight: 24, fontWeight: 800, letterSpacing: 0)
-    static let amountHero = TextStyle(fontSize: 34, lineHeight: 40, fontWeight: 800, letterSpacing: -0.02)
-    static let body = TextStyle(fontSize: 15, lineHeight: 22, fontWeight: 400, letterSpacing: 0)
-    static let bodyStrong = TextStyle(fontSize: 15, lineHeight: 22, fontWeight: 700, letterSpacing: 0)
-    static let button = TextStyle(fontSize: 16, lineHeight: 24, fontWeight: 800, letterSpacing: 0)
-    static let chip = TextStyle(fontSize: 14, lineHeight: 20, fontWeight: 700, letterSpacing: 0)
-    static let heading = TextStyle(fontSize: 26, lineHeight: 36, fontWeight: 800, letterSpacing: -0.02)
-    static let routeCode = TextStyle(fontSize: 11, lineHeight: 14, fontWeight: 500, letterSpacing: 0.08)
-    static let rowTitle = TextStyle(fontSize: 16, lineHeight: 24, fontWeight: 700, letterSpacing: 0)
-    static let screenTitle = TextStyle(fontSize: 26, lineHeight: 34, fontWeight: 800, letterSpacing: -0.02)
-    static let sectionTitle = TextStyle(fontSize: 18, lineHeight: 26, fontWeight: 800, letterSpacing: 0)
-    static let status = TextStyle(fontSize: 12, lineHeight: 16, fontWeight: 700, letterSpacing: 0)
-    static let supporting = TextStyle(fontSize: 13, lineHeight: 18, fontWeight: 400, letterSpacing: 0)
+    static let amount = TypeStyleToken(fontSize: 17, lineHeight: 24, fontWeight: 800, letterSpacing: 0)
+    static let amountHero = TypeStyleToken(fontSize: 34, lineHeight: 40, fontWeight: 800, letterSpacing: -0.02)
+    static let body = TypeStyleToken(fontSize: 15, lineHeight: 22, fontWeight: 400, letterSpacing: 0)
+    static let bodyStrong = TypeStyleToken(fontSize: 15, lineHeight: 22, fontWeight: 700, letterSpacing: 0)
+    static let button = TypeStyleToken(fontSize: 16, lineHeight: 24, fontWeight: 800, letterSpacing: 0)
+    static let chip = TypeStyleToken(fontSize: 14, lineHeight: 20, fontWeight: 700, letterSpacing: 0)
+    static let heading = TypeStyleToken(fontSize: 26, lineHeight: 36, fontWeight: 800, letterSpacing: -0.02)
+    static let routeCode = TypeStyleToken(fontSize: 11, lineHeight: 14, fontWeight: 500, letterSpacing: 0.08)
+    static let rowTitle = TypeStyleToken(fontSize: 16, lineHeight: 24, fontWeight: 700, letterSpacing: 0)
+    static let screenTitle = TypeStyleToken(fontSize: 26, lineHeight: 34, fontWeight: 800, letterSpacing: -0.02)
+    static let sectionTitle = TypeStyleToken(fontSize: 18, lineHeight: 26, fontWeight: 800, letterSpacing: 0)
+    static let status = TypeStyleToken(fontSize: 12, lineHeight: 16, fontWeight: 700, letterSpacing: 0)
+    static let supporting = TypeStyleToken(fontSize: 13, lineHeight: 18, fontWeight: 400, letterSpacing: 0)
   }
 
   enum Spacing {

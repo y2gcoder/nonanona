@@ -1,5 +1,8 @@
 # 도구 버전 고정(로컬과 CI가 같은 파일을 쓴다: CI는 jdx/mise-action). 전역 mise 설정의 minimum_release_age=7d 정책을 따른다.
 # 호환성 때문에 고른 버전은 근거 URL과 확인일을 주석으로 남긴다.
+# Python 잠금 파일을 확인한 mise 버전: https://github.com/jdx/mise/blob/v2026.11.9/docs/dev-tools/mise-lock.md (확인일 2026-11-28)
+min_version = "2026.11.9"
+
 [tools]
 gitleaks = "8.30.1"
 lefthook = "2.2.2"
@@ -8,6 +11,7 @@ java = "temurin-21.0.9+10.0.LTS"
 # Kotlin 포매터·린터. 2025-11-14 게시.
 ktlint = "1.8.0"
 # 디자인 토큰 생성기와 표준 라이브러리 테스트. 2026-10-25 게시: https://www.python.org/downloads/release/python-31410/ (확인일 2026-11-28)
+# mise.lock의 사전 빌드 20261110은 2026-11-11 게시: https://github.com/astral-sh/python-build-standalone/releases/tag/20261110 (확인일 2026-11-28)
 python = "3.14.10"
 # 로컬 Supabase(Auth + Postgres) 실행. 2026-11-09 게시. 3.2.0(2026-11-16)은 7일이 지나지 않았다.
 # CLI v3은 기본 대상이 로컬이다: https://supabase.com/changelog/supabase-cli-v3 (확인일 2026-11-21)
@@ -20,9 +24,21 @@ supabase = "3.1.0"
 # Supabase CLI 사용 통계를 이 저장소의 명령에서 보내지 않는다(전역 설정은 건드리지 않는다).
 SUPABASE_TELEMETRY_DISABLED = "1"
 
+[settings]
+# 잠금 파일에 기록한 사전 빌드를 사용한다.
+python.compile = false
+# setup이 Python 잠금 설치와 나머지 도구 설치를 각각 처리한다.
+task.run_auto_install = false
+
 [tasks.setup]
 description = "최초 도구·훅 설치 (비밀값 불필요)"
-run = ["mise install", "lefthook install"]
+run = [
+  # 같은 버전이 이미 있어도 잠근 빌드로 설치한다.
+  "mise install --locked --force python",
+  # 다른 도구를 설치할 때 Python 전용 잠금 파일을 확장하지 않는다.
+  "MISE_DISABLE_TOOLS=python MISE_LOCKFILE=0 mise install",
+  "lefthook install",
+]
 
 [tasks.doctor]
 description = "개발 환경 점검: 도구 설치, 비밀값 보호 장치, 1Password 계정"

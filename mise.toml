@@ -7,6 +7,8 @@ lefthook = "2.2.2"
 java = "temurin-21.0.9+10.0.LTS"
 # Kotlin 포매터·린터. 2025-11-14 게시.
 ktlint = "1.8.0"
+# 디자인 토큰 생성기와 표준 라이브러리 테스트. 2026-10-25 게시: https://www.python.org/downloads/release/python-31410/ (확인일 2026-11-28)
+python = "3.14.10"
 # 로컬 Supabase(Auth + Postgres) 실행. 2026-11-09 게시. 3.2.0(2026-11-16)은 7일이 지나지 않았다.
 # CLI v3은 기본 대상이 로컬이다: https://supabase.com/changelog/supabase-cli-v3 (확인일 2026-11-21)
 supabase = "3.1.0"
@@ -29,6 +31,17 @@ run = "bash scripts/doctor.sh"
 [tasks."hooks:install"]
 description = "gitleaks pre-commit 훅 설치(lefthook). 클론한 뒤 한 번 실행한다"
 run = "lefthook install"
+
+[tasks."design:tokens"]
+description = "디자인 토큰으로 iOS·Android 파일 생성"
+run = "python3 -I scripts/design-tokens/generate.py"
+
+[tasks."design:check"]
+description = "생성기 테스트와 커밋 대상 디자인 토큰 파일 비교"
+run = [
+  "python3 -B -m unittest discover -s scripts/design-tokens -v",
+  "python3 -I scripts/design-tokens/generate.py --check",
+]
 
 # 모바일 앱(apps/). Android SDK 위치는 ANDROID_HOME 또는 apps/android/local.properties(gitignore)로 정한다.
 [tasks."android:lint"]

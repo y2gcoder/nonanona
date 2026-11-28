@@ -1,0 +1,24 @@
+name: design-tokens
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  design-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@d5574b52816a478f9d4e6529a3f6ff17a8a36785 # v5.2.8
+        with:
+          install_args: python
+          minimum_release_age: 7d
+      - name: 디자인 토큰 검사
+        env:
+          MISE_TASK_RUN_AUTO_INSTALL: "false" # 위에서 설치한 Python만 쓴다.
+        run: mise run design:check

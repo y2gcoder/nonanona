@@ -27,7 +27,7 @@ SUPABASE_TELEMETRY_DISABLED = "1"
 [settings]
 # 잠금 파일에 기록한 사전 빌드를 사용한다.
 python.compile = false
-# setup이 Python 잠금 설치와 나머지 도구 설치를 각각 처리한다.
+# setup이 잠긴 도구와 나머지 도구 설치를 각각 처리한다.
 task.run_auto_install = false
 
 [tasks.setup]
@@ -35,8 +35,9 @@ description = "최초 도구·훅 설치 (비밀값 불필요)"
 run = [
   # 같은 버전이 이미 있어도 잠근 빌드로 설치한다.
   "mise install --locked --force python",
-  # 다른 도구를 설치할 때 Python 전용 잠금 파일을 확장하지 않는다.
-  "MISE_DISABLE_TOOLS=python MISE_LOCKFILE=0 mise install",
+  "mise install --locked gitleaks",
+  # 잠금 범위 밖의 도구는 기존 버전 지정으로 설치한다.
+  "MISE_DISABLE_TOOLS=python,gitleaks MISE_LOCKFILE=0 mise install",
   "lefthook install",
 ]
 

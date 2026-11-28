@@ -136,7 +136,7 @@ internal object DesignTokens {
             sky = Color(0xFF4FB0F5),
         )
 
-    data class TextStyle(
+    data class TypeStyleToken(
         val fontSize: TextUnit,
         val lineHeight: TextUnit,
         val fontWeight: FontWeight,
@@ -144,19 +144,19 @@ internal object DesignTokens {
     )
 
     object Typography {
-        val amount = TextStyle(17.sp, 24.sp, FontWeight(800), 0.em)
-        val amountHero = TextStyle(34.sp, 40.sp, FontWeight(800), (-0.02).em)
-        val body = TextStyle(15.sp, 22.sp, FontWeight(400), 0.em)
-        val bodyStrong = TextStyle(15.sp, 22.sp, FontWeight(700), 0.em)
-        val button = TextStyle(16.sp, 24.sp, FontWeight(800), 0.em)
-        val chip = TextStyle(14.sp, 20.sp, FontWeight(700), 0.em)
-        val heading = TextStyle(26.sp, 36.sp, FontWeight(800), (-0.02).em)
-        val routeCode = TextStyle(11.sp, 14.sp, FontWeight(500), 0.08.em)
-        val rowTitle = TextStyle(16.sp, 24.sp, FontWeight(700), 0.em)
-        val screenTitle = TextStyle(26.sp, 34.sp, FontWeight(800), (-0.02).em)
-        val sectionTitle = TextStyle(18.sp, 26.sp, FontWeight(800), 0.em)
-        val status = TextStyle(12.sp, 16.sp, FontWeight(700), 0.em)
-        val supporting = TextStyle(13.sp, 18.sp, FontWeight(400), 0.em)
+        val amount = TypeStyleToken(17.sp, 24.sp, FontWeight(800), 0.em)
+        val amountHero = TypeStyleToken(34.sp, 40.sp, FontWeight(800), (-0.02).em)
+        val body = TypeStyleToken(15.sp, 22.sp, FontWeight(400), 0.em)
+        val bodyStrong = TypeStyleToken(15.sp, 22.sp, FontWeight(700), 0.em)
+        val button = TypeStyleToken(16.sp, 24.sp, FontWeight(800), 0.em)
+        val chip = TypeStyleToken(14.sp, 20.sp, FontWeight(700), 0.em)
+        val heading = TypeStyleToken(26.sp, 36.sp, FontWeight(800), (-0.02).em)
+        val routeCode = TypeStyleToken(11.sp, 14.sp, FontWeight(500), 0.08.em)
+        val rowTitle = TypeStyleToken(16.sp, 24.sp, FontWeight(700), 0.em)
+        val screenTitle = TypeStyleToken(26.sp, 34.sp, FontWeight(800), (-0.02).em)
+        val sectionTitle = TypeStyleToken(18.sp, 26.sp, FontWeight(800), 0.em)
+        val status = TypeStyleToken(12.sp, 16.sp, FontWeight(700), 0.em)
+        val supporting = TypeStyleToken(13.sp, 18.sp, FontWeight(400), 0.em)
     }
 
     object Spacing {

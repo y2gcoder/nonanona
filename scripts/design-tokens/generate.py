@@ -16,6 +16,16 @@ KOTLIN = Path("apps/android/app/src/main/java/app/nonanona/design/DesignTokens.k
 DIMENSIONS = ("Spacing", "Radius", "Size")
 HEADER = "// 생성 파일. 직접 수정하지 마세요.\n// 원본: design/tokens.json\n// 생성: mise run design:tokens"
 TOKEN_NAME = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*")
+# Lowercase words reserved by Swift or Kotlin in generated property declarations.
+# https://docs.swift.org/swift-book/documentation/the-swift-programming-language/lexicalstructure/#Keywords-and-Punctuation
+# https://kotlinlang.org/docs/keyword-reference.html#hard-keywords
+RESERVED_NAMES = frozenset("""
+    as associatedtype await borrowing break case catch class consuming continue default
+    defer deinit do else enum extension fallthrough false fileprivate for fun func guard if
+    import in init inout interface internal is let nil nonisolated null object open operator
+    package precedencegroup private protocol public repeat rethrows return self static struct
+    subscript super switch this throw throws true try typealias typeof val var when where while
+""".split())
 NUMBER = r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)"
 RGBA = re.compile(rf"rgba\(\s*([0-9]{{1,3}})\s*,\s*([0-9]{{1,3}})\s*,\s*([0-9]{{1,3}})\s*,\s*({NUMBER})\s*\)")
 
@@ -49,19 +59,45 @@ def camel_case(name):
     return first + "".join(part.capitalize() for part in rest)
 
 
-def named_tokens(entries):
+def required_field(fields, key, path):
+    if key not in fields:
+        raise ValueError(f"Missing field: {path}")
+    return fields[key]
+
+
+def named_tokens(groups):
     tokens = {}
-    identifiers = set()
-    for token in entries:
-        name = token["name"]
-        if not TOKEN_NAME.fullmatch(name):
-            raise ValueError(f"Invalid token name: {name!r}")
-        identifier = camel_case(name)
-        if identifier in identifiers:
-            raise ValueError(f"Duplicate generated name: {identifier} (from {name})")
-        identifiers.add(identifier)
-        tokens[name] = token
+    identifiers = {}
+    for group_path, entries_path, entries in groups:
+        for index, token in enumerate(entries):
+            name = required_field(token, "name", f"{entries_path}[{index}].name")
+            path = f"{group_path}.{name}"
+            if not isinstance(name, str) or not TOKEN_NAME.fullmatch(name):
+                raise ValueError(f"Invalid token name: {name!r} in {group_path}")
+            identifier = camel_case(name)
+            if identifier in RESERVED_NAMES:
+                raise ValueError(f"Reserved generated name: {identifier} ({path})")
+            if identifier in identifiers:
+                raise ValueError(f"Duplicate generated name: {identifier} ({identifiers[identifier]} and {path})")
+            identifiers[identifier] = path
+            tokens[name] = (path, token)
     return dict(sorted(tokens.items()))
+
+
+def group_tokens(tokens, group):
+    section = required_field(tokens, group, group)
+    entries_path = f"{group}.tokens"
+    entries = required_field(section, "tokens", entries_path)
+    return named_tokens([(group, entries_path, entries)])
+
+
+def typography_groups(tokens):
+    section = required_field(tokens, "type", "type")
+    groups = required_field(section, "groups", "type.groups")
+    for index, group in enumerate(groups):
+        path = f"type.groups[{group.get('name', index)}]"
+        entries_path = f"{path}.styles"
+        yield path, entries_path, required_field(group, "styles", entries_path)
 
 
 def parse_color(value):
@@ -76,19 +112,18 @@ def parse_color(value):
     raise ValueError(f"Invalid color: {value!r}")
 
 
-def resolve_colors(entries):
-    tokens = named_tokens(entries)
-
+def resolve_colors(tokens):
     def resolve(name, theme, trail=()):
         chain = " -> ".join((*trail, name))
         if name in trail:
             raise ValueError(f"Circular color reference ({theme}): {chain}")
         if name not in tokens:
             raise ValueError(f"Unknown color reference ({theme}): {chain}")
-        value = tokens[name]["value"]
+        path, token = tokens[name]
+        value = required_field(token, "value", f"{path}.value")
         if isinstance(value, dict):
             if theme not in value:
-                raise ValueError(f"Missing color value ({theme}): {chain}")
+                raise ValueError(f"Missing field: {path}.{theme} ({theme}: {chain})")
             value = value[theme]
         if isinstance(value, str):
             reference = re.fullmatch(r"\{([^{}]+)\}", value)
@@ -113,6 +148,11 @@ def measure(value, unit, field):
     return literal(Decimal(match[1]))
 
 
+def measure_px(token, key, path):
+    field = f"{path}.{key}"
+    return measure(required_field(token, key, field), "px", field)
+
+
 @dataclass(frozen=True)
 class TypeStyle:
     font_size: str
@@ -121,16 +161,15 @@ class TypeStyle:
     letter_spacing: str
 
     @classmethod
-    def from_token(cls, token):
-        name = token["name"]
-        weight = token["fontWeight"]
+    def from_token(cls, path, token):
+        weight = required_field(token, "fontWeight", f"{path}.fontWeight")
         if type(weight) is not int or not 1 <= weight <= 1000:
-            raise ValueError(f"{name}.fontWeight: expected an integer from 1 to 1000")
+            raise ValueError(f"{path}.fontWeight: expected an integer from 1 to 1000")
         return cls(
-            measure(token["fontSize"], "px", f"{name}.fontSize"),
-            measure(token["lineHeight"], "px", f"{name}.lineHeight"),
+            measure_px(token, "fontSize", path),
+            measure_px(token, "lineHeight", path),
             weight,
-            measure(token.get("letterSpacing", "0em"), "em", f"{name}.letterSpacing"),
+            measure(token.get("letterSpacing", "0em"), "em", f"{path}.letterSpacing"),
         )
 
     def swift(self):
@@ -152,7 +191,7 @@ def swift_source(colors, styles, dimensions):
         for name, (light, dark) in colors.items()
     )
     type_lines = "\n".join(
-        f"    static let {name} = TextStyle({style.swift()})" for name, style in styles.items()
+        f"    static let {name} = TypeStyleToken({style.swift()})" for name, style in styles.items()
     )
     dimension_blocks = []
     for group, tokens in dimensions.items():
@@ -182,7 +221,7 @@ enum DesignTokens {{
     }}
   }}
 
-  struct TextStyle {{
+  struct TypeStyleToken {{
     let fontSize: CGFloat
     let lineHeight: CGFloat
     let fontWeight: Int
@@ -206,7 +245,7 @@ def kotlin_source(colors, styles, dimensions):
         palettes.append(f"    val {theme}Colors =\n        Colors(\n{lines}\n        )")
     palette_source = "\n\n".join(palettes)
     type_lines = "\n".join(
-        f"        val {name} = TextStyle({style.kotlin()})" for name, style in styles.items()
+        f"        val {name} = TypeStyleToken({style.kotlin()})" for name, style in styles.items()
     )
     dimension_blocks = []
     for group, tokens in dimensions.items():
@@ -231,7 +270,7 @@ internal object DesignTokens {{
 
 {palette_source}
 
-    data class TextStyle(
+    data class TypeStyleToken(
         val fontSize: TextUnit,
         val lineHeight: TextUnit,
         val fontWeight: FontWeight,
@@ -248,13 +287,13 @@ internal object DesignTokens {{
 
 
 def render(tokens):
-    colors = resolve_colors(tokens["color"]["tokens"])
-    styles = named_tokens(style for group in tokens["type"]["groups"] for style in group["styles"])
-    typography = {camel_case(name): TypeStyle.from_token(style) for name, style in styles.items()}
+    colors = resolve_colors(group_tokens(tokens, "color"))
+    styles = named_tokens(typography_groups(tokens))
+    typography = {camel_case(name): TypeStyle.from_token(path, style) for name, (path, style) in styles.items()}
     dimensions = {
         group: {
-            camel_case(name): measure(token["value"], "px", name)
-            for name, token in named_tokens(tokens[group.lower()]["tokens"]).items()
+            camel_case(name): measure_px(token, "value", path)
+            for name, (path, token) in group_tokens(tokens, group.lower()).items()
         }
         for group in DIMENSIONS
     }

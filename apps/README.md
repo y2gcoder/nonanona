@@ -551,7 +551,7 @@ iOS 단위 테스트와 release 확인은 `IOS_DESTINATION`(기본 `platform=iOS
 - 영수증 처리: release에서는 검토·확인까지 할 수 있고 올리기는 없다. 처리는 앱이 앞에 있을 때만 돈다(iOS 백그라운드 작업, Android WorkManager 없음). 실기기, 큰 HEIC·JPEG, EXIF 회전 사진, 저장 공간 부족, Google 포토 공유, 앱 안 사진 선택기로 10장 고르기는 확인하지 않았다. 가로 전체 띠 가림은 같은 행의 다른 정보도 덮는다. 공유 확장도 가져오기 패키지를 함께 링크해 OCR 코드가 들어 있다(쓰지는 않는다).
 - debug 빌드는 로컬 모드 때문에 INTERNET 권한이 있어, ML Kit 라이브러리가 debug에서 사용 통계를 보낼 수 있는지는 확인하지 않았다(release는 권한이 없다).
 - 초대 링크는 사용자 지정 스킴(`nonanona://`)이다. 운영 도메인의 Universal Links·App Links는 서버 준비와 함께 붙인다.
-- 번들 ID·applicationId(`app.nonanona`), App Group(`group.app.nonanona`), 앱 아이콘은 임시다(아이콘 방향은 [ADR-0014](../docs/adr/0014-unified-design-system.md)). 실기기 서명과 스토어 등록 때 정한다.
+- 번들 ID·applicationId(`app.nonanona`), App Group(`group.app.nonanona`), 앱 아이콘은 임시다(아이콘 방향은 [ADR-0014](../docs/adr/0014-unified-design-system.md), [ADR-0016](../docs/adr/0016-design-direction-b.md)). 실기기 서명과 스토어 등록 때 정한다.
 - 시뮬레이터·에뮬레이터만 확인했다. 실기기, Google 포토 앱의 공유(에뮬레이터는 계정 없이 쓸 수 없어 파일 앱으로 대신), 앱 안 사진 선택기의 E2E, 공유 확장 메모리 한도, 큰 HEIC는 확인하지 않았다.
 - 정산은 로컬 슬라이스만 있다(위 "여행방 정산"과 ADR-0006). release는 계속 `Unavailable*`이다.
 - 영수증 올리기: 행 없는 사본(부분 실패)을 지우는 정리 작업이 없다. 같은 사본을 다른 여행방에 올리면 다른 요청 키라 별개 지출이 된다. 한 번에 여러 장을 올리다 중간에 실패하면 앞의 장은 이미 올라간 상태로 남는다(같은 확인으로 다시 올리면 앞의 장은 같은 지출로 수렴). 서버가 사본 내용(가림이 실제로 개인정보를 가렸는지)을 검사하지 않는다. 파일 검사(청크·해시·픽셀)는 가림이 의미상 충분하다는 증명이 아니다. 실기기, 느린 망, 큰 사본, 여러 계정이 같은 방에 동시에 올리기는 확인하지 않았다.

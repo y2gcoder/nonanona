@@ -15,13 +15,13 @@ iOS(SwiftUI)와 Android(Compose)를 따로 만들면서 두 앱이 같은 서비
 | 한국어 문구와 말투(해요체, 짧은 문장) | 시트: iOS `.sheet`(detents), Android `ModalBottomSheet` |
 | 화면과 상태의 종류, 상태를 바꾸는 동작 | 사진 고르기: iOS `PhotosPicker`, Android 시스템 사진 선택기(`PickMultipleVisualMedia`), 둘 다 권한 요청 없음 |
 | 상태는 글자 라벨로 표시(색은 보조) | 공유로 받기: iOS 공유 확장(시트 안에서 "초안에 담기"), Android 공유 대상 Activity(바로 담고 스낵바) |
-| 간격 값 | 제목: iOS 큰 제목, Android 상단 앱 바 / 주 동작: iOS 하단 막대, Android 확장 FAB |
+| 간격 값 | 제목: iOS 큰 제목, Android 상단 앱 바 / 주 동작: iOS 하단 막대, Android 확장 FAB(superseded by [ADR-0016](../adr/0016-design-direction-b.md): 두 플랫폼 모두 하단 고정 막대의 전체 너비 버튼) |
 | 글자 크기는 시스템 설정을 따름 | 로그인 버튼 모양(아래 "로그인 버튼") |
 | 창 크기별 배치 규칙과 읽기 폭 640(아래 "창 크기와 접기") | 목록·상세: iOS `NavigationSplitView`, Android `ListDetailSceneStrategy` / 두 칸 기준: iOS 가로 regular, Android 840dp |
 
 ## 색 역할 (임시 중립 팔레트)
 
-> 임시 중립 팔레트는 superseded by [ADR-0014](../adr/0014-unified-design-system.md)(두 앱 공통 토큰, "맑은 하늘"). 앱에 반영하기 전까지 아래 값이 지금 코드의 값이다. 역할 이름은 그대로 쓴다.
+> 임시 중립 팔레트는 superseded by [ADR-0014](../adr/0014-unified-design-system.md)(두 앱 공통 토큰). 색 방향 "맑은 하늘"은 superseded by [ADR-0016](../adr/0016-design-direction-b.md)(진한 하늘 요약 카드, 라임 주 동작). 앱에 반영하기 전까지 아래 값이 지금 코드의 값이다. 역할 이름은 그대로 쓴다.
 
 브랜드 색이 없으므로 무채색만 쓴다. Android는 동적 색(Material You)을 끈다. 두 앱의 화면을 같은 기준으로 비교하기 위해서다.
 

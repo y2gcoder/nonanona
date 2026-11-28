@@ -1,0 +1,9 @@
+Google Material Symbols Rounded · Apache License 2.0
+Source: https://github.com/google/material-design-icons/tree/10ecc14790612ca8fd164e3f4ffe9c16fc50d5b7/symbols/web
+Revision date: 2026-10-23
+Verified: 2026-11-28
+
+20px optical size, weight 400, grade 0, FILL 1.
+bed, directions_car, ramen_dining, shopping_bag, grid_view, check, chevron_right.
+SVG paths were converted to Android VectorDrawable resources with the viewport translated to a non-negative Y origin.
+The chevron mirrors in right-to-left layouts.

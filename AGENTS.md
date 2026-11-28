@@ -17,6 +17,11 @@
 - 작업 보고(한 일, 검증, 남은 일)는 PR 본문에 쓴다.
 - 작업은 이슈로 시작한다. 작업자를 배정하기 전에 이슈를 만들고, 브랜치·PR은 그 이슈 하나를 다루며 PR 본문에 `Closes #N`(일부만 하면 `Refs #N`)을 쓴다. 이슈를 만들 때 담당자를 지정한다: `gh issue create --assignee @me`. 맡은 일이 사람 계정으로 남아, 작업 기록과 회고에서 "내가 한 일"을 찾는 기준이 된다. 담당자 없이 만든 이슈는 같은 세션에서 `gh issue edit <N> --add-assignee @me`로 채운다.
 
+## 작업자
+
+- Claude Code 작업자는 pstack의 poteto-mode(`/pstack:poteto-mode`)로 일한다. Codex 작업자는 pstack을 쓰지 못하므로 해당 없다.
+- Claude Code 작업자는 사용자 경로에 설치된 `orca-poteto-worker` 스킬로 띄운다. `orchestration worker-start`의 지시서에 슬래시 명령을 섞으면 Orca 안내문이 앞에 붙어 poteto-mode가 켜지지 않는다.
+
 ## 스킬
 
 - 먼저 호출 범위를 정한다. 이 저장소에 의존하는 스킬은 여기에 둔다. 여러 개인 저장소에서 같은 작업을 직접 호출해야 하면 홈 레포에서 원본을 관리하고 실제로 쓰는 에이전트의 사용자 경로에 설치한다.

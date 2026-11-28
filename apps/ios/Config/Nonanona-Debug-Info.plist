@@ -28,5 +28,11 @@
 	<string>$(NONANONA_LOCAL_HOST_EMAIL)</string>
 	<key>NonanonaLocalHostPassword</key>
 	<string>$(NONANONA_LOCAL_HOST_PASSWORD)</string>
+	<key>UIAppFonts</key>
+	<array>
+		<string>Pretendard-Regular.otf</string>
+		<string>Pretendard-Bold.otf</string>
+		<string>Pretendard-ExtraBold.otf</string>
+	</array>
 </dict>
 </plist>

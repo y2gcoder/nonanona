@@ -164,7 +164,7 @@ struct ReceiptReviewView: View {
     } footer: {
       if item.state == .ready {
         Text("원본과 읽은 글자 전체는 이 기기에만 남아요. 여행방에는 확인한 가린 사본과 날짜·금액·통화·가게만 올라가요.")
-          .textRole(.caption)
+          .textRole(.supporting)
       }
     }
   }
@@ -191,7 +191,7 @@ struct ReceiptReviewView: View {
             VStack(alignment: .leading, spacing: Spacing.xs) {
               Text(line.text).textRole(.body)
               if suggested.contains(line.id) {
-                Text("자동 제안").textRole(.caption).foregroundStyle(.secondary)
+                Text("자동 제안").textRole(.supporting).foregroundStyle(.secondary)
               }
             }
           }
@@ -248,7 +248,7 @@ struct ReceiptReviewView: View {
         ) { actions.edit(.amount($0)) }
         if content.proposal?.needsTotalReview == true {
           Text("기울어진 사진에서 찾은 합계예요. 원본의 합계와 비교해 주세요.")
-            .textRole(.caption).foregroundStyle(.secondary)
+            .textRole(.supporting).foregroundStyle(.secondary)
         }
         Picker(
           "통화",
@@ -271,7 +271,7 @@ struct ReceiptReviewView: View {
         .textRole(.sectionTitle).foregroundStyle(.primary).textCase(nil)
     } footer: {
       if editable {
-        Text("통화는 영수증에 적힌 통화예요. 원화 금액은 여행방에서 방장이 확인해요.").textRole(.caption)
+        Text("통화는 영수증에 적힌 통화예요. 원화 금액은 여행방에서 방장이 확인해요.").textRole(.supporting)
       }
     }
   }
@@ -292,13 +292,13 @@ struct ReceiptReviewView: View {
     VStack(spacing: Spacing.s) {
       if content.confirmFailed {
         Text("확인을 저장하지 못했어요. 아직 확인되지 않았고 입력은 그대로예요. 다시 눌러 주세요.")
-          .textRole(.caption).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading)
+          .textRole(.supporting).foregroundStyle(Palette.error).frame(maxWidth: .infinity, alignment: .leading)
           .accessibilityIdentifier("review-confirm-error")
       }
       if content.saveFailed {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.s) {
           Text("입력을 기기에 저장하지 못했어요. 화면의 입력은 그대로예요.")
-            .textRole(.caption).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading)
+            .textRole(.supporting).foregroundStyle(Palette.error).frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityIdentifier("review-save-error")
           Button("다시 저장", action: actions.retrySave).buttonStyle(.bordered)
             .accessibilityIdentifier("review-save-retry")
@@ -306,14 +306,14 @@ struct ReceiptReviewView: View {
       }
       Group {
         if !content.problems.isEmpty {
-          Text("확인하려면 위에서 표시한 값을 고쳐 주세요.").foregroundStyle(.red)
+          Text("확인하려면 위에서 표시한 값을 고쳐 주세요.").foregroundStyle(Palette.error)
         } else if item.state == .failed {
           Text("확인하면 직접 입력한 값만 저장해요.")
         } else {
           Text("확인하면 가린 사본을 만들어요. 원본은 이 기기에만 남아요.")
         }
       }
-      .textRole(.caption)
+      .textRole(.supporting)
       .frame(maxWidth: .infinity, alignment: .leading)
       .accessibilityIdentifier("review-confirm-hint")
       Button("확인하고 다음", action: actions.confirmAndNext)
@@ -400,7 +400,7 @@ private struct FieldRow: View {
         .accessibilityLabel(label)
         .accessibilityIdentifier(id)
       if let problem {
-        Text(problem).textRole(.caption).foregroundStyle(.red).accessibilityIdentifier("\(id)-problem")
+        Text(problem).textRole(.supporting).foregroundStyle(Palette.error).accessibilityIdentifier("\(id)-problem")
       }
     }
     .padding(.vertical, Spacing.xs)

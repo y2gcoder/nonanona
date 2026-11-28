@@ -158,7 +158,8 @@ struct RoomLedgerView: View {
             }
           }
           if let failure {
-            Text(failure.message).textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("room-failure")
+            Text(failure.message).textRole(.supporting).foregroundStyle(Palette.error).accessibilityIdentifier(
+              "room-failure")
           }
         }
       }
@@ -186,7 +187,7 @@ struct RoomLedgerView: View {
           Text("아직 올라온 지출이 없어요.").textRole(.supporting)
         }
         ForEach(Array(ledger.expenses.enumerated()), id: \.element.id) { index, expense in
-          let row = ExpenseRow(expense: expense, ledger: ledger)
+          let row = LedgerExpenseRow(expense: expense, ledger: ledger)
           if ledger.isHost && !ledger.isFinalized {
             Button {
               onReview(expense.id)
@@ -200,7 +201,7 @@ struct RoomLedgerView: View {
               row.accessibilityIdentifier("expense-\(index + 1)")
               if let sent = expense.shareProposal, expense.uploadedBy == ledger.me {
                 Text(ShareProposalText.uploaderState(sent.state))
-                  .textRole(.caption).foregroundStyle(.secondary)
+                  .textRole(.supporting).foregroundStyle(.secondary)
                   .accessibilityIdentifier("expense-proposal-\(index + 1)")
               }
               if canPropose(expense) {
@@ -247,7 +248,7 @@ struct RoomLedgerView: View {
 }
 
 /// 지출 한 줄: 가게(또는 직접 입력) · 날짜 · 원래 금액 · 올린 사람, 상태, 결제자·원화·부담.
-struct ExpenseRow: View {
+struct LedgerExpenseRow: View {
   let expense: LedgerExpense
   let ledger: RoomLedger
 
@@ -263,30 +264,30 @@ struct ExpenseRow: View {
       Text(
         "\(ledger.name(of: expense.uploadedBy))이(가) 올림 · \(expense.isManual ? "직접 입력(증빙 없음)" : "가린 사본")"
       )
-      .textRole(.caption).foregroundStyle(.secondary)
+      .textRole(.supporting).foregroundStyle(.secondary)
       if expense.status == .included, let krw = expense.krwAmount {
         Text("결제 \(ledger.name(of: expense.payer)) · \(krwText(krw)) · \(sharesText)")
-          .textRole(.caption).foregroundStyle(.secondary)
+          .textRole(.supporting).foregroundStyle(.secondary)
         ForEach(
           KRWBasisText.detail(
             basis: expense.krwBasis, fx: expense.fx, acquisition: expense.acquisition, currency: expense.currency),
           id: \.self
         ) { line in
-          Text(line).textRole(.caption).foregroundStyle(.secondary)
+          Text(line).textRole(.supporting).foregroundStyle(.secondary)
         }
         if let correction = expense.fxCorrection {
-          Text(FXCorrectionText.rowNote(correction)).textRole(.caption)
-            .foregroundStyle(correction == .kept ? Color.secondary : Color.orange)
+          Text(FXCorrectionText.rowNote(correction)).textRole(.supporting)
+            .foregroundStyle(correction == .kept ? Palette.contentSecondary : Palette.attention)
         } else if expense.fxSuperseded {
           Text("더 새 기준환율 고시값이 있어요. 포함한 금액은 그대로이고 다시 검토할 수 있어요.")
-            .textRole(.caption).foregroundStyle(.orange)
+            .textRole(.supporting).foregroundStyle(Palette.attention)
         }
       }
       if case .held(let reason) = expense.status {
-        Text("보류 사유: \(reason)").textRole(.caption).foregroundStyle(.secondary)
+        Text("보류 사유: \(reason)").textRole(.supporting).foregroundStyle(.secondary)
       }
       if ledger.isHost, expense.shareProposal?.state == .current {
-        Text("올린 사람의 품목 나누기 제안이 있어요").textRole(.caption).foregroundStyle(.orange)
+        Text("올린 사람의 품목 나누기 제안이 있어요").textRole(.supporting).foregroundStyle(Palette.attention)
       }
     }
     .accessibilityElement(children: .combine)
@@ -416,7 +417,7 @@ struct ExpenseReviewView: View {
         } footer: {
           if itemSplitAvailable {
             Text("이 기기에 있는 품목으로 사람마다 몫을 계산해 \"직접 나누기\"에 채워요. 품목 이름은 올라가지 않아요.")
-              .textRole(.caption)
+              .textRole(.supporting)
           }
         }
       }
@@ -467,7 +468,8 @@ struct ExpenseReviewView: View {
           }
         }
         if let problem {
-          Text(problem).textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("review-share-problem")
+          Text(problem).textRole(.supporting).foregroundStyle(Palette.error).accessibilityIdentifier(
+            "review-share-problem")
         }
       } header: {
         Text("부담").textRole(.sectionTitle).foregroundStyle(.primary).textCase(nil)
@@ -476,14 +478,15 @@ struct ExpenseReviewView: View {
       Section {
         if expense.fxSuperseded && expense.fxCorrection == nil {
           Text("포함한 예상 금액 뒤에 더 새 기준환율 고시값이 들어왔어요. 다시 저장하면 새 값으로 바뀌어요.")
-            .textRole(.supporting).foregroundStyle(.orange).accessibilityIdentifier("review-fx-superseded")
+            .textRole(.supporting).foregroundStyle(Palette.attention).accessibilityIdentifier("review-fx-superseded")
         }
         if refreshed {
           Text("다른 변경이 먼저 저장돼 최신 값으로 다시 열었어요. 확인하고 다시 저장해 주세요.")
-            .textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("review-refreshed")
+            .textRole(.supporting).foregroundStyle(Palette.error).accessibilityIdentifier("review-refreshed")
         }
         if case .failed(let failure) = state, !(refreshed && failure == .stale) {
-          Text(failure.message).textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("review-failure")
+          Text(failure.message).textRole(.supporting).foregroundStyle(Palette.error).accessibilityIdentifier(
+            "review-failure")
         }
         Button(saving ? "저장하는 중…" : "포함하기", action: onInclude)
           .buttonStyle(.primaryAction)
@@ -587,7 +590,7 @@ struct ShareProposalSection: View {
       }
       if !other.isEmpty {
         Text(comparison.matches ? "\(otherLabel)한 몫이 제안과 같아요." : "\(otherLabel)한 몫이 제안과 달라요.")
-          .textRole(.supporting).foregroundStyle(comparison.matches ? Color.secondary : Color.orange)
+          .textRole(.supporting).foregroundStyle(comparison.matches ? Palette.contentSecondary : Palette.attention)
           .accessibilityIdentifier("review-proposal-match")
       }
       Text(ShareProposalText.hostState(proposal.state))
@@ -605,7 +608,7 @@ struct ShareProposalSection: View {
       Text("올린 사람의 품목 나누기 제안").textRole(.sectionTitle).foregroundStyle(.primary).textCase(nil)
     } footer: {
       Text("품목 이름은 오지 않아요. 제안은 정산을 바꾸지 않아요. 채운 뒤 결제자를 고르고 \"포함하기\"를 눌러야 들어가요.")
-        .textRole(.caption)
+        .textRole(.supporting)
     }
   }
 }
@@ -683,15 +686,16 @@ struct KRWSection: View {
         Text(
           "\(Won.original(expense.amountMinor, expense.currency)) × \(usable.quote.rate)원 ÷ \(usable.quote.quoteUnit)엔, 원 단위 반올림"
         )
-        .textRole(.caption).foregroundStyle(.secondary)
-        Text(KRWBasisText.notActual).textRole(.caption).foregroundStyle(.secondary)
+        .textRole(.supporting).foregroundStyle(.secondary)
+        Text(KRWBasisText.notActual).textRole(.supporting).foregroundStyle(.secondary)
         if usable.quote.isSynthetic {
-          Text(KRWBasisText.synthetic).textRole(.caption).foregroundStyle(.orange)
+          Text(KRWBasisText.synthetic).textRole(.supporting).foregroundStyle(Palette.attention)
             .accessibilityIdentifier("review-estimate-synthetic")
         }
       }
     } else {
-      Text(unavailableText).textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("review-estimate-none")
+      Text(unavailableText).textRole(.supporting).foregroundStyle(Palette.error).accessibilityIdentifier(
+        "review-estimate-none")
     }
   }
 
@@ -726,37 +730,37 @@ struct FXCorrectionSection: View {
   var body: some View {
     Section {
       VStack(alignment: .leading, spacing: Spacing.xs) {
-        Text("고정한 예상 금액").textRole(.caption).foregroundStyle(.secondary)
+        Text("고정한 예상 금액").textRole(.supporting).foregroundStyle(.secondary)
         Text(expense.krwAmount.map(Won.text) ?? "").textRole(.body).monospacedDigit()
           .accessibilityIdentifier("review-fx-pinned-krw")
         if let fx = expense.fx {
           Text(KRWBasisText.quote(fx)).textRole(.supporting).accessibilityIdentifier("review-fx-pinned-quote")
           if fx.isSynthetic {
-            Text(KRWBasisText.synthetic).textRole(.caption).foregroundStyle(.orange)
+            Text(KRWBasisText.synthetic).textRole(.supporting).foregroundStyle(Palette.attention)
           }
         }
       }
       VStack(alignment: .leading, spacing: Spacing.xs) {
-        Text("지금 적용되는 기준환율").textRole(.caption).foregroundStyle(.secondary)
+        Text("지금 적용되는 기준환율").textRole(.supporting).foregroundStyle(.secondary)
         if let replacement {
           Text("새 예상 금액 \(Won.text(replacement.krw))").textRole(.body).monospacedDigit()
             .accessibilityIdentifier("review-fx-new-krw")
           Text(KRWBasisText.quote(replacement.quote)).textRole(.supporting)
             .accessibilityIdentifier("review-fx-new-quote")
           if replacement.quote.isSynthetic {
-            Text(KRWBasisText.synthetic).textRole(.caption).foregroundStyle(.orange)
+            Text(KRWBasisText.synthetic).textRole(.supporting).foregroundStyle(Palette.attention)
           }
           if let pinned = expense.krwAmount {
-            Text("차이 \(FXCorrectionText.signed(replacement.krw - pinned))").textRole(.caption)
+            Text("차이 \(FXCorrectionText.signed(replacement.krw - pinned))").textRole(.supporting)
               .foregroundStyle(.secondary).accessibilityIdentifier("review-fx-diff")
           }
         } else {
-          Text("쓸 수 있는 기준환율 고시값이 없어요.").textRole(.body).foregroundStyle(.red)
+          Text("쓸 수 있는 기준환율 고시값이 없어요.").textRole(.body).foregroundStyle(Palette.error)
             .accessibilityIdentifier("review-fx-new-none")
         }
       }
       Text(FXCorrectionText.state(correction)).textRole(.supporting)
-        .foregroundStyle(correction == .kept ? Color.secondary : Color.orange)
+        .foregroundStyle(correction == .kept ? Palette.contentSecondary : Palette.attention)
         .accessibilityIdentifier("review-fx-state")
       if correction == .required, replacement != nil {
         Button("고정 금액 유지", action: onKeep)
@@ -768,7 +772,7 @@ struct FXCorrectionSection: View {
           .disabled(saving || !canApply)
           .accessibilityIdentifier("review-fx-apply")
         if exactMode && !canApply {
-          Text(FXCorrectionText.applyExactHint).textRole(.caption).foregroundStyle(.secondary)
+          Text(FXCorrectionText.applyExactHint).textRole(.supporting).foregroundStyle(.secondary)
             .accessibilityIdentifier("review-fx-apply-hint")
         }
       }
@@ -809,10 +813,10 @@ struct ReceiptAttachmentSection: View {
             .accessibilityAddTraits(.isImage)
             .accessibilityIdentifier("review-receipt-image")
           Text("올린 사본과 같아요 · 확인 \(decoded.image.sha256.prefix(8))")
-            .textRole(.caption).foregroundStyle(.secondary).accessibilityIdentifier("review-receipt-verified")
+            .textRole(.supporting).foregroundStyle(.secondary).accessibilityIdentifier("review-receipt-verified")
           Button("사본 닫기", action: onHide).accessibilityIdentifier("review-receipt-hide")
         case .failed(let failure):
-          Text(failure.message).textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier(
+          Text(failure.message).textRole(.supporting).foregroundStyle(Palette.error).accessibilityIdentifier(
             "review-receipt-failure")
           Button("다시 시도", action: onShow).accessibilityIdentifier("review-receipt-retry")
         }
@@ -861,7 +865,8 @@ struct SettlementView: View {
       } else if let preview, let ledger {
         previewSections(preview, ledger)
       } else if case .failed(let failure) = state {
-        Text(failure.message).textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("settlement-failure")
+        Text(failure.message).textRole(.supporting).foregroundStyle(Palette.error).accessibilityIdentifier(
+          "settlement-failure")
       } else {
         ProgressView()
       }
@@ -883,13 +888,13 @@ struct SettlementView: View {
         }
         if !preview.fxCorrectionIDs.isEmpty {
           Text("기준환율이 정정된 예상 금액 \(preview.fxCorrectionIDs.count)건이 있어 확정할 수 없어요.")
-            .textRole(.supporting).foregroundStyle(.orange).accessibilityIdentifier("settlement-fx-blocked")
+            .textRole(.supporting).foregroundStyle(Palette.attention).accessibilityIdentifier("settlement-fx-blocked")
         }
         if refreshed {
           Text("미리보기 뒤에 바뀐 내용이 있어 확정하지 않았어요. 새 송금표를 확인하고 다시 확정해 주세요.")
-            .textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier("settlement-refreshed")
+            .textRole(.supporting).foregroundStyle(Palette.error).accessibilityIdentifier("settlement-refreshed")
         } else if case .failed(let failure) = state {
-          Text(failure.message).textRole(.supporting).foregroundStyle(.red).accessibilityIdentifier(
+          Text(failure.message).textRole(.supporting).foregroundStyle(Palette.error).accessibilityIdentifier(
             "settlement-failure")
         }
       }
@@ -936,8 +941,8 @@ struct SettlementView: View {
           let row = VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(expense?.merchant ?? "가게 이름 없음").textRole(.body).foregroundStyle(.primary)
             Text(expense.map { "\($0.date) · \(Won.original($0.amountMinor, $0.currency))" } ?? "")
-              .textRole(.caption).foregroundStyle(.secondary)
-            Text(expense.map(FXCorrectionText.summary) ?? "").textRole(.caption).foregroundStyle(.orange)
+              .textRole(.supporting).foregroundStyle(.secondary)
+            Text(expense.map(FXCorrectionText.summary) ?? "").textRole(.supporting).foregroundStyle(Palette.attention)
           }
           if ledger.isHost {
             Button {
@@ -977,7 +982,7 @@ struct SettlementView: View {
         Text("확정 \(final.version)판 · \(Self.localTime(final.finalizedAt))")
           .textRole(.supporting)
         Text("확정 번호 \(final.id.prefix(8)) · 기록 \(final.snapshotSHA256.prefix(8))")
-          .textRole(.caption).foregroundStyle(.secondary).accessibilityIdentifier("settlement-final-id")
+          .textRole(.supporting).foregroundStyle(.secondary).accessibilityIdentifier("settlement-final-id")
       }
     }
     .listRowBackground(Color.clear)
@@ -1021,12 +1026,12 @@ struct SettlementView: View {
               Text("\(KRWBasisText.label(x.basis) ?? "") \(x.krw.map(Won.text) ?? "")").textRole(.body)
                 .monospacedDigit()
             }
-            Text("\(x.date) · \(x.original)").textRole(.caption).foregroundStyle(.secondary)
+            Text("\(x.date) · \(x.original)").textRole(.supporting).foregroundStyle(.secondary)
             ForEach(
               KRWBasisText.detail(basis: x.basis, fx: x.fx, acquisition: x.acquisition, currency: x.currency),
               id: \.self
             ) { line in
-              Text(line).textRole(.caption).foregroundStyle(.secondary)
+              Text(line).textRole(.supporting).foregroundStyle(.secondary)
             }
           }
           .accessibilityElement(children: .combine)
@@ -1086,9 +1091,10 @@ struct SettlementView: View {
           let d = describe(x.expenseID)
           VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(d?.0 ?? "가게 이름 없음").textRole(.body)
-            Text([d?.1, d?.2].compactMap { $0 }.joined(separator: " · ")).textRole(.caption).foregroundStyle(.secondary)
+            Text([d?.1, d?.2].compactMap { $0 }.joined(separator: " · ")).textRole(.supporting).foregroundStyle(
+              .secondary)
             Text(x.kind == .held ? "보류: \(x.reason ?? "")" : "개인 지출(결제자 혼자 부담)")
-              .textRole(.caption).foregroundStyle(.secondary)
+              .textRole(.supporting).foregroundStyle(.secondary)
           }
           .accessibilityElement(children: .combine)
           .accessibilityIdentifier("excluded-\(index + 1)")

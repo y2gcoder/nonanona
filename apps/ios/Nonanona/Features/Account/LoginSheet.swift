@@ -34,7 +34,7 @@ struct LoginSheet: View {
           case .failed(let failure):
             Text(failure.message)
               .textRole(.supporting)
-              .foregroundStyle(.red)
+              .foregroundStyle(Palette.error)
               .accessibilityIdentifier("login-failed")
           case .hidden, .choosing:
             EmptyView()
@@ -53,7 +53,7 @@ struct LoginSheet: View {
       }
     }
     // 시트는 루트의 tint를 물려받지 않으므로 중립 팔레트를 다시 지정한다.
-    .tint(.primary)
+    .tint(Palette.ink)
     .presentationDetents([.medium, .large])
     .interactiveDismissDisabled(state == .signingIn)
   }

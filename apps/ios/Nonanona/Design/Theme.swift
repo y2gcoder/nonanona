@@ -1,15 +1,43 @@
 import SwiftUI
+import UIKit
 
-// 공통 디자인 기준(docs/design/mobile-foundations.md)의 역할을 SwiftUI 시스템 스타일에 연결한다.
-// 색은 임시 중립 팔레트(시스템 라벨·배경색)다. 브랜드 색을 정하면 이 파일만 바꾼다.
+// 공통 디자인 기준의 역할을 생성된 토큰(DesignTokens.swift, 원본 design/tokens.json)에 연결한다.
+// 역할 이름은 docs/design/mobile-foundations.md와 Android `Theme.kt`가 같이 쓴다. 값은 토큰 파일 하나에서 바꾼다.
 
-/// 간격 역할. Android `Spacing`과 같은 값(pt = dp)을 쓴다.
+/// 색 역할. 토큰 이름이 곧 역할 이름이고, 라이트·다크는 기기 설정을 따라 저절로 바뀐다.
+typealias Palette = DesignTokens.Colors
+
+/// 간격 역할(pt = Android dp).
 enum Spacing {
-  static let xs: CGFloat = 4
-  static let s: CGFloat = 8
-  static let m: CGFloat = 16
-  static let l: CGFloat = 24
-  static let xl: CGFloat = 32
+  static let xs = DesignTokens.Spacing.spaceXs
+  static let s = DesignTokens.Spacing.spaceS
+  static let m = DesignTokens.Spacing.spaceM
+  static let l = DesignTokens.Spacing.spaceL
+  static let xl = DesignTokens.Spacing.spaceXl
+}
+
+typealias Radius = DesignTokens.Radius
+typealias Size = DesignTokens.Size
+
+/// 하단 시트와 하단 고정 막대의 그림자(tokens.json `shadow-sheet`). 생성기가 그림자를 내보내지 않아 값을 옮겨 둔다.
+/// CSS `0 -2px 16px`의 흐림 16은 SwiftUI 반지름 8에 해당한다.
+enum Elevation {
+  static let sheetColor = Color(
+    uiColor: UIColor { traits in
+      traits.userInterfaceStyle == .dark
+        ? UIColor(white: 0, alpha: 0.4) : UIColor(red: 25 / 255, green: 31 / 255, blue: 40 / 255, alpha: 0.08)
+    })
+  static let sheetRadius: CGFloat = 8
+  static let sheetY: CGFloat = -2
+}
+
+extension View {
+  /// 앱 맨 위에 한 번 건다. 시스템 글자색 단계(`.primary`·`.secondary`·`.tertiary`)와 tint를 토큰 색으로 바꿔,
+  /// 아직 부품으로 바꾸지 않은 화면도 같은 색을 쓰게 한다.
+  func nonanonaTheme() -> some View {
+    foregroundStyle(Palette.content, Palette.contentSecondary, Palette.contentSecondary)
+      .tint(Palette.ink)
+  }
 }
 
 /// 스크롤 내용의 가로 여백. 창이 넓으면 읽기 좋은 폭(`readableWidth`, Android와 같은 값)으로 가운데에 두고,
@@ -87,91 +115,4 @@ private struct AdaptiveContentMargins: ViewModifier {
         }
       #endif
   }
-}
-
-/// 글자 역할. 시스템 텍스트 스타일을 써서 Dynamic Type을 따른다.
-/// Android 대응: sectionTitle=titleMedium, body=bodyLarge, supporting=bodyMedium, caption=bodySmall, status=labelMedium.
-enum TextRole {
-  case sectionTitle
-  case body
-  case supporting
-  case caption
-  case status
-
-  var font: Font {
-    switch self {
-    case .sectionTitle: .headline
-    case .body: .body
-    case .supporting: .subheadline
-    case .caption: .footnote
-    case .status: .caption.weight(.semibold)
-    }
-  }
-}
-
-extension View {
-  func textRole(_ role: TextRole) -> some View { font(role.font) }
-}
-
-/// 상태는 색이 아니라 글자로 전달한다. 색은 보조 신호다.
-enum StatusRole {
-  case neutral
-  case attention
-  case positive
-  case error
-}
-
-struct StatusLabel: View {
-  let text: String
-  let role: StatusRole
-
-  init(_ text: String, role: StatusRole) {
-    self.text = text
-    self.role = role
-  }
-
-  var body: some View {
-    Text(text)
-      .textRole(.status)
-      .foregroundStyle(foreground)
-      .padding(.horizontal, Spacing.s)
-      .padding(.vertical, Spacing.xs)
-      .background(background, in: Capsule())
-  }
-
-  private var foreground: Color {
-    switch role {
-    case .neutral: .secondary
-    case .attention: Color(uiColor: .systemBackground)
-    case .positive: .primary
-    case .error: .red
-    }
-  }
-
-  private var background: Color {
-    switch role {
-    case .neutral: Color(uiColor: .tertiarySystemFill)
-    case .attention: .primary
-    case .positive: Color(uiColor: .secondarySystemFill)
-    case .error: Color.red.opacity(0.15)
-    }
-  }
-}
-
-/// 화면의 주 동작. 중립 팔레트에서는 라벨색 배경(라이트: 검정, 다크: 흰색)으로 그린다.
-struct PrimaryActionStyle: ButtonStyle {
-  @Environment(\.isEnabled) private var isEnabled
-
-  func makeBody(configuration: Configuration) -> some View {
-    configuration.label
-      .font(.headline)
-      .frame(maxWidth: .infinity, minHeight: 50)
-      .padding(.horizontal, Spacing.m)
-      .foregroundStyle(Color(uiColor: .systemBackground))
-      .background(Color.primary.opacity(configuration.isPressed || !isEnabled ? 0.5 : 1), in: .rect(cornerRadius: 12))
-  }
-}
-
-extension ButtonStyle where Self == PrimaryActionStyle {
-  static var primaryAction: PrimaryActionStyle { PrimaryActionStyle() }
 }

@@ -46,7 +46,7 @@ struct InviteView: View {
         case .failed(let failure):
           Text(failure.message)
             .textRole(.supporting)
-            .foregroundStyle(.red)
+            .foregroundStyle(Palette.error)
             .accessibilityIdentifier("invite-failed")
         case .idle:
           EmptyView()

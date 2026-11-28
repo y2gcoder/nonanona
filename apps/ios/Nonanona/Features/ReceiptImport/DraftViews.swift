@@ -85,7 +85,7 @@ struct DraftView: View {
               .accessibilityIdentifier("queue-breakdown")
             if processing.recoveredCount > 0 {
               Text("앱이 중간에 닫혀 이어서 읽은 사진 \(processing.recoveredCount)장")
-                .textRole(.caption)
+                .textRole(.supporting)
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("processing-recovered")
             }
@@ -113,7 +113,7 @@ struct DraftView: View {
             .disabled(processing.count(.ready) == 0)
             .accessibilityIdentifier("review-start")
           if processing.count(.ready) == 0, processing.hasPendingWork {
-            Text("다 읽으면 확인할 수 있어요. 나머지는 이 기기에서 계속 읽어요.").textRole(.caption).foregroundStyle(.secondary)
+            Text("다 읽으면 확인할 수 있어요. 나머지는 이 기기에서 계속 읽어요.").textRole(.supporting).foregroundStyle(.secondary)
           }
         }
       }

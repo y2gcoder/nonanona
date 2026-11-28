@@ -74,7 +74,7 @@ struct ItemRetranslationSheet: View {
           Section {
             // 품목 계획 저장 실패와 같은 문구(Android `items_save_failed`). 단추는 Android와 같게 기록 삭제 실패면
             // ‘다시 시도’(`items_retranslation_retry`), 결과 저장·적용 실패면 ‘다시 저장’(`items_retry_save`)이다.
-            Text("품목을 기기에 저장하지 못했어요.").textRole(.supporting).foregroundStyle(.red)
+            Text("품목을 기기에 저장하지 못했어요.").textRole(.supporting).foregroundStyle(Palette.error)
               .accessibilityIdentifier("retranslation-save-failed")
             if session.canRetrySave {
               Button(session.retriesClear ? "다시 시도" : "다시 저장", action: actions.retrySave)
@@ -150,7 +150,7 @@ struct ItemRetranslationSheet: View {
         Text(line.originalName)
         Spacer()
         Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-          .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+          .foregroundStyle(isSelected ? Palette.ink : Palette.contentSecondary)
           .accessibilityHidden(true)
       }
       .contentShape(Rectangle())

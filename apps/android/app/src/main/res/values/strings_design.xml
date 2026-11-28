@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="design_send">보내기</string>
+    <string name="design_send_description">보내는 사람 %1$s, 받는 사람 %2$s, %3$s 보내기</string>
+</resources>
